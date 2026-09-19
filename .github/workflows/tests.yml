@@ -1,0 +1,22 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  phase1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - name: Phase 1 test suite
+        run: python -m pytest tests/ -v
+      - name: Dependency direction
+        run: python -m pytest tests/test_dependency_direction.py -v
+      - name: Event != Memory invariant
+        run: python -m pytest tests/test_event_not_memory.py -v
