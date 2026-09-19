@@ -17,6 +17,7 @@ from ..core.contracts import (
     EventRepository,
     MessageRepository,
     ModelProvider,
+    ModelRegistry,
     SessionRepository,
     UserRepository,
 )
@@ -30,7 +31,6 @@ from ..core.domain import (
     User,
 )
 from ..core.errors import ProviderError
-from ..runtime.model_registry import ModelRegistry
 from .events import EventRecorder
 
 

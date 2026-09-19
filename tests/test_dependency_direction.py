@@ -22,6 +22,7 @@ FORBIDDEN_IN_DOMAIN = {
 
 
 def imported_modules(path: Path) -> set[str]:
+    """Third-party and stdlib top-level modules imported absolutely."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     found: set[str] = set()
     for node in ast.walk(tree):
@@ -30,6 +31,52 @@ def imported_modules(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             found.add(node.module.split(".")[0])
     return found
+
+
+# Which internal layer each package belongs to, and what it may depend on.
+# The composition root is exempt: wiring concrete adapters to contracts is its
+# entire job.
+LAYER_MAY_IMPORT = {
+    "core": set(),                                  # depends on nothing internal
+    "runtime": {"core"},
+    "persistence": {"core"},
+    "conversation": {"core"},                       # application -> contracts only
+}
+COMPOSITION_ROOTS = {"conversation/factory.py"}
+
+
+def internal_imports(path: Path) -> set[str]:
+    """Resolve internal imports to their target layer.
+
+    Relative imports (`node.level > 0`) are resolved against the importing
+    module's own position, which is what the earlier version of this file
+    failed to do: it filtered on `level == 0` and so could not see a single
+    internal import. A layering violation written as `from ..runtime import X`
+    was invisible, and one was shipped because of it.
+    """
+    rel = path.relative_to(SRC)
+    # package parts of the importing module, e.g. ("conversation",)
+    pkg_parts = rel.parts[:-1]
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    layers: set[str] = set()
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.level == 0:
+            # absolute: only interesting if it names this package
+            if node.module and node.module.split(".")[0] == "personal_ai_core":
+                parts = node.module.split(".")
+                if len(parts) > 1:
+                    layers.add(parts[1])
+            continue
+        # relative: level 1 = current package, 2 = parent, ...
+        base = pkg_parts[: len(pkg_parts) - (node.level - 1)]
+        target = (*base, *(node.module.split(".") if node.module else ()))
+        if target:
+            layers.add(target[0])
+
+    return layers
 
 
 def python_files(*parts: str) -> list[Path]:
@@ -80,6 +127,68 @@ def test_no_model_name_literal_in_business_logic():
             if "qwen" in line.lower() and not line.strip().startswith("#"):
                 offenders.append(f"{path.relative_to(SRC)}:{i}")
     assert not offenders, f"model name hard-coded outside config: {offenders}"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [p for p in SRC.rglob("*.py") if p.name != "__init__.py"],
+    ids=lambda p: str(p.relative_to(SRC)),
+)
+def test_internal_layering_is_respected(path):
+    """Every internal relative import resolves to a permitted layer.
+
+    This is the check that was missing. It is what catches an application
+    module importing a concrete infrastructure or runtime module.
+    """
+    rel = str(path.relative_to(SRC)).replace("\\", "/")
+    if rel in COMPOSITION_ROOTS:
+        pytest.skip("composition root may wire concrete adapters")
+
+    layer = path.relative_to(SRC).parts[0]
+    if layer not in LAYER_MAY_IMPORT:
+        pytest.skip(f"no layer rule for {layer}")
+
+    allowed = LAYER_MAY_IMPORT[layer] | {layer}
+    offenders = internal_imports(path) - allowed
+    assert not offenders, (
+        f"{rel} (layer '{layer}') imports from {sorted(offenders)}; "
+        f"may only import {sorted(allowed)}"
+    )
+
+
+def test_the_layering_check_actually_detects_a_violation():
+    """Adversarial: prove the check above is not vacuous.
+
+    The previous version of this file passed while `service.py` imported a
+    concrete runtime class. A check that cannot fail is not a check, so this
+    feeds it a known-bad module and requires a detection.
+    """
+    import tempfile
+
+    violation = (
+        "from ..persistence.in_memory import InMemoryEventRepository\n"
+        "from ..core.contracts import EventRepository\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_pkg = Path(tmp) / "conversation"
+        fake_pkg.mkdir()
+        module = fake_pkg / "offender.py"
+        module.write_text(violation, encoding="utf-8")
+
+        # resolve against the fake root the same way the real check does
+        global SRC
+        real_src, SRC = SRC, Path(tmp)
+        try:
+            found = internal_imports(module)
+        finally:
+            SRC = real_src
+
+    assert "persistence" in found, (
+        "the layering check failed to see a concrete infrastructure import"
+    )
+    assert "persistence" not in LAYER_MAY_IMPORT["conversation"], (
+        "conversation must not be permitted to import persistence"
+    )
 
 
 def test_core_does_not_import_application_or_infrastructure_packages():

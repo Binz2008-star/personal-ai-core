@@ -43,6 +43,37 @@ class ModelProvider(Protocol):
 
 
 @runtime_checkable
+class ModelSpecLike(Protocol):
+    """The shape the application needs from a registered model.
+
+    `context_window` is part of the contract because the context budget must
+    derive from the active model rather than a constant (ADR-005).
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def provider(self) -> str: ...
+
+    @property
+    def context_window(self) -> int: ...
+
+
+@runtime_checkable
+class ModelRegistry(Protocol):
+    """Which model is currently active.
+
+    The application depends on this protocol, not on the concrete registry in
+    `runtime.model_registry`. That keeps a later persistent or remote registry
+    substitutable without touching the conversation layer.
+    """
+
+    @property
+    def active(self) -> ModelSpecLike: ...
+
+
+@runtime_checkable
 class UserRepository(Protocol):
     def add(self, user: User) -> None: ...
     def get(self, user_id: str) -> User | None: ...

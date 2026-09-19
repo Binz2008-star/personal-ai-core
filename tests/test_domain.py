@@ -23,7 +23,6 @@ def test_domain_objects_are_frozen():
         Event(session_id="s", type=EventType.SESSION_STARTED),
     ):
         with pytest.raises(dataclasses.FrozenInstanceError):
-            object.__setattr__  # noqa: B018 - guard below is the real assertion
             setattr(obj, "id", "mutated")
 
 
