@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "personal_ai_core"
+SRC = Path(__file__).resolve().parents[2] / "src" / "personal_ai_core"
 
 FORBIDDEN_IN_DOMAIN = {
     "ollama", "httpx", "requests", "urllib", "aiohttp",
@@ -41,6 +41,8 @@ LAYER_MAY_IMPORT = {
     "runtime": {"core"},
     "persistence": {"core"},
     "conversation": {"core"},                       # application -> contracts only
+    "knowledge": {"core"},                          # Phase 2 retrieval stack
+    "context": {"core"},                            # Phase 2 budgeting
 }
 COMPOSITION_ROOTS = {"conversation/factory.py"}
 
@@ -307,3 +309,28 @@ def test_the_contract_purity_check_actually_detects_a_leak():
         assert "hnsw_m" in found, "parameter leak went undetected"
     finally:
         path.unlink()
+
+
+def test_no_core_module_imports_anything_from_the_test_tree():
+    """Characterization must never become a runtime dependency.
+
+    `tests/characterization/rrf_transcription.py` is a transcription of legacy
+    SQL kept so its behaviour can be pinned without Postgres. It is evidence,
+    not a component. The cross-check in
+    `tests/characterization/test_core_fusion_vs_legacy.py` imports the Core;
+    the arrow must never point back.
+    """
+    offenders = []
+    for path in SRC.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names = [node.module]
+            for name in names:
+                head = name.split(".")[0]
+                if head in {"tests", "characterization", "conftest"}:
+                    offenders.append(f"{path.relative_to(SRC)} -> {name}")
+    assert not offenders, f"source imports the test tree: {offenders}"

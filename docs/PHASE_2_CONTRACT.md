@@ -119,7 +119,9 @@ In-memory index · real embedding provider · real chunker · RRF implementation
 token estimator · context assembler · pgvector · Neon · HNSW · migrations · any import from
 `unified-llm-local`.
 
-## Next step
+## Next step — done
 
 The in-memory implementation behind these protocols, with characterization tests written
-before any legacy behaviour is adapted.
+before any legacy behaviour was adapted. See `PHASE_2_IMPLEMENTATION.md` for what was built,
+what was inherited from the audited system, what was refused, and what these implementations
+honestly do not do.
