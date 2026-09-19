@@ -54,6 +54,54 @@ class ContextBudget:
 
 
 @dataclass(frozen=True, slots=True)
+class ContextAllocation:
+    """How one model's context window was divided for a single turn.
+
+    Every share is recorded, not just the answer. ADR-005's failure was a
+    budget nobody could trace: the audited source hard-coded 24000 for a 32K
+    model, and because only the final number existed there was nothing to
+    check it against.
+
+    The arithmetic is deliberately visible and deliberately conservative --
+    `evidence` is whatever survives after the other three shares are taken,
+    floored at zero. A budget is never allowed to go negative and silently
+    wrap into "plenty of room".
+    """
+
+    context_window: int
+    generation_reserve: int
+    overhead: int
+    history: int
+
+    def __post_init__(self) -> None:
+        for name in ("context_window", "generation_reserve", "overhead", "history"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be non-negative")
+
+    @property
+    def spoken_for(self) -> int:
+        return self.generation_reserve + self.overhead + self.history
+
+    @property
+    def evidence(self) -> int:
+        """Tokens left for retrieved evidence. Never negative."""
+        return max(0, self.context_window - self.spoken_for)
+
+    @property
+    def overcommitted(self) -> bool:
+        """The turn already exceeds the window before any evidence is added.
+
+        Not an error here -- the caller decides -- but it must be visible.
+        A long enough conversation reaches this, and reaching it silently is
+        how a model starts truncating history nobody asked it to drop.
+        """
+        return self.spoken_for > self.context_window
+
+    def budget(self, *, source: str) -> "ContextBudget":
+        return ContextBudget(available_tokens=self.evidence, source=source)
+
+
+@dataclass(frozen=True, slots=True)
 class ExcludedResult:
     """A result that was retrieved but not included, and why."""
 

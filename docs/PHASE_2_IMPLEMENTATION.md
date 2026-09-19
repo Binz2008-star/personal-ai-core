@@ -98,8 +98,38 @@ from `tests/`. That is enforced by
   four-chars-per-token estimate, reinstating the `* 8` depth formula, replacing `blake2b`
   with the salted builtin `hash()`, and making ingestion accumulate instead of replace.
 
+## Wiring — the slice is vertical (audit finding 4)
+
+The layers above were reachable from nothing: `knowledge` and `context` were imported by no
+application code. They are now consumed by the conversation path.
+
+```
+User -> Session -> Message
+     -> measure history -> allocate budget from the ACTIVE model
+     -> retrieve -> fuse -> provenance -> fit to budget
+     -> [ephemeral system message] -> ModelProvider -> Response -> Event
+```
+
+**The dependency direction did not move to achieve it.** `service.py` and `grounding.py`
+import `core` only; `factory.py`, the composition root the layering test exempts by name, is
+the single module that names `knowledge`, `context`, `persistence` and `runtime` together.
+
+| Decision | Why |
+|---|---|
+| Grounding is **optional** | With no `context_builder` the turn behaves exactly as before. Adding retrieval must not alter a path that already worked, and `build_in_memory_service` is unchanged. |
+| The grounding message is **never persisted** | It is derived from the index at one moment and rebuilt next turn. Persisting it would make history un-reproducible and charge the budget for the same evidence on every later turn. |
+| **No evidence means no message** | An empty evidence block invites an answer that claims to have consulted sources it never received. |
+| Retrieval failure **propagates** | An ungrounded answer that the caller believes is grounded is worse than a failed turn: the first is invisible. A `RETRIEVAL_FAILED` event is recorded and the model is never called. |
+| The budget is **derived per turn** | `ReserveBasedBudgetPolicy` takes the active `ModelSpecLike` and the measured history, so the budget follows the Boss model and shrinks as the conversation grows (ADR-005). `ContextAllocation` records every share, not just the answer. |
+| `CONTEXT_ASSEMBLED` carries the **exclusions** | The exclusions are what explain a bad answer. An event recording only what was kept cannot tell "never retrieved" from "retrieved and dropped". |
+
+`Event != Memory` is untouched: retrieval reads an index and promotes nothing.
+
 ## Not built
 
 Real embedding model · persistent index · pgvector or Neon adapter · migrations ·
 approximate nearest-neighbour search · per-language stemming · identity foundation ·
 memory foundation (both still outstanding from Phase 1, per `PHASE_1_RECONCILIATION.md`).
+
+Audit findings 1, 2, 3 and 6 remain open and are deliberately untouched: they are naming and
+documentation corrections, not behaviour.

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
-from .context import BudgetedContext, ContextBudget
+from .context import BudgetedContext, ContextAllocation, ContextBudget
 from .domain import Event, Message, ModelResponse, Session, User
 from .knowledge import (
     CandidateList,
@@ -269,6 +269,25 @@ class TokenEstimator(Protocol):
     def model_id(self) -> str: ...
 
     def estimate(self, text: str) -> int: ...
+
+
+@runtime_checkable
+class ContextBudgetPolicy(Protocol):
+    """Decides how much of a model's window retrieved evidence may use.
+
+    A separate contract from `ContextAssembler` because these are two
+    decisions, not one: how much may be spent, and what to spend it on. The
+    audited source collapsed them into a constant, which is why neither could
+    be questioned.
+
+    `history_tokens` is a parameter because the budget shrinks as a
+    conversation grows. A budget computed once from the window alone is
+    correct on turn one and wrong by turn twenty.
+    """
+
+    def allocate(
+        self, *, model: ModelSpecLike, history_tokens: int
+    ) -> ContextAllocation: ...
 
 
 @runtime_checkable

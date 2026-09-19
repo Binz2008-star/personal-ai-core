@@ -1,11 +1,15 @@
-"""ConversationService — the Phase 1 vertical slice.
+"""ConversationService — the vertical slice.
 
-    User -> Session -> Message -> ModelProvider -> OllamaProvider
-         -> Boss model -> Response -> Event
+    User -> Session -> Message -> [retrieve -> budget -> assemble]
+         -> ModelProvider -> OllamaProvider -> Boss model -> Response -> Event
 
 Application layer. It orchestrates domain objects and contracts, and knows
-nothing about Ollama, HTTP or storage engines: every collaborator arrives as a
-protocol.
+nothing about Ollama, HTTP, an index or a storage engine: every collaborator
+arrives as a protocol or as a same-layer object built from protocols.
+
+Grounding is **optional**. With no `context_builder` the turn behaves exactly
+as it did before retrieval existed — that is deliberate, so adding the
+knowledge layer could not change a path that already worked.
 
 It records events. It never writes memory.
 """
@@ -15,6 +19,7 @@ from typing import Any, Mapping, Sequence
 
 from ..core.contracts import (
     EventRepository,
+    ModelSpecLike,
     MessageRepository,
     ModelProvider,
     ModelRegistry,
@@ -32,6 +37,7 @@ from ..core.domain import (
 )
 from ..core.errors import ProviderError
 from .events import EventRecorder
+from .grounding import ContextBuilder, summarize
 
 
 class ConversationService:
@@ -44,13 +50,24 @@ class ConversationService:
         events: EventRepository,
         provider: ModelProvider,
         registry: ModelRegistry,
+        context_builder: ContextBuilder | None = None,
     ) -> None:
         self._users = users
         self._sessions = sessions
         self._messages = messages
         self._provider = provider
         self._registry = registry
+        self._context_builder = context_builder
         self._recorder = EventRecorder(events)
+
+    @property
+    def grounded(self) -> bool:
+        """Whether this service retrieves evidence for a turn.
+
+        Exposed because "was that answer grounded?" must be answerable without
+        reading the wiring.
+        """
+        return self._context_builder is not None
 
     def create_user(self) -> User:
         user = User()
@@ -104,20 +121,39 @@ class ConversationService:
         spec = self._registry.active
         history = self._messages.list_for_session(session_id)
 
+        grounding = self._ground(
+            session_id=session_id,
+            query=content,
+            language=language,
+            spec=spec,
+            history=history,
+            message_id=user_message.id,
+        )
+
+        # The grounding message is prepended for this call only. It is never
+        # given to the message repository: it is derived from the index at this
+        # moment, it is rebuilt next turn, and persisting it would charge the
+        # budget for the same evidence again on every later turn.
+        prompt: Sequence[Message] = history
+        if grounding is not None and grounding.message is not None:
+            prompt = [grounding.message, *history]
+
         self._recorder.record(
             session_id=session_id,
             type=EventType.GENERATION_REQUESTED,
             payload={
                 "model": spec.name,
                 "provider": spec.provider,
-                "message_count": len(history),
+                "message_count": len(prompt),
+                "grounded": grounding is not None and grounding.message is not None,
+                "evidence_chunks": grounding.used if grounding is not None else 0,
             },
             message_id=user_message.id,
         )
 
         try:
             response = self._provider.generate(
-                model=spec.name, messages=history, options=options
+                model=spec.name, messages=prompt, options=options
             )
         except ProviderError as exc:
             self._recorder.record(
@@ -147,6 +183,51 @@ class ConversationService:
             message_id=reply.id,
         )
         return reply
+
+    def _ground(
+        self,
+        *,
+        session_id: str,
+        query: str,
+        language: str,
+        spec: ModelSpecLike,
+        history: Sequence[Message],
+        message_id: str,
+    ):
+        """Retrieve and budget evidence for this turn, or return None.
+
+        A retrieval failure is recorded and then re-raised rather than
+        swallowed. Answering anyway would produce an ungrounded reply that the
+        caller believes is grounded, which is worse than a failed turn: the
+        first is visible, the second is not.
+        """
+        if self._context_builder is None:
+            return None
+
+        try:
+            grounding = self._context_builder.build(
+                session_id=session_id,
+                query=query,
+                language=language,
+                model=spec,
+                history=history,
+            )
+        except Exception as exc:
+            self._recorder.record(
+                session_id=session_id,
+                type=EventType.RETRIEVAL_FAILED,
+                payload={"error": str(exc), "error_type": type(exc).__name__},
+                message_id=message_id,
+            )
+            raise
+
+        self._recorder.record(
+            session_id=session_id,
+            type=EventType.CONTEXT_ASSEMBLED,
+            payload=summarize(grounding),
+            message_id=message_id,
+        )
+        return grounding
 
     def close_session(self, session_id: str) -> Session:
         session = self._sessions.get(session_id)

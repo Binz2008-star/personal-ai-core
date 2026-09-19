@@ -38,13 +38,20 @@ class SessionStatus(str, Enum):
 
 
 class EventType(str, Enum):
-    """Conversation events recorded in Phase 1.
+    """Conversation events recorded in Phase 1, extended in Phase 2.
 
-    This is not the full learning event taxonomy; Phase 3 extends it.
+    This is not the full learning event taxonomy; Phase 3 extends it further.
+
+    `CONTEXT_ASSEMBLED` and `RETRIEVAL_FAILED` exist because grounding an
+    answer in retrieved evidence is only trustworthy if what was retrieved,
+    what was dropped and why are all recoverable afterwards. An answer that
+    cites evidence nobody can reconstruct is not grounded, it is decorated.
     """
 
     SESSION_STARTED = "session.started"
     MESSAGE_RECEIVED = "message.received"
+    CONTEXT_ASSEMBLED = "context.assembled"
+    RETRIEVAL_FAILED = "retrieval.failed"
     GENERATION_REQUESTED = "generation.requested"
     GENERATION_COMPLETED = "generation.completed"
     GENERATION_FAILED = "generation.failed"
