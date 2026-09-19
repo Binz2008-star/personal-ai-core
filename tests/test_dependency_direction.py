@@ -200,3 +200,110 @@ def test_core_does_not_import_application_or_infrastructure_packages():
                 assert target not in {"conversation", "persistence", "runtime"}, (
                     f"{path.name} imports upward into {target}"
                 )
+
+
+# --- Phase 2: the contract must not learn about its adapters ---------------
+
+INFRASTRUCTURE_TERMS = (
+    "pgvector", "postgres", "psycopg", "hnsw", "tsvector", "neon",
+    "sqlalchemy", "openai", "trigram", "chunker_v4", "second_brain",
+)
+
+# core/config.py is the one place provider configuration is allowed to name a
+# provider -- an Ollama host has to be configured somewhere, and naming it
+# there is what keeps it out of everywhere else.
+CONTRACT_PURITY_EXEMPT = {"config.py"}
+
+
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    """Node ids of every docstring Constant, so prose can be skipped."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            continue
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+            if isinstance(first.value.value, str):
+                found.add(id(first.value))
+    return found
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted((SRC / "core").rglob("*.py")),
+    ids=lambda p: p.name,
+)
+def test_core_contracts_name_no_infrastructure_in_code(path):
+    """Infrastructure may be discussed in prose, never named in code.
+
+    The Second Brain retrieval, pgvector and HNSW are assets to adapt behind
+    these contracts. The moment one of them appears in an identifier, a
+    signature or a runtime string here, it has begun owning the architecture
+    instead of serving it.
+
+    Docstrings are exempt: several deliberately explain *why* a technology is
+    excluded, and that reasoning is the most useful thing in the file.
+    """
+    if path.name in CONTRACT_PURITY_EXEMPT:
+        pytest.skip(f"{path.name} is the provider-configuration boundary")
+
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    skip = _docstring_nodes(tree)
+    offenders = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = node.name
+        elif isinstance(node, ast.Name):
+            name = node.id
+        elif isinstance(node, ast.Attribute):
+            name = node.attr
+        elif isinstance(node, ast.arg):
+            name = node.arg
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if id(node) in skip:
+                continue
+            name = node.value
+        else:
+            continue
+
+        lowered = name.lower()
+        for term in INFRASTRUCTURE_TERMS:
+            if term in lowered:
+                offenders.append(f"{term} in {name[:50]!r}")
+
+    assert not offenders, f"{path.name} names infrastructure in code: {offenders}"
+
+
+def test_the_contract_purity_check_actually_detects_a_leak():
+    """Adversarial: prove the check above is not vacuous."""
+    import tempfile
+
+    leak = "def build_pgvector_index(hnsw_m: int) -> None: ...\n"
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".py", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(leak)
+        path = Path(f.name)
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        skip = _docstring_nodes(tree)
+        found = []
+        for node in ast.walk(tree):
+            name = None
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                name = node.name
+            elif isinstance(node, ast.arg):
+                name = node.arg
+            if name and any(t in name.lower() for t in INFRASTRUCTURE_TERMS):
+                found.append(name)
+        assert "build_pgvector_index" in found, "leak went undetected"
+        assert "hnsw_m" in found, "parameter leak went undetected"
+    finally:
+        path.unlink()

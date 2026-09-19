@@ -31,3 +31,15 @@ class PhaseNotImplementedError(CoreError):
     Distinct from NotImplementedError so that a sealed-by-design boundary is
     never mistaken for an incomplete implementation.
     """
+
+
+class EmbeddingError(CoreError):
+    """An embedding provider failed to produce usable vectors."""
+
+
+class IndexError_(CoreError):
+    """An index operation failed."""
+
+
+class RetrievalError(CoreError):
+    """Retrieval failed."""

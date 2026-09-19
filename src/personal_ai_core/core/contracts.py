@@ -11,7 +11,17 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
+from .context import BudgetedContext, ContextBudget
 from .domain import Event, Message, ModelResponse, Session, User
+from .knowledge import (
+    CandidateList,
+    Chunk,
+    Document,
+    DocumentVersion,
+    Embedding,
+    RetrievalQuery,
+    RetrievalResult,
+)
 
 
 @runtime_checkable
@@ -117,3 +127,154 @@ class MemoryStore(Protocol):
     """
 
     def write(self, record: Mapping[str, Any]) -> None: ...
+
+
+# --- Phase 2 knowledge contracts ------------------------------------------
+#
+# Protocols only. No implementation exists behind these yet.
+#
+# None of them names Postgres, pgvector, HNSW, tsvector, SQL, a connection, a
+# vector operator or a provider. That is the point: the existing Second Brain
+# retrieval is a valuable asset to adapt behind these, and an asset must not
+# become the architecture.
+
+
+@runtime_checkable
+class EmbeddingProvider(Protocol):
+    """Turns text into vectors.
+
+    `model_id` and `dimensions` are part of the contract because an embedding
+    is only comparable against others from the same model at the same size.
+    A provider that cannot state both cannot be validated.
+
+    Raises `EmbeddingError` on failure. Returning a short, empty or
+    wrong-dimension result is a contract violation, not a degraded success.
+    """
+
+    @property
+    def model_id(self) -> str: ...
+
+    @property
+    def dimensions(self) -> int: ...
+
+    def embed(self, texts: Sequence[str]) -> Sequence[Embedding]:
+        """Embed each text, in order. len(result) == len(texts)."""
+        ...
+
+
+@runtime_checkable
+class Chunker(Protocol):
+    """Splits a document version's content into retrievable chunks.
+
+    Must be deterministic: the same content and settings produce the same
+    chunks, including their offsets. Non-deterministic chunking makes every
+    citation unverifiable.
+    """
+
+    def chunk(
+        self, *, document: Document, version: DocumentVersion, content: str
+    ) -> Sequence[Chunk]: ...
+
+
+@runtime_checkable
+class VectorIndex(Protocol):
+    """Semantic candidate generation.
+
+    Expresses what retrieval needs, not how a store provides it. An in-memory
+    implementation and a pgvector adapter satisfy this identically; neither
+    leaks through it.
+    """
+
+    @property
+    def index_version(self) -> str:
+        """Identifies the index build, for provenance."""
+        ...
+
+    def add(self, chunks: Sequence[Chunk], embeddings: Sequence[Embedding]) -> None: ...
+
+    def remove_document(self, document_id: str) -> None: ...
+
+    def search(
+        self, *, embedding: Embedding, limit: int, language: str | None = None
+    ) -> CandidateList:
+        """Return semantic candidates, ranked best first, 1-based ranks."""
+        ...
+
+
+@runtime_checkable
+class LexicalIndex(Protocol):
+    """Lexical candidate generation.
+
+    Separate from `VectorIndex` because the two are genuinely different
+    capabilities with different failure modes, and because the audited lexical
+    arm was hard-coded to English (ADR-006). `language` is an explicit
+    parameter here so that an implementation must decide what to do with it
+    rather than defaulting silently.
+    """
+
+    @property
+    def index_version(self) -> str: ...
+
+    def add(self, chunks: Sequence[Chunk]) -> None: ...
+
+    def remove_document(self, document_id: str) -> None: ...
+
+    def search(
+        self, *, text: str, limit: int, language: str | None = None
+    ) -> CandidateList:
+        """Return lexical candidates, ranked best first, 1-based ranks."""
+        ...
+
+
+@runtime_checkable
+class RankFusion(Protocol):
+    """Combines ranked candidate lists into one ranking.
+
+    Consumes ranks rather than scores, because scores from different retrieval
+    paths share no scale. Must be deterministic, including tie-breaking --
+    see `FusedCandidate.sort_key`.
+
+    Reciprocal Rank Fusion is the intended first implementation. The audited
+    RRF is classified `implemented, unproven` with zero dedicated tests, so it
+    is characterized before it is adapted, not assumed correct.
+    """
+
+    def fuse(self, lists: Sequence[CandidateList], *, limit: int) -> Sequence[str]:
+        """Return chunk ids, best first."""
+        ...
+
+
+@runtime_checkable
+class Retriever(Protocol):
+    """Hybrid retrieval: semantic + lexical candidates, fused and ranked.
+
+    Results carry full provenance. A result that cannot say which path found
+    it and at what rank does not satisfy this contract.
+    """
+
+    def retrieve(self, query: RetrievalQuery) -> Sequence[RetrievalResult]: ...
+
+
+@runtime_checkable
+class TokenEstimator(Protocol):
+    """Estimates token cost of text.
+
+    A contract rather than a helper because the estimate must be correct for
+    Arabic as well as English. ADR-005 records the audited `CHARS_PER_TOKEN=4`
+    heuristic as unsafe here; an implementation is expected to be
+    tokenizer-backed and is tested in both languages.
+    """
+
+    @property
+    def model_id(self) -> str: ...
+
+    def estimate(self, text: str) -> int: ...
+
+
+@runtime_checkable
+class ContextAssembler(Protocol):
+    """Fits retrieval results into a budget, recording what was excluded."""
+
+    def assemble(
+        self, results: Sequence[RetrievalResult], *, budget: ContextBudget
+    ) -> BudgetedContext: ...
