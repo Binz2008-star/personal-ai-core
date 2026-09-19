@@ -22,7 +22,7 @@ from personal_ai_core.knowledge import (
     IngestionService,
 )
 
-ENGLISH_NOTES = """Hybrid retrieval runs a semantic arm and a lexical arm.
+ENGLISH_NOTES = """Hybrid retrieval runs a vector arm and a lexical arm.
 
 Reciprocal rank fusion combines the two rankings using ranks, not scores.
 
@@ -104,7 +104,7 @@ def test_provenance_answers_every_question_it_promises(stack, english_doc):
     ingestion, retriever, vector_index, lexical_index, _ = stack
     report = ingestion.ingest(english_doc, ENGLISH_NOTES)
 
-    result = retriever.retrieve(RetrievalQuery(text="semantic arm", limit=1))[0]
+    result = retriever.retrieve(RetrievalQuery(text="vector arm", limit=1))[0]
     provenance = result.provenance
 
     assert provenance.document_id == english_doc.id
@@ -113,7 +113,7 @@ def test_provenance_answers_every_question_it_promises(stack, english_doc):
     assert provenance.source_uri == english_doc.source_uri
     assert provenance.fused_score is not None
     assert set(provenance.methods) <= {
-        RetrievalMethod.SEMANTIC,
+        RetrievalMethod.VECTOR,
         RetrievalMethod.LEXICAL,
     }
     assert provenance.methods, "no retrieval arm was recorded"
@@ -139,13 +139,13 @@ def test_a_query_matching_only_one_arm_still_returns_results(stack, english_doc)
     ingestion.ingest(english_doc, ENGLISH_NOTES)
 
     semantic_only = retriever.retrieve(
-        RetrievalQuery(text="provenance", limit=3, methods=(RetrievalMethod.SEMANTIC,))
+        RetrievalQuery(text="provenance", limit=3, methods=(RetrievalMethod.VECTOR,))
     )
     lexical_only = retriever.retrieve(
         RetrievalQuery(text="provenance", limit=3, methods=(RetrievalMethod.LEXICAL,))
     )
     assert semantic_only and lexical_only
-    assert semantic_only[0].provenance.methods == (RetrievalMethod.SEMANTIC,)
+    assert semantic_only[0].provenance.methods == (RetrievalMethod.VECTOR,)
     assert lexical_only[0].provenance.methods == (RetrievalMethod.LEXICAL,)
 
 
@@ -205,7 +205,7 @@ def test_a_citation_survives_an_unchanged_re_ingestion(stack, english_doc):
     ingestion, retriever, _, _, catalog = stack
     ingestion.ingest(english_doc, ENGLISH_NOTES)
 
-    cited = retriever.retrieve(RetrievalQuery(text="semantic arm", limit=1))[0]
+    cited = retriever.retrieve(RetrievalQuery(text="vector arm", limit=1))[0]
 
     ingestion.ingest(english_doc, ENGLISH_NOTES)
 
@@ -288,8 +288,8 @@ def test_candidate_depth_does_not_scale_with_the_requested_limit(stack, english_
     ingestion, retriever, _, _, _ = stack
     ingestion.ingest(english_doc, ENGLISH_NOTES)
 
-    narrow = retriever.retrieve(RetrievalQuery(text="semantic arm", limit=1))
-    wide = retriever.retrieve(RetrievalQuery(text="semantic arm", limit=3))
+    narrow = retriever.retrieve(RetrievalQuery(text="vector arm", limit=1))
+    wide = retriever.retrieve(RetrievalQuery(text="vector arm", limit=3))
     assert narrow[0].chunk.id == wide[0].chunk.id
 
 

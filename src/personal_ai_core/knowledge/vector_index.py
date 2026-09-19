@@ -1,6 +1,11 @@
-"""In-memory semantic index.
+"""In-memory vector index.
 
 Implements `core.contracts.VectorIndex`.
+
+Named for the mechanism. It ranks by cosine similarity between whatever
+vectors it is given; whether those vectors encode meaning is the embedding
+model's business, not this index's, and the index enforces only that they all
+came from the same model.
 
 This is not a miniature vector database and does not try to be. There is no
 approximate nearest-neighbour structure, no graph, no quantization, no
@@ -126,13 +131,13 @@ class InMemoryVectorIndex:
         scored.sort(key=lambda pair: (-pair[0], pair[1]))
 
         return CandidateList(
-            method=RetrievalMethod.SEMANTIC,
+            method=RetrievalMethod.VECTOR,
             candidates=tuple(
                 Candidate(
                     chunk_id=chunk_id,
                     rank=position,
                     score=score,
-                    method=RetrievalMethod.SEMANTIC,
+                    method=RetrievalMethod.VECTOR,
                 )
                 for position, (score, chunk_id) in enumerate(scored[:limit], start=1)
             ),

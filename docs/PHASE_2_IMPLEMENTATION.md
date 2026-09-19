@@ -58,8 +58,15 @@ character n-grams and word tokens. Two texts that say the same thing in differen
 near zero against each other. It exists so the contract is proven implementable, so tests are
 deterministic and offline, and so a real model later is a substitution rather than a
 redesign. Because `Embedding` carries `model_id`, vectors from it can never be silently
-compared with a real model's. **The "semantic" arm is not yet semantic**, and no test in this
-repository claims otherwise.
+compared with a real model's, and no test in this repository claims it understands anything.
+
+The vocabulary was corrected to match (audit finding 1). `RetrievalMethod.SEMANTIC` is gone;
+the arm is `VECTOR`, which names the mechanism and stays true whichever embedder is plugged
+in. `RetrievalProvenance.embedding_model_id` now records which embedder ranked each result,
+because "found by the vector arm" is equally true of a real model and of this stand-in, and
+the reader needs to know which. The `CONTEXT_ASSEMBLED` event carries the same, as a distinct
+set rather than one value, so a mixed index shows as a disagreement instead of looking
+consistent.
 
 **`ScriptAwareTokenEstimator` is a heuristic, not a tokenizer.** This project has no runtime
 dependencies, so there is no vocabulary available. Its `model_id` begins with `heuristic:` so

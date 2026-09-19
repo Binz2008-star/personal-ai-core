@@ -34,7 +34,7 @@ def test_knowledge_types_are_frozen():
         DocumentVersion(document_id="d", content_hash="h"),
         a_chunk(),
         Embedding(vector=(0.1, 0.2), model_id="m"),
-        Candidate(chunk_id="c", rank=1, score=0.5, method=RetrievalMethod.SEMANTIC),
+        Candidate(chunk_id="c", rank=1, score=0.5, method=RetrievalMethod.VECTOR),
     ):
         # use a field the type actually declares; these are slots dataclasses,
         # so assigning an unknown name raises a different error entirely
@@ -133,13 +133,13 @@ def test_two_models_produce_distinguishable_embeddings():
 
 def test_candidate_rank_is_one_based():
     with pytest.raises(ValueError, match="1-based"):
-        Candidate(chunk_id="c", rank=0, score=1.0, method=RetrievalMethod.SEMANTIC)
+        Candidate(chunk_id="c", rank=0, score=1.0, method=RetrievalMethod.VECTOR)
 
 
 def test_candidate_list_rejects_a_mismatched_method():
     lexical = Candidate(chunk_id="c", rank=1, score=1.0, method=RetrievalMethod.LEXICAL)
     with pytest.raises(ValueError, match="does not match list method"):
-        CandidateList(method=RetrievalMethod.SEMANTIC, candidates=(lexical,))
+        CandidateList(method=RetrievalMethod.VECTOR, candidates=(lexical,))
 
 
 def test_fusion_tie_breaking_is_deterministic():
@@ -159,11 +159,11 @@ def test_fused_candidate_reports_contributing_methods():
         chunk_id="c",
         fused_score=0.8,
         contributions=(
-            Candidate(chunk_id="c", rank=1, score=0.9, method=RetrievalMethod.SEMANTIC),
+            Candidate(chunk_id="c", rank=1, score=0.9, method=RetrievalMethod.VECTOR),
             Candidate(chunk_id="c", rank=3, score=0.4, method=RetrievalMethod.LEXICAL),
         ),
     )
-    assert fused.methods() == (RetrievalMethod.SEMANTIC, RetrievalMethod.LEXICAL)
+    assert fused.methods() == (RetrievalMethod.VECTOR, RetrievalMethod.LEXICAL)
 
 
 # --- provenance answers the required questions ----------------------------
@@ -177,9 +177,9 @@ def test_provenance_answers_every_required_question():
         chunk_id=chunk.id,
         start=0,
         end=5,
-        methods=(RetrievalMethod.SEMANTIC, RetrievalMethod.LEXICAL),
-        ranks={RetrievalMethod.SEMANTIC: 1, RetrievalMethod.LEXICAL: 4},
-        scores={RetrievalMethod.SEMANTIC: 0.91},
+        methods=(RetrievalMethod.VECTOR, RetrievalMethod.LEXICAL),
+        ranks={RetrievalMethod.VECTOR: 1, RetrievalMethod.LEXICAL: 4},
+        scores={RetrievalMethod.VECTOR: 0.91},
         fused_score=0.77,
         index_version="idx-1",
         source_uri="file://x",
@@ -188,7 +188,7 @@ def test_provenance_answers_every_required_question():
     assert prov.version_id == "ver"               # which version
     assert (prov.chunk_id, prov.start, prov.end) == (chunk.id, 0, 5)  # which text
     assert RetrievalMethod.LEXICAL in prov.methods                    # which path
-    assert prov.ranks[RetrievalMethod.SEMANTIC] == 1                  # what ranking
+    assert prov.ranks[RetrievalMethod.VECTOR] == 1                  # what ranking
     assert prov.fused_score == 0.77
     assert prov.index_version == "idx-1"          # against which index
 
@@ -199,7 +199,7 @@ def test_provenance_is_a_type_not_a_metadata_dict():
     )
     assert not isinstance(prov, dict)
     with pytest.raises(TypeError):
-        prov.ranks[RetrievalMethod.SEMANTIC] = 1
+        prov.ranks[RetrievalMethod.VECTOR] = 1
 
 
 def test_result_rejects_provenance_for_a_different_chunk():

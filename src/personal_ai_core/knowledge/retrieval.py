@@ -2,7 +2,7 @@
 
 Implements `core.contracts.Retriever`.
 
-Runs the semantic and lexical arms, fuses their rankings, and returns results
+Runs the vector and lexical arms, fuses their rankings, and returns results
 carrying full provenance. It depends on the four contracts it composes --
 `EmbeddingProvider`, `VectorIndex`, `LexicalIndex`, `RankFusion` -- and on no
 concrete implementation of any of them, so the in-memory stack here and a
@@ -69,15 +69,20 @@ class HybridRetriever:
 
         lists: list[CandidateList] = []
         index_versions: dict[RetrievalMethod, str] = {}
+        embedding_model_id: str | None = None
 
-        if RetrievalMethod.SEMANTIC in query.methods:
+        if RetrievalMethod.VECTOR in query.methods:
             embedding = self._embedder.embed([query.text])[0]
             lists.append(
                 self._vector_index.search(
                     embedding=embedding, limit=depth, language=query.language
                 )
             )
-            index_versions[RetrievalMethod.SEMANTIC] = self._vector_index.index_version
+            index_versions[RetrievalMethod.VECTOR] = self._vector_index.index_version
+            # Recorded so a reader of the provenance can tell which embedder
+            # produced this ranking. "Found by the vector arm" is equally true
+            # of a real model and of a hashing stand-in.
+            embedding_model_id = self._embedder.model_id
 
         if RetrievalMethod.LEXICAL in query.methods:
             lists.append(
@@ -113,6 +118,7 @@ class HybridRetriever:
                         scores={c.method: c.score for c in candidate.contributions},
                         fused_score=candidate.fused_score,
                         index_version=self._describe_indexes(index_versions),
+                        embedding_model_id=embedding_model_id,
                         source_uri=self._catalog.source_uri(chunk.document_id),
                     ),
                 )

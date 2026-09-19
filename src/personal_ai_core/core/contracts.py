@@ -178,7 +178,13 @@ class Chunker(Protocol):
 
 @runtime_checkable
 class VectorIndex(Protocol):
-    """Semantic candidate generation.
+    """Vector candidate generation.
+
+    Named for the mechanism, not for a capability. This contract is satisfied
+    by any provider of comparable vectors -- a real embedding model, or a
+    hashing stand-in that captures only surface overlap. It does not promise
+    that the ranking means anything; that promise belongs to the embedding
+    model, and `EmbeddingProvider.model_id` is what identifies it.
 
     Expresses what retrieval needs, not how a store provides it. An in-memory
     implementation and a pgvector adapter satisfy this identically; neither
@@ -197,7 +203,7 @@ class VectorIndex(Protocol):
     def search(
         self, *, embedding: Embedding, limit: int, language: str | None = None
     ) -> CandidateList:
-        """Return semantic candidates, ranked best first, 1-based ranks."""
+        """Return vector candidates, ranked best first, 1-based ranks."""
         ...
 
 
@@ -246,7 +252,7 @@ class RankFusion(Protocol):
 
 @runtime_checkable
 class Retriever(Protocol):
-    """Hybrid retrieval: semantic + lexical candidates, fused and ranked.
+    """Hybrid retrieval: vector + lexical candidates, fused and ranked.
 
     Results carry full provenance. A result that cannot say which path found
     it and at what rank does not satisfy this contract.

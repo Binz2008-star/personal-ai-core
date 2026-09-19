@@ -27,9 +27,20 @@ class RetrievalMethod(str, Enum):
 
     Part of provenance, not a detail: "which path found this" is one of the
     questions a retrieval result must be able to answer.
+
+    These name the **mechanism**, never a claimed capability. `VECTOR` says a
+    candidate came from comparing vectors; it does not say those vectors
+    encode meaning. Whether they do depends entirely on the embedding model,
+    which is why `embedding_model_id` is recorded alongside.
+
+    This member was originally `SEMANTIC`, and that was a false claim: the
+    vector arm was satisfied by a character-n-gram hashing provider, which
+    captures surface overlap and nothing else. Provenance reported "semantic"
+    for a ranking with no semantics in it. A provenance record that overstates
+    its own method is worse than none, because it is believed.
     """
 
-    SEMANTIC = "semantic"
+    VECTOR = "vector"
     LEXICAL = "lexical"
     FUSED = "fused"
 
@@ -227,9 +238,15 @@ class RetrievalProvenance:
       - Which retrieval path found it?     `methods`
       - What ranking led to selection?     `ranks`, `scores`, `fused_score`
       - Against which index?               `index_version`
+      - With which embedding model?        `embedding_model_id`
 
     The audited source carried provenance only to file level, which is why
     this is specified as a type rather than left to convention.
+
+    `embedding_model_id` exists because `methods` naming the mechanism is
+    necessary but not sufficient: "found by the vector arm" is true of a real
+    embedding model and of a hashing stand-in alike, and a reader needs to
+    know which one ranked this passage. It is `None` when no vector arm ran.
     """
 
     document_id: str
@@ -242,6 +259,7 @@ class RetrievalProvenance:
     scores: Mapping[RetrievalMethod, float] = field(default_factory=dict)
     fused_score: float | None = None
     index_version: str | None = None
+    embedding_model_id: str | None = None
     source_uri: str | None = None
 
     def __post_init__(self) -> None:
@@ -278,7 +296,7 @@ class RetrievalQuery:
     limit: int = 10
     language: str = UNDETERMINED_LANGUAGE
     methods: tuple[RetrievalMethod, ...] = (
-        RetrievalMethod.SEMANTIC,
+        RetrievalMethod.VECTOR,
         RetrievalMethod.LEXICAL,
     )
     filters: Mapping[str, Any] = field(default_factory=dict)

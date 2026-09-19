@@ -55,7 +55,7 @@ class FakeVectorIndex:
     def remove_document(self, document_id): ...
 
     def search(self, *, embedding, limit, language=None):
-        return CandidateList(method=RetrievalMethod.SEMANTIC)
+        return CandidateList(method=RetrievalMethod.VECTOR)
 
 
 class FakeLexicalIndex:
@@ -127,7 +127,7 @@ def test_index_search_returns_a_list_tagged_with_its_own_method():
         embedding=Embedding(vector=(0.0,), model_id="m"), limit=5
     )
     lex = FakeLexicalIndex().search(text="q", limit=5)
-    assert vec.method is RetrievalMethod.SEMANTIC
+    assert vec.method is RetrievalMethod.VECTOR
     assert lex.method is RetrievalMethod.LEXICAL
 
 
@@ -152,10 +152,10 @@ def test_fusion_consumes_ranks_not_scores():
     """Scores from different paths share no scale; the signature reflects that."""
     lists = [
         CandidateList(
-            method=RetrievalMethod.SEMANTIC,
+            method=RetrievalMethod.VECTOR,
             candidates=(
                 Candidate(
-                    chunk_id="a", rank=1, score=0.9, method=RetrievalMethod.SEMANTIC
+                    chunk_id="a", rank=1, score=0.9, method=RetrievalMethod.VECTOR
                 ),
             ),
         ),

@@ -35,7 +35,7 @@ class Spec:
         self.provider = "ollama"
 
 
-def result(chunk, source_uri="file:///notes/en.md"):
+def result(chunk, source_uri="file:///notes/en.md", embedding_model_id="fake-embed-v1"):
     return RetrievalResult(
         chunk=chunk,
         provenance=RetrievalProvenance(
@@ -44,11 +44,12 @@ def result(chunk, source_uri="file:///notes/en.md"):
             chunk_id=chunk.id,
             start=chunk.start,
             end=chunk.end,
-            methods=(RetrievalMethod.SEMANTIC,),
-            ranks={RetrievalMethod.SEMANTIC: 1},
-            scores={RetrievalMethod.SEMANTIC: 0.9},
+            methods=(RetrievalMethod.VECTOR,),
+            ranks={RetrievalMethod.VECTOR: 1},
+            scores={RetrievalMethod.VECTOR: 0.9},
             fused_score=0.5,
             index_version="fake@1",
+            embedding_model_id=embedding_model_id,
             source_uri=source_uri,
         ),
     )
@@ -270,3 +271,55 @@ def test_the_summary_records_the_whole_allocation(make_chunk):
     ):
         assert key in payload, f"{key} missing from the audit payload"
     assert payload["context_window"] == 8192
+
+
+def test_the_summary_reports_every_embedder_not_just_the_first(make_chunk):
+    """Audit finding 1.
+
+    If two results ever disagree about which embedder ranked them, the audit
+    trail must show the disagreement rather than pick one and look consistent.
+    A mixed index is how a provenance record starts quietly attributing a real
+    model's ranking to a stand-in, or the reverse.
+    """
+    results = [
+        result(make_chunk("a", chunk_id="c1"), embedding_model_id="real-model-v2"),
+        result(make_chunk("b", chunk_id="c2"), embedding_model_id="hashing-stand-in"),
+    ]
+    grounding = builder(FakeRetriever(results)).build(
+        session_id="s1", query="q", language="en", model=Spec(), history=[]
+    )
+    assert summarize(grounding)["embedding_model_ids"] == [
+        "hashing-stand-in",
+        "real-model-v2",
+    ]
+
+
+def test_the_summary_reports_one_embedder_once(make_chunk):
+    results = [
+        result(make_chunk("a", chunk_id="c1"), embedding_model_id="one-model"),
+        result(make_chunk("b", chunk_id="c2"), embedding_model_id="one-model"),
+    ]
+    grounding = builder(FakeRetriever(results)).build(
+        session_id="s1", query="q", language="en", model=Spec(), history=[]
+    )
+    assert summarize(grounding)["embedding_model_ids"] == ["one-model"]
+
+
+def test_a_lexical_only_result_contributes_no_embedder(make_chunk):
+    chunk = make_chunk("a", chunk_id="c1")
+    lexical_only = RetrievalResult(
+        chunk=chunk,
+        provenance=RetrievalProvenance(
+            document_id=chunk.document_id,
+            version_id=chunk.version_id,
+            chunk_id=chunk.id,
+            start=chunk.start,
+            end=chunk.end,
+            methods=(RetrievalMethod.LEXICAL,),
+            ranks={RetrievalMethod.LEXICAL: 1},
+        ),
+    )
+    grounding = builder(FakeRetriever([lexical_only])).build(
+        session_id="s1", query="q", language="en", model=Spec(), history=[]
+    )
+    assert summarize(grounding)["embedding_model_ids"] == []

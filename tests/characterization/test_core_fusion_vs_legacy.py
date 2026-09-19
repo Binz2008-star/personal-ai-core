@@ -100,7 +100,7 @@ def test_core_k_matches_the_legacy_default():
 def test_core_scores_match_the_legacy_formula_exactly(vector_rank, lexical_rank):
     lists = []
     if vector_rank is not None:
-        lists.append(as_list(RetrievalMethod.SEMANTIC, [""] * (vector_rank - 1) + ["x"]))
+        lists.append(as_list(RetrievalMethod.VECTOR, [""] * (vector_rank - 1) + ["x"]))
     if lexical_rank is not None:
         lists.append(as_list(RetrievalMethod.LEXICAL, [""] * (lexical_rank - 1) + ["x"]))
 
@@ -118,7 +118,7 @@ def test_both_reward_appearing_in_two_arms_over_ranking_first_in_one():
     assert legacy.rrf_score(1, None) < legacy.rrf_score(2, 2)
     order = ReciprocalRankFusion().fuse(
         [
-            as_list(RetrievalMethod.SEMANTIC, ["only-top", "both"]),
+            as_list(RetrievalMethod.VECTOR, ["only-top", "both"]),
             as_list(RetrievalMethod.LEXICAL, ["filler", "both"]),
         ],
         limit=5,
@@ -134,8 +134,8 @@ def test_the_core_resolves_the_tie_ordering_the_legacy_left_undefined():
     guarantee. Core: ascending chunk_id, always."""
     assert legacy.rrf_score(1, None) == legacy.rrf_score(1, None)
     order = ReciprocalRankFusion().fuse(
-        [as_list(RetrievalMethod.SEMANTIC, ["z"]),
-         as_list(RetrievalMethod.SEMANTIC, ["a"])],
+        [as_list(RetrievalMethod.VECTOR, ["z"]),
+         as_list(RetrievalMethod.VECTOR, ["a"])],
         limit=5,
     )
     assert order == ["a", "z"]

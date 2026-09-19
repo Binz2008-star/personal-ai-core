@@ -2,7 +2,7 @@
 
 These tests assert what this provider actually promises -- determinism, model
 identity, dimensionality, unit length, loud failure on empty input -- and
-deliberately do NOT assert semantic behaviour, because it has none. A test
+deliberately do NOT assert vector behaviour, because it has none. A test
 claiming "cat" is close to "feline" here would pass only by accident and would
 become a lie the moment a real model replaced it.
 """

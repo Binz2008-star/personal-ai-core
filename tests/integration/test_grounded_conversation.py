@@ -37,7 +37,7 @@ from personal_ai_core.core.domain import EventType, Role
 from personal_ai_core.core.errors import RetrievalError
 from personal_ai_core.core.knowledge import Document
 
-NOTES_EN = """Hybrid retrieval runs a semantic arm and a lexical arm together.
+NOTES_EN = """Hybrid retrieval runs a vector arm and a lexical arm together.
 
 Reciprocal rank fusion combines the two rankings using ranks, not scores.
 
@@ -296,6 +296,34 @@ def test_a_retrieval_failure_is_recorded_and_fails_the_turn(transport):
     assert EventType.GENERATION_REQUESTED not in types
     assert EventType.GENERATION_COMPLETED not in types
     assert transport.payloads == [], "the model was called despite a failed retrieval"
+
+
+def test_the_audit_trail_names_the_embedder_behind_the_ranking(slice_):
+    """Audit finding 1, at the end of the chain.
+
+    The turn's audit record must not let a reader assume the passages were
+    ranked by a model that understands them.
+    """
+    ingest(slice_, NOTES_EN)
+    session = slice_.service.start_session(slice_.service.create_user().id)
+    slice_.service.send(session_id=session.id, content="what does fusion combine?")
+
+    payload = next(
+        e for e in slice_.events.all() if e.type is EventType.CONTEXT_ASSEMBLED
+    ).payload
+    assert payload["embedding_model_ids"] == ["hashing-ngram3-256d-v1"]
+
+
+def test_nothing_in_the_prompt_claims_the_evidence_was_understood(slice_, transport):
+    """The preamble may promise a checkable citation. It must not promise
+    meaning the retrieval stack does not currently provide."""
+    ingest(slice_, NOTES_EN)
+    session = slice_.service.start_session(slice_.service.create_user().id)
+    slice_.service.send(session_id=session.id, content="what does fusion combine?")
+
+    system = transport.last_messages[0]["content"].lower()
+    for word in ("semantic", "semantically", "meaning-based", "understood"):
+        assert word not in system, f"the prompt claims {word!r}"
 
 
 # --- Event != Memory still holds ------------------------------------------

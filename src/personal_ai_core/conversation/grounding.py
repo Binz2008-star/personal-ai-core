@@ -185,9 +185,20 @@ def summarize(grounding: Grounding) -> dict:
     excluded: dict[str, int] = {}
     for item in grounding.context.excluded:
         excluded[item.reason.value] = excluded.get(item.reason.value, 0) + 1
+    # Distinct rather than "the first one": if two results ever disagree about
+    # which embedder ranked them, the audit trail must show that rather than
+    # pick one and look consistent.
+    embedders = sorted(
+        {
+            r.provenance.embedding_model_id
+            for r in grounding.context.selected
+            if r.provenance.embedding_model_id is not None
+        }
+    )
     return {
         "retrieved": grounding.retrieved,
         "used": grounding.used,
+        "embedding_model_ids": embedders,
         "dropped": grounding.dropped,
         "excluded_by_reason": excluded,
         "evidence_tokens": grounding.context.token_estimate,

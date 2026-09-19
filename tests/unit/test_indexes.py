@@ -118,7 +118,7 @@ def test_vector_ranks_are_one_based_and_ordered_by_similarity(
     assert [c.rank for c in found.candidates] == [1, 2]
     assert found.candidates[0].chunk_id == "a"
     assert found.candidates[0].score >= found.candidates[1].score
-    assert found.method is RetrievalMethod.SEMANTIC
+    assert found.method is RetrievalMethod.VECTOR
 
 
 def test_vector_ties_break_deterministically_on_chunk_id(

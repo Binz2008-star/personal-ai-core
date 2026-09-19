@@ -27,7 +27,7 @@ from personal_ai_core.knowledge import (
     ReciprocalRankFusion,
 )
 
-TEXT = "Retrieval joins a semantic arm and a lexical arm."
+TEXT = "Retrieval joins a vector arm and a lexical arm."
 
 
 def build_stack():
@@ -87,12 +87,12 @@ def test_every_protocol_member_is_callable_through_its_signature(document):
     assert report.chunk_count == 1
 
     embedding = embedder.embed([TEXT])[0]
-    semantic = vector_index.search(embedding=embedding, limit=5, language=None)
+    vector = vector_index.search(embedding=embedding, limit=5, language=None)
     lexical = lexical_index.search(text=TEXT, limit=5, language=None)
-    assert semantic.method is RetrievalMethod.SEMANTIC
+    assert vector.method is RetrievalMethod.VECTOR
     assert lexical.method is RetrievalMethod.LEXICAL
 
-    fused = ReciprocalRankFusion().fuse([semantic, lexical], limit=5)
+    fused = ReciprocalRankFusion().fuse([vector, lexical], limit=5)
     assert fused
 
     retriever = HybridRetriever(
@@ -101,7 +101,7 @@ def test_every_protocol_member_is_callable_through_its_signature(document):
         lexical_index=lexical_index,
         catalog=catalog,
     )
-    results = retriever.retrieve(RetrievalQuery(text="semantic arm", limit=3))
+    results = retriever.retrieve(RetrievalQuery(text="vector arm", limit=3))
     assert results
 
     assembled = GreedyContextAssembler(ScriptAwareTokenEstimator()).assemble(
