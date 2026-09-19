@@ -171,6 +171,104 @@ def test_re_ingestion_replaces_rather_than_accumulates(stack, english_doc):
     )[0].chunk.text.startswith("Only one paragraph")
 
 
+def test_re_ingesting_identical_content_does_nothing(stack, english_doc):
+    """Idempotency by content hash.
+
+    A source that has not changed must not be re-chunked. Re-chunking mints a
+    new version id and a new id for every chunk, so every citation already
+    issued against the previous version stops resolving -- silently, while
+    still looking correct. `content_hash` exists to make that detectable, and
+    this is the test that it is actually read.
+    """
+    ingestion, _, vector_index, lexical_index, catalog = stack
+
+    first = ingestion.ingest(english_doc, ENGLISH_NOTES)
+    ids_before = sorted(chunk.id for chunk in catalog)
+    vector_version_before = vector_index.index_version
+    lexical_version_before = lexical_index.index_version
+
+    second = ingestion.ingest(english_doc, ENGLISH_NOTES)
+
+    assert second.unchanged is True
+    assert second.replaced_previous is False
+    assert second.version.id == first.version.id
+    assert second.version.revision == 1
+    assert second.chunk_count == first.chunk_count
+
+    assert sorted(chunk.id for chunk in catalog) == ids_before
+    assert vector_index.index_version == vector_version_before
+    assert lexical_index.index_version == lexical_version_before
+
+
+def test_a_citation_survives_an_unchanged_re_ingestion(stack, english_doc):
+    """The user-visible consequence of the test above."""
+    ingestion, retriever, _, _, catalog = stack
+    ingestion.ingest(english_doc, ENGLISH_NOTES)
+
+    cited = retriever.retrieve(RetrievalQuery(text="semantic arm", limit=1))[0]
+
+    ingestion.ingest(english_doc, ENGLISH_NOTES)
+
+    resolved = catalog.get(cited.provenance.chunk_id)
+    assert resolved is not None, "the citation no longer resolves"
+    assert resolved.text == cited.chunk.text
+    assert ENGLISH_NOTES[resolved.start : resolved.end] == resolved.text
+
+
+def test_changed_content_is_still_ingested_as_a_new_version(stack, english_doc):
+    """The guard must not swallow a real edit."""
+    ingestion, _, _, _, catalog = stack
+    ingestion.ingest(english_doc, ENGLISH_NOTES)
+    ids_before = sorted(chunk.id for chunk in catalog)
+
+    report = ingestion.ingest(english_doc, ENGLISH_NOTES + "\n\nA new paragraph.")
+
+    assert report.unchanged is False
+    assert report.replaced_previous is True
+    assert report.version.revision == 2
+    assert sorted(chunk.id for chunk in catalog) != ids_before
+
+
+def test_reverting_to_earlier_content_is_a_change_not_a_no_op(stack, english_doc):
+    """The hash is compared against the *current* version, not any past one.
+
+    Edit, then revert: the stored hash is the edited one, so the revert is a
+    real change and gets a new revision. Treating it as a no-op would leave the
+    index holding the edited text while the caller believes it holds the
+    original.
+    """
+    ingestion, _, _, _, _ = stack
+    ingestion.ingest(english_doc, ENGLISH_NOTES)
+    ingestion.ingest(english_doc, "Something else entirely.")
+
+    report = ingestion.ingest(english_doc, ENGLISH_NOTES)
+    assert report.unchanged is False
+    assert report.version.revision == 3
+
+
+def test_an_unchanged_re_ingestion_of_an_empty_document_is_also_a_no_op(
+    stack, english_doc
+):
+    ingestion, _, _, _, _ = stack
+    first = ingestion.ingest(english_doc, "   \n\n  ")
+    second = ingestion.ingest(english_doc, "   \n\n  ")
+
+    assert second.unchanged is True
+    assert second.chunk_count == 0 == first.chunk_count
+    assert second.version.id == first.version.id
+
+
+def test_idempotency_is_tracked_per_document(stack, english_doc, arabic_doc):
+    """Two documents with different content must not share one hash slot."""
+    ingestion, _, _, _, _ = stack
+    ingestion.ingest(english_doc, ENGLISH_NOTES)
+    ingestion.ingest(arabic_doc, ARABIC_NOTES)
+
+    assert ingestion.ingest(english_doc, ENGLISH_NOTES).unchanged is True
+    assert ingestion.ingest(arabic_doc, ARABIC_NOTES).unchanged is True
+    assert ingestion.ingest(arabic_doc, ENGLISH_NOTES).unchanged is False
+
+
 def test_retrieval_is_deterministic_across_repeated_calls(stack, english_doc):
     ingestion, retriever, _, _, _ = stack
     ingestion.ingest(english_doc, ENGLISH_NOTES)

@@ -26,12 +26,18 @@ class IngestionReport:
 
     Returned rather than logged. A caller that cannot see how many chunks were
     produced cannot tell an empty document from a broken chunker.
+
+    `unchanged` reports that the content hash matched and nothing was done.
+    Without it a no-op is indistinguishable from a re-ingestion that happened
+    to produce the same chunk count, and "did this change anything" is the
+    question a caller most needs answered.
     """
 
     document_id: str
     version: DocumentVersion
     chunk_count: int
     replaced_previous: bool
+    unchanged: bool = False
 
 
 def content_hash(content: str) -> str:
@@ -54,15 +60,42 @@ class IngestionService:
         self._vector_index = vector_index
         self._lexical_index = lexical_index
         self._catalog = catalog
-        self._revisions: dict[str, int] = {}
+        self._versions: dict[str, DocumentVersion] = {}
+        self._chunk_counts: dict[str, int] = {}
 
     def ingest(self, document: Document, content: str) -> IngestionReport:
-        previous = self._revisions.get(document.id)
-        revision = 1 if previous is None else previous + 1
+        """Ingest `content` as the current version of `document`.
+
+        Idempotent by content hash. Re-ingesting text identical to the stored
+        version does nothing at all and returns the existing version.
+
+        That short-circuit is the whole reason `content_hash` exists rather
+        than being a field nobody reads. Without it, re-running an unchanged
+        source mints a new version id and a new id for every chunk, so every
+        citation already issued against the previous version stops resolving --
+        silently, and while still looking correct.
+        """
+        digest = content_hash(content)
+        previous = self._versions.get(document.id)
+
+        if previous is not None and previous.content_hash == digest:
+            # A deliberate pure no-op: no re-chunk, no re-embed, no index
+            # mutation, and no catalog write. Anything touched here would move
+            # `index_version`, which provenance records, for a version that did
+            # not change.
+            return IngestionReport(
+                document_id=document.id,
+                version=previous,
+                chunk_count=self._chunk_counts.get(document.id, 0),
+                replaced_previous=False,
+                unchanged=True,
+            )
+
+        revision = 1 if previous is None else previous.revision + 1
 
         version = DocumentVersion(
             document_id=document.id,
-            content_hash=content_hash(content),
+            content_hash=digest,
             revision=revision,
         )
 
@@ -82,7 +115,8 @@ class IngestionService:
             self._lexical_index.add(chunks)
             self._catalog.add(chunks)
 
-        self._revisions[document.id] = revision
+        self._versions[document.id] = version
+        self._chunk_counts[document.id] = len(chunks)
         return IngestionReport(
             document_id=document.id,
             version=version,
