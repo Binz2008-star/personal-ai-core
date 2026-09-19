@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  phase1:
+  suite:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,9 +14,33 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pytest
-      - name: Phase 1 test suite
+
+      # The whole suite first: if this fails, the named steps below only
+      # narrow down where.
+      - name: Full suite
         run: python -m pytest tests/ -v
-      - name: Dependency direction
-        run: python -m pytest tests/test_dependency_direction.py -v
-      - name: Event != Memory invariant
-        run: python -m pytest tests/test_event_not_memory.py -v
+
+      # The three layers are run separately as well, because a failure in
+      # `characterization/` means something different from a failure in
+      # `unit/` -- one says the Core changed, the other says our reading of
+      # the legacy behaviour did.
+      - name: Unit
+        run: python -m pytest tests/unit -v
+      - name: Characterization (legacy behaviour, and Core vs legacy)
+        run: python -m pytest tests/characterization -v
+      - name: Integration (composed, no infrastructure required)
+        run: python -m pytest tests/integration -v
+
+      # Named individually so a violation is legible in the checks list
+      # rather than buried in a 380-line run.
+      - name: Architecture -- dependency direction
+        run: python -m pytest tests/unit/test_dependency_direction.py -v
+      - name: Invariant -- Event != Memory
+        run: python -m pytest tests/unit/test_event_not_memory.py -v
+
+      # A skipped test must never read as a passed one. This prints every
+      # skip with its reason so the log says what went unverified; it does
+      # not fail on them. `tests/unit/test_expected_skips.py` is what
+      # actually enforces which skips are allowed.
+      - name: Report skips with reasons
+        run: python -m pytest tests/ -q -rs
