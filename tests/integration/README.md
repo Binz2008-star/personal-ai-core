@@ -6,9 +6,10 @@ where contract mismatches actually show up.
 
 Two rules:
 
-- **No test here may require infrastructure that is absent by default.** The
-  in-memory stack needs no service, no model download and no network, so the
-  whole file runs anywhere. A test that genuinely needs a live Ollama,
-  Postgres, pgvector or Neon may skip when its dependency is missing, and must
-  say so in its skip reason.
+- **Nothing here may require infrastructure that is absent by default.** The
+  in-memory stack needs no service, no model download and no network, so it
+  runs anywhere. A test that genuinely needs an absent dependency — a live
+  Ollama, Postgres, pgvector, Neon, or a reference tokenizer — may skip, and
+  its skip reason must say plainly what is left unverified as a result. A skip
+  that reads like a pass is worse than a missing test.
 - **Tests in `unit/` and `characterization/` never skip.**

@@ -283,3 +283,93 @@ def test_both_indexes_reject_a_non_positive_limit(embedder, vector_index, limit)
 def test_impossible_bm25_parameters_are_rejected(kwargs):
     with pytest.raises(ValueError):
         InMemoryLexicalIndex(**kwargs)
+
+
+# --- exactly which BM25 (audit finding 2) ----------------------------------
+
+
+def test_bm25_parameters_are_the_stated_defaults():
+    """k1 and b are choices; a change to either must be a visible one."""
+    from personal_ai_core.knowledge.lexical_index import (
+        BM25_B,
+        BM25_K1,
+        BM25_QUERY_TERM_FREQUENCY,
+    )
+
+    assert (BM25_K1, BM25_B) == (1.5, 0.75)
+    assert BM25_QUERY_TERM_FREQUENCY == "linear"
+
+
+def test_query_term_frequency_is_linear_not_deduplicated(make_chunk):
+    """The variant the module docstring names, pinned.
+
+    "BM25" alone does not pin down how a repeated query term is weighted. This
+    implementation sums duplicates, which is the full Okapi formula with k3
+    unbounded. Deduplicating would make these two scores equal; saturating with
+    a finite k3 would put the ratio between 1 and 3.
+    """
+    index = InMemoryLexicalIndex()
+    index.add([make_chunk(ENGLISH_A, chunk_id="a"), make_chunk(ARABIC_A, chunk_id="b")])
+
+    once = index.search(text="artificial", limit=5).candidates[0].score
+    thrice = index.search(text="artificial artificial artificial", limit=5).candidates[0].score
+
+    assert thrice == pytest.approx(once * 3)
+
+
+def test_a_repeated_query_term_outweighs_a_single_one_in_ranking(make_chunk):
+    """The user-visible consequence of linear query term frequency."""
+    index = InMemoryLexicalIndex()
+    index.add(
+        [
+            make_chunk("artificial systems", chunk_id="artificial-only"),
+            make_chunk("intelligence systems", chunk_id="intelligence-only"),
+        ]
+    )
+    # Weighting one term more heavily by repeating it changes which wins.
+    plain = index.search(text="artificial intelligence", limit=5).candidates
+    weighted = index.search(
+        text="intelligence intelligence intelligence artificial", limit=5
+    ).candidates
+
+    assert {c.chunk_id for c in plain} == {"artificial-only", "intelligence-only"}
+    assert weighted[0].chunk_id == "intelligence-only"
+
+
+def test_the_per_term_formula_is_textbook_okapi(make_chunk):
+    """Recomputed here from the formula rather than trusted from the name."""
+    import math
+
+    docs = {"d1": "the cat sat on the mat the cat", "d2": "a dog sat on a log"}
+    index = InMemoryLexicalIndex()
+    index.add([make_chunk(text, chunk_id=cid) for cid, text in docs.items()])
+
+    from personal_ai_core.knowledge.text import tokenize
+
+    tokens = {cid: tokenize(text) for cid, text in docs.items()}
+    n = len(tokens)
+    avgdl = sum(len(t) for t in tokens.values()) / n
+    query = tokenize("cat sat")
+
+    expected = {}
+    for cid, terms in tokens.items():
+        score = 0.0
+        for term in query:
+            frequency = terms.count(term)
+            if frequency == 0:
+                continue
+            df = sum(1 for t in tokens.values() if term in t)
+            idf = math.log(1.0 + (n - df + 0.5) / (df + 0.5))
+            score += (
+                idf
+                * (frequency * (1.5 + 1.0))
+                / (frequency + 1.5 * (1 - 0.75 + 0.75 * len(terms) / avgdl))
+            )
+        expected[cid] = score
+
+    actual = {
+        c.chunk_id: c.score for c in index.search(text="cat sat", limit=9).candidates
+    }
+    for cid, score in expected.items():
+        if score > 0:
+            assert actual[cid] == pytest.approx(score, abs=1e-12)

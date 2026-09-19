@@ -47,7 +47,7 @@ transcription in `tests/characterization/test_core_fusion_vs_legacy.py`.
 | `to_tsvector('english', …)` | English stemming and stop words applied to every language, silently. Arabic went through an English stemmer and came out unmatched, with no error (ADR-006). | BM25 over Unicode tokenization. No per-language asset exists to be wrong. |
 | Undefined tie ordering | Equal fused scores fell to the store's row order, which is not a guarantee. A ranking that can differ between two identical runs cannot be tested — which is how it stayed unproven. | Ties break on ascending `chunk_id`, via `FusedCandidate.sort_key`. Arbitrary but fixed. |
 | Filters that return nothing | **Verified defect:** in the audited `search_brain()`, passing a `language` or `chunk_type` filter always returned an empty list — indistinguishable from "there is no Arabic content". | One shared policy in `knowledge/language.py`, used identically by both arms, with the legacy symptom pinned as a regression test. |
-| `CHARS_PER_TOKEN = 4` | Roughly right for English, wrong by about half for Arabic. Under-estimating overflows the context window and the overflow is resolved by silent truncation (ADR-005). | Per-script costs, biased pessimistic. Arabic is estimated at roughly twice English for the same character count. |
+| `CHARS_PER_TOKEN = 4` | One constant cannot fit every script: a BPE vocabulary trained mostly on English packs English densely and everything else less so, so a single ratio is generous to one script and mean to the others. Under-estimating overflows the context window and the overflow is resolved by silent truncation (ADR-005). | Per-script costs, calibrated toward the expensive end. **This calibration charges Arabic about twice Latin per character. That is a property of the constants chosen here, not a measured fact about any tokenizer** — see the honesty note below. |
 
 ## What these implementations honestly do not do
 
@@ -68,13 +68,35 @@ the reader needs to know which. The `CONTEXT_ASSEMBLED` event carries the same, 
 set rather than one value, so a mixed index shows as a disagreement instead of looking
 consistent.
 
-**`ScriptAwareTokenEstimator` is a heuristic, not a tokenizer.** This project has no runtime
-dependencies, so there is no vocabulary available. Its `model_id` begins with `heuristic:` so
-a budget traced back to it cannot be mistaken for a real count. Its error is deliberately
-one-sided — over-estimating wastes budget, under-estimating truncates silently.
+**`ScriptAwareTokenEstimator` is a heuristic, not a tokenizer — and its calibration is
+unvalidated.** This project has no runtime dependencies, so there is no vocabulary available.
+Its `model_id` begins with `heuristic:` so a budget traced back to it cannot be mistaken for
+a real count.
+
+Two claims here are different and were previously blurred together (audit finding 3):
+
+- **Decided and enforced.** The error *should* fall on the expensive side, because
+  over-estimating costs one passage while under-estimating truncates silently.
+  `safety_margin` refuses any value below 1.0, and that is tested.
+- **Not evidenced.** That the per-script constants actually achieve it. Checking
+  "never below the real count" needs a real tokenizer to compare against, and none is
+  vendored. The numbers are a cautious guess with a known intended direction.
+
+`tests/integration/test_token_estimator_validation.py` is the harness that settles it against
+the Boss model's own tokenizer, or against `tiktoken` as an indicative second best. **It
+skips wherever neither is installed, which is the normal case** — a skip there means the
+claim is still unverified in that environment, and the skip reason says so. Until it has run,
+treat the ratios as a deliberate guess, not a measurement.
 
 **Neither index scales.** Both are exact O(n) scans. That is a deliberate trade: being exact
 makes them a reference an approximate index can be checked against later.
+
+**BM25's query term frequency is linear.** Per document term the ranking is textbook Okapi
+with Lucene's IDF, verified numerically against an independently written reference. The part
+"BM25" alone does not pin down is the *query* side: query terms are iterated with duplicates
+and summed, which is the full Okapi formula with `k3` unbounded, so a term repeated three
+times in a query counts three times. A legitimate variant, now named in the module docstring
+and pinned by a test rather than left to be rediscovered from a surprising ranking.
 
 **No stemming, in any language.** "running" and "run" are different terms. Raising recall
 needs per-language morphology, which must arrive as a tested per-language component — not as
@@ -138,5 +160,5 @@ Real embedding model · persistent index · pgvector or Neon adapter · migratio
 approximate nearest-neighbour search · per-language stemming · identity foundation ·
 memory foundation (both still outstanding from Phase 1, per `PHASE_1_RECONCILIATION.md`).
 
-Audit findings 1, 2, 3 and 6 remain open and are deliberately untouched: they are naming and
-documentation corrections, not behaviour.
+Audit finding 6 remains open: `RetrievalMethod.FUSED` and three `ExclusionReason` members are
+declared with no producer and no test. Findings 1, 2, 3 and 5 are closed.

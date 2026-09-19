@@ -10,21 +10,43 @@ its error falls on the safe side.
 
 Why not the obvious `len(text) // 4`:
 
-ADR-005 records the audited system using a flat `CHARS_PER_TOKEN = 4`. That
-ratio is roughly right for English prose under a BPE tokenizer and badly wrong
-for Arabic, where the same tokenizers emit closer to one token every two
-characters. A flat 4 therefore *under*-estimates Arabic by around half.
+ADR-005 records the audited system using a flat `CHARS_PER_TOKEN = 4`. A single
+ratio cannot be right for every script: a BPE vocabulary trained mostly on
+English packs English densely and everything else less so, so one constant is
+necessarily generous to one script and mean to the others.
 
 Under-estimating is the dangerous direction. Over-estimating wastes budget and
 includes one fewer passage. Under-estimating overflows the model's context and
 the overflow is resolved by truncation -- silently, at the wrong end, with no
-error anywhere. An Arabic conversation degrades and nothing reports why.
+error anywhere. A conversation degrades and nothing reports why.
 
-So the ratio is per script, and every ratio is chosen at the pessimistic end
-of what common multilingual BPE tokenizers produce. `estimate()` is intended
-to be at or above the true count for ordinary text; a caller that needs an
-exact count needs a real tokenizer behind this same contract, which is the
-point of it being a contract.
+So the ratio is per script, and each is set toward the expensive end.
+
+
+What is decided, and what is actually evidenced
+-----------------------------------------------
+
+These are different things and the distinction is the honest part of this
+module.
+
+**Decided.** The per-script costs below, and the rule that the error should
+fall on the expensive side. `safety_margin` refuses any value under 1.0, so the
+*policy* of a one-sided error is enforced at the boundary and tested.
+
+**Not evidenced.** That the constants actually achieve it. Validating "this
+estimate is never below the real count" requires a real tokenizer to compare
+against, and this project has no runtime dependencies and no vocabulary. The
+numbers below are a calibration, chosen to be cautious; they have not been
+measured against the Boss model's tokenizer or any other.
+
+`tests/integration/test_token_estimator_validation.py` is the harness that
+settles it. It skips when no reference tokenizer is installed -- which is the
+normal case here -- and checks the one-sided-error claim directly wherever one
+is. Until it has run somewhere, treat the ratios as a deliberate guess with a
+known direction, not as a measurement.
+
+A caller needing an exact count needs a real tokenizer behind this same
+contract. That is the point of it being a contract.
 """
 from __future__ import annotations
 
@@ -32,8 +54,12 @@ import math
 import unicodedata
 
 # Token cost per character, by script. Higher means the script packs fewer
-# characters into a token. These are pessimistic by design: see the module
-# docstring for why the error is deliberately one-sided.
+# characters into a token.
+#
+# A calibration, not a measurement. Chosen toward the expensive end so the
+# error falls on the safe side -- see "What is decided, and what is actually
+# evidenced" above. Changing one of these changes every budget, so they are
+# named constants and pinned by a test.
 _LATIN_COST = 0.27          # ~3.7 chars/token; BPE prose is nearer 4
 _ARABIC_COST = 0.55         # ~1.8 chars/token
 _CJK_COST = 1.0             # roughly one token per character, often more
@@ -65,10 +91,12 @@ def _character_cost(character: str) -> float:
 
 
 class ScriptAwareTokenEstimator:
-    """Per-script, deliberately pessimistic token estimate.
+    """Per-script token estimate, calibrated to err on the expensive side.
 
-    Deterministic, allocation-light, and correct in the only sense that
-    matters for a budget: it does not claim text is cheaper than it is.
+    Deterministic and allocation-light. "Errs on the expensive side" is the
+    intent behind the constants and is not yet verified against a real
+    tokenizer -- see the module docstring. `model_id` begins with `heuristic:`
+    so a budget traced back here can never be mistaken for a token count.
     """
 
     def __init__(self, *, safety_margin: float = 1.0) -> None:

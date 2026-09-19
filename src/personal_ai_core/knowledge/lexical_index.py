@@ -2,7 +2,8 @@
 
 Implements `core.contracts.LexicalIndex`.
 
-Ranking is Okapi BM25. That choice is deliberate on two counts.
+Ranking is Okapi BM25, in the variant stated exactly below. That choice is
+deliberate on two counts.
 
 First, it is a published, parameterized ranking function rather than an
 invented score, so its behaviour can be reasoned about and its parameters
@@ -21,6 +22,29 @@ The price is real and stated rather than hidden: no stemming means "running"
 and "run" are different terms in every language. Raising recall with
 per-language morphology is future work that must arrive as a tested,
 per-language component -- not as one language's defaults applied to all.
+
+Exactly which BM25
+------------------
+
+Per document term, this is textbook Okapi, with no approximation::
+
+                       f(q,D) * (k1 + 1)
+    IDF(q) * -----------------------------------------
+             f(q,D) + k1 * (1 - b + b * |D| / avgdl)
+
+using Lucene's always-positive IDF, ``ln(1 + (N - df + 0.5) / (df + 0.5))``.
+
+The part worth naming, because "BM25" alone does not pin it down, is the
+**query** term frequency. The full Okapi formula carries a third saturating
+factor, ``(k3 + 1) * qf / (k3 + qf)``. This implementation iterates the query
+terms *with duplicates* and sums, which is that factor with ``k3`` unbounded:
+a term repeated three times in the query contributes three times as much.
+
+That is a legitimate variant, not a defect, and it is the behaviour a caller
+gets -- but it is a choice, so it is written down and pinned by a test rather
+than left for someone to rediscover from a surprising ranking. The two common
+alternatives, deduplicating query terms or saturating with a finite ``k3``,
+would both change rankings for repeated-term queries.
 """
 from __future__ import annotations
 
@@ -42,6 +66,11 @@ from .text import tokenize
 # defaults, named here so a change to them is a visible decision.
 BM25_K1 = 1.5
 BM25_B = 0.75
+
+# Query term frequency is linear: the query terms are iterated with duplicates
+# and summed. Equivalent to the full Okapi formula with k3 unbounded. See the
+# module docstring, "Exactly which BM25".
+BM25_QUERY_TERM_FREQUENCY = "linear"
 
 
 class InMemoryLexicalIndex:
@@ -154,6 +183,8 @@ class InMemoryLexicalIndex:
         counts = self._terms[chunk_id]
         length = self._lengths[chunk_id]
         score = 0.0
+        # Duplicates are deliberate, not an oversight: iterating them is what
+        # makes query term frequency linear (module docstring).
         for term in query_terms:
             frequency = counts.get(term, 0)
             if frequency == 0:
