@@ -42,9 +42,11 @@ reranking subsystems. Existing repositories supply **edge components and pattern
                    local-llm-rig  (separate repo)
 ```
 
-`local-llm-rig` is **not** part of this repository. It owns the model runtime, Modelfiles,
-benchmarks and hardware evidence. This Core consumes its measurements; it does not absorb
-its scripts wholesale.
+`local-llm-rig` is **not** part of this repository and **not a runtime dependency**. The
+Core does not import from it, call into it, or require it to be present in order to run. It
+owns the model runtime, Modelfiles, benchmarks and hardware evidence; the Core cites its
+measurements as evidence and adapts specific harness scripts into its own `evaluation/`
+tree. See `COMPONENT_EXTRACTION_MATRIX.md` §1.2.
 
 Project-specific systems attach at the edge, never inside:
 

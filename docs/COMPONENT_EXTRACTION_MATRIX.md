@@ -20,19 +20,52 @@ in §5 so they are not silently reintroduced.
 
 ---
 
-## 1. Repository lineage
+## 1. Repository lineage and pinned evidence SHAs
 
 **VERIFIED SOURCE FACT.**
 
-| Repository | SHA audited | Lineage |
+This table is the **canonical evidence record**. Every audited commit is pinned here as a
+full 40-character SHA. Short SHAs appearing elsewhere in this document, in the ADRs and in
+the other Phase 0 documents are **abbreviated representations of these same commits** — this
+table resolves them.
+
+| Repository | Audited commit (full SHA) | Lineage |
 |---|---|---|
-| `local-llm-rig` | (see repo `HANDOFF.md`) | independent — model runtime & measurement |
-| `unified-llm-local` | `21a36b0` | **Second Brain lineage — current/superset snapshot** |
-| `second-brain-kb` | `c65dbce` | Second Brain lineage — historical snapshot |
-| `code-it` | `c72aa0a` | Second Brain lineage — UI variant |
-| `rag-engine` | `16f6279` | independent — evaluation & analysis |
-| `Rico-...-UAE` | `origin/main @ 215c3169` | independent — product |
-| `Robin-Content-Engine-v2` | `6ee2249` | independent — video content pipeline |
+| `unified-llm-local` | `21a36b0765d89390eed63da094977e4bb8e5b4c2` | **Second Brain lineage — current/superset snapshot** |
+| `second-brain-kb` | `c65dbce315774f2fbaf49a844cdb58820c4533bc` | Second Brain lineage — historical snapshot |
+| `code-it` | `c72aa0ae5eebdf578d7df1253515a4ba0b4b9db1` | Second Brain lineage — UI variant |
+| `rag-engine` | `16f62790a95f13f9783aceaa6aff37ff3e2aa1e8` | independent — evaluation & analysis |
+| `Rico-...-UAE` | `215c316979731eedcdf2f99bcbd97b727229abf5` (`origin/main` at audit) | independent — product |
+| `Robin-Content-Engine-v2` | `6ee22491391e2e312f797b2da414b11f75c6f06a` | independent — video content pipeline |
+| `local-llm-rig` | **UNPINNED / UNRESOLVED** — see §1.1 | independent — **evidence source**, see §1.2 |
+
+### 1.1 `local-llm-rig` — why its SHA is unresolved
+
+**DEFERRED / UNVERIFIED.** No audited SHA can be established for `local-llm-rig`, and none
+is substituted.
+
+Unlike every other source, `local-llm-rig` was **not audited at a frozen point**. It was
+under active development throughout the audit window, receiving at least six commits on
+2026-09-19 while its contents were being referenced. The §2.5 rows therefore describe the
+repository across a moving range, not a single commit.
+
+**Its current HEAD is deliberately not used as a substitute.** Back-filling a HEAD that was
+never the audited state would manufacture evidence, which is precisely the failure this
+document exists to prevent.
+
+**Required before any `local-llm-rig` extraction:** freeze a specific commit, re-verify the
+§2.5 rows against it, and replace this entry with that full SHA. Until then the §2.5 rows
+are directional, not pinned evidence.
+
+### 1.2 `local-llm-rig` is an evidence source, not a runtime dependency
+
+**ARCHITECTURAL DECISION.** `local-llm-rig` is a separate repository that owns the model
+runtime, Modelfiles, benchmarks, refusal probes and hardware evidence.
+
+`personal-ai-core` **does not depend on it at runtime.** It neither imports from it, calls
+into it, nor requires it to be present to run. The relationship is one-directional and
+evidential: the Core cites its measurements as recorded evidence, and adapts specific
+harness scripts into its own `evaluation/` tree. Modelfiles stay in `local-llm-rig`.
 
 `second-brain-kb`, `unified-llm-local` and `code-it` are **one project lineage, not three
 independent systems.** Evidence: both brain repos carry the byte-identical README title
@@ -59,7 +92,7 @@ for this lineage. The other two are reference material. There is no three-way re
 | Rollback | `rollback.py` | 458 | ~796 lines | 0 | **production-worthy** | **ADAPT** | `agent/recovery/` |
 | Protected-path policy | `protected_path_policy.py` | 319 | 368 lines | 0 | strong | **ADAPT** | `agent/policy/` |
 | Path containment | `path_security.py` | 239 | shared | 1 | strong | **ADAPT** | `agent/policy/` |
-| Hybrid retrieval (RRF) | `chunker_v4.py` L460–532 (SQL) | ~70 | **0** | 0 | implemented, unproven | **ADAPT** | `knowledge/retrieval/` |
+| Hybrid retrieval (RRF) | `chunker_v4.py` L460–532 (SQL) | ~70 | **0 — zero RRF tests exist** | 0 | **implemented, unproven** | **ADAPT** | `knowledge/retrieval/` |
 | pgvector + HNSW schema | `chunker_v4.py` L400–458 | ~60 | 0 | 0 | implemented | **ADAPT** | `persistence/migrations/` |
 | Context token budget | `context_builder.py` | 220 | 1 file | 0 | partial | **ADAPT** | `context/budget/` |
 | Chunker | `chunker_v4.py` | 536 | **0** | code-oriented | prototype for our use | **REWRITE** | `knowledge/chunking/` |
@@ -67,6 +100,28 @@ for this lineage. The other two are reference material. There is no three-way re
 | Agent orchestration | `brain_agent_v4.py` | 1260 | 0 | high | reference only | **REWRITE** | architectural reference |
 | Merge gate / merge lock | `merge_gate.py`, `merge_lock.py` | 930 | 409 lines | git workflow | project-specific | **DROP** | — |
 | Reranking | — | — | — | — | **does not exist** | **BUILD** | `knowledge/reranking/` |
+
+**Row 5 — hybrid retrieval is `implemented, unproven`.** Both halves of that phrase are
+load-bearing. The RRF formula, the tsvector lexical arm and the pgvector/HNSW vector arm are
+genuinely implemented in SQL, and the function is genuinely called from the application at
+`brain_agent_v4.py:249` with a documented vector-only fallback. **Zero RRF tests exist**, as
+do zero chunker tests and zero tsvector tests. It works as far as anyone has checked, and
+nobody has checked. It is adapted with tests written first, never promoted on the strength
+of the implementation existing.
+
+**Row 1 — what `ADAPT` means for `tool_security.py`.** Not a copy. The sequence is:
+
+1. **Characterize** — write tests against `tool_security.py` at
+   `21a36b0765d89390eed63da094977e4bb8e5b4c2` pinning its current behaviour.
+2. **Define the Core contract** — the `Tool` protocol, `PolicyEngine` and audit interfaces
+   in `agent/`, owned by this repository and independent of the source's shape.
+3. **Adapt the implementation** — port the command-validation, path-containment and audit
+   logic to satisfy that contract; the source's workspace-scoping model is carried over
+   only where it fits the agent sandbox.
+
+The source module is **not vendored wholesale**. Its ~962 lines of tests are evidence that
+the logic is sound, not a substitute for the Core's own contract tests. The same three-step
+sequence applies to every `ADAPT` row in this document.
 
 ### 2.2 `rag-engine` @ `16f6279`
 
@@ -131,7 +186,14 @@ carries 67 video/media references and uses `cv2.VideoCapture`, `ffmpeg`, `_mean_
 | Bounded automation (`allowed()` → `record()` → `summary()`) | `upload_budget.py` (82) | **REWRITE** (concept) | `agent/policy/` |
 | Everything video-specific | — | **DROP** | — |
 
-### 2.5 `local-llm-rig`
+### 2.5 `local-llm-rig` — **SHA UNRESOLVED**
+
+**DEFERRED / UNVERIFIED.** These rows are **not pinned evidence.** No audited commit could
+be established for this repository (§1.1), so the classifications below are directional and
+must be re-verified against a frozen SHA before any extraction. Size, test and coupling
+columns were not recorded for this source.
+
+`local-llm-rig` is an evidence source, not a runtime dependency of the Core (§1.2).
 
 | Component | Class | Destination |
 |---|---|---|
@@ -228,14 +290,43 @@ Partially verified: `second-brain-kb` and `code-it` were inspected structurally 
 
 ---
 
-## 7. Extraction rules
+## 7. Classification vocabulary
 
-**ARCHITECTURAL DECISION.**
+**ARCHITECTURAL DECISION.** These six terms are the complete vocabulary. No row uses any
+other word.
 
-- **KEEP** — only when implementation *and* tests justify it.
-- **ADAPT** — implementation useful; contracts, storage or runtime assumptions differ.
-- **REWRITE** — only the architectural idea transfers.
-- **DROP** — domain-specific, trivial, or misleading.
+| Class | Meaning | Source code enters the Core? |
+|---|---|---|
+| **KEEP** | Implementation *and* tests justify taking it essentially as-is. | Yes, largely unchanged |
+| **ADAPT** | Implementation is useful, but contracts, storage or runtime assumptions differ. | Yes, reshaped |
+| **MERGE** | Two or more sources cover the same ground; the best parts combine into one component. | Yes, combined |
+| **REWRITE** | Only the architectural idea transfers. The source is read as a reference. | **No** |
+| **DROP** | Domain-specific, trivial, or misleading. Not used at all. | No |
+| **BUILD** | **No source exists.** The subsystem is designed and engineered from nothing. | No — nothing to take |
 
-No component is integrated without characterization tests taken against its recorded SHA
-first. See `ENGINEERING_PLAYBOOK.md`.
+### `REWRITE` vs `BUILD` — not interchangeable
+
+The distinction matters because it changes what the work actually is.
+
+**`REWRITE`** means a source implementation exists and was read. Its architecture, control
+flow or data shape informs the new code, but its code does not transfer. Example: Robin's
+`quality_gate.py` — its structured pass/fail result shape (`QualityGateConfig` /
+`QualityCheck` / `QualityGateResult`) is a good pattern, and every line of it is about
+video frames. We take the shape and write our own.
+
+**`BUILD`** means **no source implementation exists at all**, in any audited repository.
+There is nothing to read, nothing to characterize, no prior art in this ecosystem to
+reference. Example: reranking — absent from every source. Example: the event →
+experience → promotion pipeline — absent from every source.
+
+A `BUILD` item has no characterization step, because there is nothing to characterize. Its
+risk profile is entirely different from `REWRITE`: no existing behaviour constrains it, and
+no existing behaviour validates it. Every `BUILD` subsystem is listed in §4.
+
+### Integration rule
+
+No component classified `KEEP`, `ADAPT` or `MERGE` is integrated without characterization
+tests written first against its **pinned** SHA from §1. Where a source SHA is UNRESOLVED
+(currently `local-llm-rig` — see §1.1), it must be pinned before extraction begins.
+
+See `ENGINEERING_PLAYBOOK.md` for the full chain.

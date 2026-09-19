@@ -27,7 +27,7 @@ DISCOVER → CLASSIFY → FREEZE → CHARACTERIZE → EXTRACT
 | Stage | Means |
 |---|---|
 | DISCOVER | read the implementation, not the filename or the README |
-| CLASSIFY | KEEP / ADAPT / MERGE / REWRITE / DROP, with evidence |
+| CLASSIFY | KEEP / ADAPT / MERGE / REWRITE / DROP / BUILD, with evidence — vocabulary defined in `COMPONENT_EXTRACTION_MATRIX.md` §7 |
 | FREEZE | record the exact source SHA |
 | CHARACTERIZE | tests describing what it *does* today |
 | EXTRACT | copy into the Core's tree |
@@ -35,6 +35,10 @@ DISCOVER → CLASSIFY → FREEZE → CHARACTERIZE → EXTRACT
 | TEST | unit → contract → integration |
 | EVALUATE | against the golden set |
 | PROMOTE | only on evidence |
+
+A **BUILD** item skips DISCOVER, FREEZE and CHARACTERIZE: no source exists, so there is
+nothing to read, pin or pin down. It enters at contract definition and carries a different
+risk profile — no prior behaviour constrains it, and none validates it.
 
 ## 3. Techniques
 
