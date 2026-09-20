@@ -50,7 +50,7 @@ from personal_ai_core.memory.retriever import (
 )
 from personal_ai_core.persistence.memory_store import InMemoryMemoryRepository
 
-SECRET = "postgres://user:hunter2@db.internal:5432/memories"
+SECRET = "CANARY-DO-NOT-LEAK-a7f3e91c"
 SRC = Path(__file__).resolve().parents[2] / "src" / "personal_ai_core"
 
 
@@ -352,8 +352,6 @@ def test_payload_never_carries_raw_exception_data():
 
     assert payload["memory_error"] == "internal"
     assert SECRET not in rendered
-    assert "hunter2" not in rendered
-    assert "db.internal" not in rendered
     assert "connection refused" not in rendered
 
 
