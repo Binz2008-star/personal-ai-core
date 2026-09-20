@@ -6,7 +6,12 @@ projects are separate layers with their own contracts; the model is a replaceabl
 **Status: Phase 4 — Memory-Aware Context Recall ACCEPTED / MERGED (PR #2 — MERGED, main `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`, implementation `e8062ff2fa8b6eb5a4471ac8475f29bed76fd369`).**
 
 Phases:
-- **Phase 1** — HISTORICAL / COMPLETED — core source audit, evidence freeze, extraction matrix (no separate gate; see `docs/PHASE_1_RECONCILIATION.md`)
+- **Phase 0** — HISTORICAL / COMPLETED — core source audit, evidence freeze, extraction matrix (no separate gate; see [`docs/COMPONENT_EXTRACTION_MATRIX.md`](docs/COMPONENT_EXTRACTION_MATRIX.md))
+- **Phase 1** — PARTIAL / NOT COMPLETE — core foundation vertical slice
+  (User → Session → Message → ModelProvider → Response → Event).
+  [`docs/PHASE_1_RECONCILIATION.md`](docs/PHASE_1_RECONCILIATION.md) records that two of its five
+  playbook components are unbuilt. Later phases proceeded on the parts that exist; Phase 1 itself
+  was never closed.
 - **Phase 2** — ACCEPTED (`0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511`)
   Knowledge & context foundations. In-memory contracts, retrieval, budgeting.
   Tests: 389 passed / 14 skipped.
@@ -75,6 +80,10 @@ and hardware evidence. This Core sits above it and consumes its measurements as 
 ## Phase progression
 
 ```
+Phase 0: source audit + evidence freeze + extraction matrix
+         ↓
+Phase 1: core foundation vertical slice        (PARTIAL — never closed)
+         ↓
 Phase 2: knowledge + context foundations
          ↓
 Phase 3: memory domain + promotion + persistence contracts + write path
