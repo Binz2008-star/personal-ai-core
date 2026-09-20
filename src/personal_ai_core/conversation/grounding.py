@@ -118,6 +118,33 @@ def render_evidence(results: Sequence[RetrievalResult]) -> str:
     return "\n\n".join(blocks)
 
 
+def _classify(exc: BaseException) -> MemoryRetrievalError:
+    """Read a failure's classification without trusting the object.
+
+    The conversation layer may not import the memory layer, so a
+    `MemoryRetrievalFailure` cannot be caught by type here and is
+    recognised by its `classification` attribute instead.
+
+    That attribute is read defensively: on a foreign exception it may be
+    absent, or a property that raises. `getattr` with a default only
+    suppresses the first case -- a raising property propagates straight
+    out of the except block and fails the turn with the original message
+    attached. Reading it inside its own guard keeps every path returning a
+    stable value and never the original exception.
+
+    `Exception` rather than `BaseException` is intentional: a
+    `KeyboardInterrupt` or a cancellation is not a recall failure to be
+    swallowed.
+    """
+    try:
+        classification = getattr(exc, "classification", None)
+    except Exception:  # noqa: BLE001 -- a hostile property; nothing to read
+        return MemoryRetrievalError.INTERNAL
+    if isinstance(classification, MemoryRetrievalError):
+        return classification
+    return MemoryRetrievalError.INTERNAL
+
+
 def render_memories(memories: Sequence[MemoryEvidence]) -> str:
     """Render recalled memories with the rule and time that produced them.
 
@@ -272,25 +299,30 @@ class ContextBuilder:
         if self._memory_retriever is None:
             return (), None
 
-        # Imported here rather than at module scope: the exception type lives
-        # in the memory layer, and this layer may only depend on core.
         try:
-            memories = self._memory_retriever.retrieve(
-                MemoryQuery(
-                    session_id=session_id,
-                    text=query,
-                    language=language,
-                    limit=self._limit,
-                )
+            recall_query = MemoryQuery(
+                session_id=session_id,
+                text=query,
+                language=language,
+                limit=self._limit,
             )
+        except ValueError:
+            # The query this layer assembled is not one the contract accepts.
+            # That is a query fault, not an internal one, and classifying it
+            # as INTERNAL would hide a caller bug behind a store failure.
+            return (), MemoryRetrievalError.INVALID_QUERY
+
+        try:
+            # Materialised inside the guard, deliberately. The contract says
+            # `Sequence`, but a foreign retriever may return a lazy iterable:
+            # a generator is not sized, and one that raises mid-iteration
+            # would do so in the assembler -- outside this handler, carrying
+            # its raw message out of the turn. That is exactly the leak this
+            # layer exists to stop, so consumption happens here.
+            memories = tuple(self._memory_retriever.retrieve(recall_query))
             return memories, None
         except Exception as exc:  # noqa: BLE001 -- classified below, never re-raised
-            classification = getattr(exc, "classification", None)
-            if isinstance(classification, MemoryRetrievalError):
-                return (), classification
-            # A third-party retriever that raised something outside this
-            # contract. Classified, never inspected for a message.
-            return (), MemoryRetrievalError.INTERNAL
+            return (), _classify(exc)
 
     def _describe_source(self) -> str:
         source = getattr(self._budget_policy, "source", None)

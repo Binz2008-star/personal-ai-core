@@ -98,13 +98,71 @@ def test_memory_reader_exposes_no_write_surface():
 
 
 def test_a_sealed_store_wrapped_in_a_reader_still_refuses():
-    """The seal survives wrapping; it does not become a silent empty read.
+    """The seal survives wrapping -- at this level.
 
-    Nothing in the composition root wraps a SealedMemoryStore. This pins
-    what happens if anything ever did: a loud refusal, not a quiet zero.
+    Nothing in the composition root wraps a SealedMemoryStore, and
+    `MemoryReader.__init__` accepts any object with the read shape, so
+    this pins what happens if anything ever did.
+
+    It refuses here. It does NOT stay loud further out: `InvariantViolation`
+    is an ordinary `Exception`, so `SimpleMemoryRetriever` catches it as
+    UNAVAILABLE and `ContextBuilder` then degrades the turn. The
+    end-to-end effect of a sealed store on the recall path is every turn
+    running memory-less with `memory_error: "unavailable"` -- visible in
+    the payload, but not an exception anyone sees.
+
+    An earlier version of this docstring claimed the opposite ("a loud
+    refusal, not a quiet zero") and was wrong about the path that matters.
+    `test_a_sealed_store_on_the_recall_path_degrades_visibly` pins the
+    real behaviour.
     """
     reader = MemoryReader(source=SealedMemoryStore())
     with pytest.raises(InvariantViolation, match="Event != Memory"):
         reader.list_active_for_session("s1")
     with pytest.raises(InvariantViolation, match="Event != Memory"):
         reader.read("anything")
+
+
+def test_a_sealed_store_on_the_recall_path_degrades_visibly():
+    """What a sealed store actually does once it reaches the real path.
+
+    Not an exception anyone sees: the turn survives and runs memory-less,
+    reporting UNAVAILABLE. That is the honest description, and it is worth
+    a test because the failure mode is silent-by-design -- a deployment
+    mis-wired this way would recall nothing, forever, while every turn
+    still answered.
+    """
+    from personal_ai_core.context.assembler import HybridContextAssembler
+    from personal_ai_core.context.budget import ReserveBasedBudgetPolicy
+    from personal_ai_core.context.token_estimator import ScriptAwareTokenEstimator
+    from personal_ai_core.conversation.grounding import ContextBuilder
+    from personal_ai_core.core.memory import MemoryRetrievalError
+    from personal_ai_core.memory.retriever import SimpleMemoryRetriever
+
+    class Spec:
+        context_window = 8192
+        name = "boss"
+        provider = "ollama"
+
+    class NoDocuments:
+        def retrieve(self, query):
+            return ()
+
+    estimator = ScriptAwareTokenEstimator()
+    builder = ContextBuilder(
+        retriever=NoDocuments(),
+        assembler=HybridContextAssembler(estimator),
+        budget_policy=ReserveBasedBudgetPolicy(),
+        estimator=estimator,
+        memory_retriever=SimpleMemoryRetriever(
+            reader=MemoryReader(source=SealedMemoryStore())
+        ),
+    )
+
+    grounding = builder.build(
+        session_id="s1", query="anything", language="en", model=Spec(), history=[]
+    )
+
+    assert grounding.memory_error is MemoryRetrievalError.UNAVAILABLE
+    assert grounding.memories_retrieved == 0
+    assert grounding.memory_enabled is True
