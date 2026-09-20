@@ -10,8 +10,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 from personal_ai_core.core.domain import EventType
 from personal_ai_core.core.memory import (
     ExperienceRecord,
@@ -196,13 +194,56 @@ def test_conversation_service_has_no_memory_collaborator_after_phase_3():
     assert not any("memory" in attr.lower() for attr in vars(service))
 
 
-def test_pipeline_does_not_touch_conversation_service_events():
-    """A memory-pipeline run leaves an unrelated conversation event stream alone."""
-    conversation_events = InMemoryEventRepository()
+def test_conversation_turn_emits_no_memory_events_even_on_a_shared_repo():
+    """Structural proof of `Event != Memory` under a shared EventRepository.
+
+    Wires ConversationService and ExperiencePipeline to the SAME
+    InMemoryEventRepository, runs a real conversation turn, and asserts
+    every event that turn produced is a conversation event. If a future
+    change ever routed a memory write through the conversation path, this
+    test would find MEMORY_* in the session's event list.
+
+    A weaker version of this test that hands the pipeline a second,
+    unwired repository could not distinguish a genuinely isolated pipeline
+    from a broken one, so it is deliberately replaced with the shared
+    setup here.
+    """
+    from personal_ai_core.conversation.factory import build_in_memory_service
+
+    def fake_transport(url, payload, timeout):
+        return {
+            "model": payload["model"],
+            "message": {"content": "ok"},
+            "done_reason": "stop",
+        }
+
+    service, events = build_in_memory_service(transport=fake_transport)
+    # The pipeline shares the very same repository the conversation writes
+    # into. This is the setup where a wiring regression would leak.
     pipeline = ExperiencePipeline(
         gate=DefaultPromotionGate(),
         store=InMemoryMemoryRepository(),
-        events=InMemoryEventRepository(),  # separate stream
+        events=events,
     )
-    pipeline.ingest(ExperienceRecord(session_id="s1", text="I prefer Arabic"))
-    assert conversation_events.list_for_session("s1") == ()
+
+    session = service.start_session(service.create_user().id)
+    service.send(session_id=session.id, content="I prefer Arabic replies")
+    service.send(session_id=session.id, content="my name is Roben")
+
+    for event in events.list_for_session(session.id):
+        assert not event.type.value.startswith("memory."), (
+            f"conversation path emitted a memory event: {event.type.value}"
+        )
+
+    # A separate pipeline call on the same shared repository still keeps
+    # its events out of the conversation event stream when nothing wired
+    # ConversationService to the pipeline. This confirms the pipeline can
+    # coexist without the invariant relying on repository separation.
+    pipeline.ingest(ExperienceRecord(
+        session_id="another-session", text="I prefer concise answers"
+    ))
+    # The pipeline's memory events land in the shared repo but under a
+    # different session; the conversation session's stream is unaffected.
+    conversation_stream = events.list_for_session(session.id)
+    for event in conversation_stream:
+        assert not event.type.value.startswith("memory.")

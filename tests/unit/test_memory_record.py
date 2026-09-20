@@ -22,24 +22,35 @@ from personal_ai_core.core.memory import (
 )
 
 
-def _provenance() -> MemoryProvenance:
+def _provenance(session_id: str = "s1") -> MemoryProvenance:
     return MemoryProvenance(
-        session_id="s1", event_id="e1", promoted_by="rule:test"
+        session_id=session_id, event_id="e1", promoted_by="rule:test"
     )
 
 
-def _record(**overrides) -> MemoryRecord:
-    defaults = dict(
-        session_id="s1",
-        type=MemoryType.PREFERENCES,
-        content="prefers Arabic",
-        language="en",
-        provenance=_provenance(),
-        status=MemoryStatus.ACTIVE,
-        confidence=0.9,
+def _record(
+    *,
+    session_id: str = "s1",
+    type: MemoryType = MemoryType.PREFERENCES,
+    content: str = "prefers Arabic",
+    language: str = "en",
+    provenance: MemoryProvenance | None = None,
+    status: MemoryStatus = MemoryStatus.ACTIVE,
+    confidence: float = 0.9,
+    version: int = 1,
+    supersedes: str | None = None,
+) -> MemoryRecord:
+    return MemoryRecord(
+        session_id=session_id,
+        type=type,
+        content=content,
+        language=language,
+        provenance=provenance if provenance is not None else _provenance(session_id),
+        status=status,
+        confidence=confidence,
+        version=version,
+        supersedes=supersedes,
     )
-    defaults.update(overrides)
-    return MemoryRecord(**defaults)
 
 
 def test_memory_record_and_candidate_are_frozen():
@@ -150,3 +161,14 @@ def test_promotion_decision_enum_values_are_stable_strings():
     assert PromotionDecision.PROMOTED.value == "promoted"
     assert PromotionDecision.REJECTED.value == "rejected"
     assert PromotionDecision.HELD.value == "held"
+
+
+def test_record_session_id_must_match_provenance_session_id():
+    # Matching session ids succeed.
+    matched = _record(session_id="s1", provenance=_provenance("s1"))
+    assert matched.session_id == "s1"
+    assert matched.provenance.session_id == "s1"
+
+    # Mismatched session ids raise at construction time.
+    with pytest.raises(ValueError, match="does not match provenance.session_id"):
+        _record(session_id="s1", provenance=_provenance("s-other"))

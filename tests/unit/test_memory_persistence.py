@@ -12,20 +12,33 @@ from personal_ai_core.core.memory import (
 from personal_ai_core.persistence.memory_store import InMemoryMemoryRepository
 
 
-def _record(**overrides) -> MemoryRecord:
-    defaults = dict(
-        session_id="s1",
-        type=MemoryType.PREFERENCES,
-        content="prefers Arabic",
-        language="en",
-        provenance=MemoryProvenance(
-            session_id="s1", event_id="e1", promoted_by="rule:test"
-        ),
-        status=MemoryStatus.ACTIVE,
-        confidence=0.9,
+def _record(
+    *,
+    session_id: str = "s1",
+    type: MemoryType = MemoryType.PREFERENCES,
+    content: str = "prefers Arabic",
+    language: str = "en",
+    provenance: MemoryProvenance | None = None,
+    status: MemoryStatus = MemoryStatus.ACTIVE,
+    confidence: float = 0.9,
+    version: int = 1,
+    supersedes: str | None = None,
+) -> MemoryRecord:
+    if provenance is None:
+        provenance = MemoryProvenance(
+            session_id=session_id, event_id="e1", promoted_by="rule:test"
+        )
+    return MemoryRecord(
+        session_id=session_id,
+        type=type,
+        content=content,
+        language=language,
+        provenance=provenance,
+        status=status,
+        confidence=confidence,
+        version=version,
+        supersedes=supersedes,
     )
-    defaults.update(overrides)
-    return MemoryRecord(**defaults)
 
 
 def test_write_then_read():

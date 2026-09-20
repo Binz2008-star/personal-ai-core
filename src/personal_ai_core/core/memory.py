@@ -134,6 +134,15 @@ class MemoryRecord:
                 "MemoryStatus.REJECTED must not carry a `supersedes` link: "
                 "a rejected candidate replaced nothing"
             )
+        # Provenance carries the session a record came from. The record's
+        # own session_id must agree, or the record and its citation are
+        # about different sessions -- an inconsistency the pipeline never
+        # produces but any direct caller could.
+        if self.provenance.session_id != self.session_id:
+            raise ValueError(
+                f"MemoryRecord.session_id ({self.session_id!r}) does not match "
+                f"provenance.session_id ({self.provenance.session_id!r})"
+            )
 
 
 @dataclass(frozen=True, slots=True)
