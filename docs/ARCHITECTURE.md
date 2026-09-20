@@ -1,8 +1,21 @@
 # Architecture
 
-**Status: Phase 4 — Memory-Aware Context Recall ACCEPTED / MERGED (PR #2 — MERGED: `e8062ff2fa8b6eb5a4471ac8475f29bed76fd369` → main `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`; Phase 3 merged `f090100`, Phase 2 accepted `0a8d798`).**
+**This document describes the TARGET architecture, not the built system.** It was drafted
+during the Phase 0 audit and still states where the Core is going. Most of what it
+describes does not exist yet.
 
-Evidence for every source claim is in [`COMPONENT_EXTRACTION_MATRIX.md`](COMPONENT_EXTRACTION_MATRIX.md). Current accepted state and roadmap: [`PROJECT_STATE.md`](../PROJECT_STATE.md). Phase 4 recall is session-scoped (ADR-009) — ACCEPTED / MERGED.
+**For what is actually built and verified, read [`PROJECT_STATE.md`](../PROJECT_STATE.md).**
+Built through Phase 4: `core/`, `runtime/`, `conversation/`, `memory/`, `knowledge/`,
+`context/`, `persistence/`. Not built: `identity/`, `agent/`, `learning/`, `evaluation/`,
+`projects/`, `api/`, `ui/`. Sections below are labelled accordingly.
+
+Evidence for every source claim is in [`COMPONENT_EXTRACTION_MATRIX.md`](COMPONENT_EXTRACTION_MATRIX.md).
+Phase 4 recall is session-scoped (ADR-009).
+
+A previous edit set this header to "Status: Phase 4 ACCEPTED / MERGED" while leaving the
+body at its Phase 0 content. That turned a design document into an apparent status report
+and made every unbuilt subsystem below read as shipped. The header states the document's
+genre now, because that is what was actually wrong.
 
 ---
 
@@ -60,36 +73,62 @@ Project-specific systems attach at the edge, never inside:
 
 ## 3. Module architecture
 
+**BUILT.** Present in `src/personal_ai_core/`, with the real submodule names:
+
 ```text
-core/          contracts, schemas, errors, config, lifecycle
-runtime/       ollama/, model_registry/, inference/, generation/
+core/          contracts, domain, memory, knowledge, context, config, errors
+runtime/       ollama/ (provider adapter), model_registry.py
+conversation/  service, factory, grounding, events
+memory/        rules, gate, pipeline (write path) · retriever (read path)
+knowledge/     catalog, chunking, embedding, fusion, ingestion, language,
+               lexical_index, retrieval, text, vector_index
+context/       assembler, budget, token_estimator
+persistence/   in_memory, memory_store          (process memory only)
+tests/
+```
+
+**DESIGN TO BUILD.** None of these exist. They are the target, not the state:
+
+```text
 identity/      personality, behavioral contract, response policy
-conversation/  sessions, messages, events
-memory/        working, episodic, semantic, preferences, decisions,
-               lessons, patterns, promotion, storage
-knowledge/     ingestion, parsers, chunking, embeddings, indexing,
-               retrieval, reranking, provenance
-context/       retrieval, ranking, compression, budget
 agent/         planner, executor, tools, policy, verifier, state, recovery
 learning/      events, feedback, experience, analysis, dataset,
                training, evaluation, promotion
 evaluation/    regression, capability, memory, retrieval, agent,
                Arabic, coding, performance
 projects/      registry, connectors, adapters, indexes
-persistence/   migrations, repositories, postgres
-api/  ui/  tests/  scripts/
+api/  ui/  scripts/
 ```
+
+Two corrections worth stating, because both were previously asserted as built and were
+copied out of this file into other documents:
+
+- `persistence/` is **process memory only**. There are no migrations, no repositories
+  layer and no Postgres. Adding any of them requires explicit authorisation — see the
+  hard invariants in `README.md`.
+- `memory/` implements **four** `MemoryType` values — `preferences`, `lessons`,
+  `semantic`, `episodic`. The wider taxonomy in `MEMORY_ARCHITECTURE.md` (`working`,
+  `decisions`, `patterns`) is design, not code: a member is declared only once a rule
+  produces it.
 
 ## 4. Dependency direction
 
 **ARCHITECTURAL DECISION.** Dependencies point inward. The Core depends on abstractions;
 concrete providers depend on the Core.
 
+The principle is **BUILT** and enforced by `test_internal_layering_is_respected`. The
+concrete adapters shown are what exists today:
+
 ```text
-        OllamaProvider ──┐
-    PostgresMemoryStore ─┼──▶  core/contracts  ◀── agent, memory, knowledge
-   OllamaEmbeddingProvider ┘
+             OllamaProvider ──┐
+    InMemoryMemoryRepository ─┼──▶  core/contracts  ◀── memory, knowledge, context
+   HashingEmbeddingProvider ──┘                          conversation
 ```
+
+`HashingEmbeddingProvider` captures surface overlap, not meaning — it is a development
+stand-in, and `EmbeddingProvider.model_id` is what identifies whichever model actually
+ranked a passage (ADR-006). A Postgres-backed store and a real embedding provider are
+**DESIGN TO BUILD**; naming them here previously implied they were wired.
 
 Three consequences, each a direct response to an audited defect:
 
@@ -100,33 +139,47 @@ Three consequences, each a direct response to an audited defect:
 
 ## 5. Runtime flow
 
+**DESIGN TO BUILD**, except where marked. Three of these ten steps exist today; the
+agent loop, the tool policy gate and the learning path have no code at all.
+
 ```text
 USER
  ↓ UNDERSTAND
- ↓ CONTEXT BUILD      (retrieve → rank → dedupe → compress → budget)
+ ↓ CONTEXT BUILD      BUILT — retrieve → recall → merge → budget
  ↓ PLAN
  ↓ POLICY CHECK       (allow / deny / ask)
  ↓ TOOL EXECUTION     (schema, timeout, audit)
  ↓ VERIFY
  ↓ REPAIR / RETRY
- ↓ RESPONSE
- ↓ EVENT              (recorded; not a memory)
+ ↓ RESPONSE           BUILT
+ ↓ EVENT              BUILT — recorded; not a memory
  ↓ LEARNING           (asynchronous, batch, evaluated)
 ```
 
+`CONTEXT BUILD` is built but differs from the sketch: `ContextBuilder` retrieves
+documents, recalls session-scoped memories, and `HybridContextAssembler` merges both
+into one shared token budget. There is no separate compression stage.
+
+The word "policy" does appear in the source — as `ContextBudgetPolicy` and
+`ReserveBasedBudgetPolicy`, which allocate a token budget. That is not the tool policy
+gate described above, and the name collision should not be read as partial coverage.
+
 ## 6. Layer boundaries
 
-**Memory** holds what the system knows about the user and itself. It is written only
-through the promotion pipeline, never directly from a conversation turn. `MEMORY_ARCHITECTURE.md`.
+**Memory** — BUILT. Holds what the system knows about the user and itself. Written only
+through the promotion pipeline, never from a conversation turn: `ExperiencePipeline` is
+the sole writer, and `SealedMemoryStore` on the conversation path refuses every
+operation. Read back through `MemoryReader`, which exposes no write. `MEMORY_ARCHITECTURE.md`.
 
-**Knowledge** holds ingested documents and code, retrieved with provenance.
-Memory never queries a vector store directly; it goes through `RetrievalService`.
+**Knowledge** — BUILT. Holds ingested documents, retrieved with provenance. Retrieval
+goes through the `Retriever` contract (`HybridRetriever` today); no component reaches an
+index directly.
 
-**Agent** plans and acts. Every tool call passes the policy gate and is audited.
-`AGENT_ARCHITECTURE.md`.
+**Agent** — DESIGN TO BUILD. No `agent/` package exists; no planner, executor, verifier
+or tool policy gate has been written. `AGENT_ARCHITECTURE.md` is the target.
 
-**Learning** consumes events and produces candidates. It never modifies model weights
-during a conversation. `LEARNING_ARCHITECTURE.md`.
+**Learning** — DESIGN TO BUILD. No `learning/` package exists. `LEARNING_ARCHITECTURE.md`
+is the target.
 
 **Evaluation** must use the **same** retrieval, context and prompting path as production.
 A separate evaluation pipeline proves nothing about the runtime — a principle carried from
@@ -134,16 +187,38 @@ A separate evaluation pipeline proves nothing about the runtime — a principle 
 
 ## 7. Hard invariants
 
+An invariant nothing enforces is an intention. These are split so the two are not read
+as equally binding.
+
+**ENFORCED** — each has a test that fails if it is broken:
+
 1. `Event != Memory`. Conversations create events; memories are promoted.
+   `test_event_not_memory.py`, plus the sole-writer AST scan in
+   `test_experience_pipeline.py`.
 2. The base model is replaceable and never hard-coded into business logic.
+   `test_no_model_name_literal_in_business_logic`.
+5. Every memory carries provenance, confidence, version and status.
+   `MemoryRecord.__post_init__`, `test_memory_record.py`.
+8. Context is budgeted; the knowledge base is never dumped into a prompt.
+   `test_hybrid_assembler.py::test_token_estimate_never_exceeds_the_budget`.
+
+Also enforced, and worth naming because they are not in the original list: dependency
+direction (`test_internal_layering_is_respected`), no dead enum members
+(`test_enum_producer_guard.py`), and no raw exception data in an event payload
+(`test_payload_never_carries_raw_exception_data`).
+
+**INTENDED — NOT YET ENFORCEABLE.** Nothing tests these because the subsystems they
+constrain do not exist:
+
 3. Memory and knowledge are never baked into model weights.
 4. Normal conversation never modifies weights.
-5. Every memory carries provenance, confidence, version and status.
 6. Every tool has a schema, permission, risk level, timeout and audit record.
+   *(no tools)*
 7. Retrieval preserves provenance to the response.
-8. Context is budgeted; the knowledge base is never dumped into a prompt.
-9. Runtime and evaluation share one grounding path.
-10. Project business logic stays in connectors.
+   *(`RetrievalProvenance` exists and travels into the grounding message; no test asserts
+   it survives all the way to the user-visible response)*
+9. Runtime and evaluation share one grounding path. *(no evaluation harness)*
+10. Project business logic stays in connectors. *(no connectors)*
 
 ## 8. Cross-cutting decisions from the audit
 
