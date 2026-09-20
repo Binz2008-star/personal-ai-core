@@ -8,10 +8,10 @@ message does and does not contain.
 import pytest
 
 from personal_ai_core.context import (
-    GreedyContextAssembler,
     ReserveBasedBudgetPolicy,
     ScriptAwareTokenEstimator,
 )
+from personal_ai_core.context.assembler import HybridContextAssembler
 from personal_ai_core.conversation.grounding import (
     GROUNDING_PREAMBLE,
     ContextBuilder,
@@ -72,7 +72,7 @@ def builder(retriever, *, limit=5, generation_reserve=1024, overhead=256):
     estimator = ScriptAwareTokenEstimator()
     return ContextBuilder(
         retriever=retriever,
-        assembler=GreedyContextAssembler(estimator),
+        assembler=HybridContextAssembler(estimator),
         budget_policy=ReserveBasedBudgetPolicy(
             generation_reserve=generation_reserve, overhead=overhead
         ),
