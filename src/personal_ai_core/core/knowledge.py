@@ -42,7 +42,6 @@ class RetrievalMethod(str, Enum):
 
     VECTOR = "vector"
     LEXICAL = "lexical"
-    FUSED = "fused"
 
 
 # --- source ---------------------------------------------------------------

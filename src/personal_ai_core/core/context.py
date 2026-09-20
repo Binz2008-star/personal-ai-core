@@ -29,9 +29,6 @@ class ExclusionReason(str, Enum):
 
     BUDGET_EXHAUSTED = "budget_exhausted"
     DUPLICATE = "duplicate"
-    BELOW_THRESHOLD = "below_threshold"
-    LANGUAGE_MISMATCH = "language_mismatch"
-    POLICY = "policy"
 
 
 @dataclass(frozen=True, slots=True)

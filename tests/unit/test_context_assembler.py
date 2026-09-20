@@ -39,7 +39,7 @@ def result(chunk):
             chunk_id=chunk.id,
             start=chunk.start,
             end=chunk.end,
-            methods=(RetrievalMethod.FUSED,),
+            methods=(RetrievalMethod.VECTOR,),
         ),
     )
 

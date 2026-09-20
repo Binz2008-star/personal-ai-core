@@ -160,5 +160,7 @@ Real embedding model · persistent index · pgvector or Neon adapter · migratio
 approximate nearest-neighbour search · per-language stemming · identity foundation ·
 memory foundation (both still outstanding from Phase 1, per `PHASE_1_RECONCILIATION.md`).
 
-Audit finding 6 remains open: `RetrievalMethod.FUSED` and three `ExclusionReason` members are
-declared with no producer and no test. Findings 1, 2, 3 and 5 are closed.
+Audit finding 6 closed: `RetrievalMethod.FUSED`, `ExclusionReason.BELOW_THRESHOLD`,
+`ExclusionReason.LANGUAGE_MISMATCH`, and `ExclusionReason.POLICY` were dropped (no producer,
+no test). A regression guard in `tests/unit/test_enum_producer_guard.py` prevents dead
+members from re-accumulating. Findings 1, 2, 3, 5, and 6 are closed.
