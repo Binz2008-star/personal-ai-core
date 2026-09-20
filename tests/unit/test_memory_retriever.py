@@ -31,7 +31,7 @@ from personal_ai_core.memory.retriever import (
 )
 from personal_ai_core.persistence.memory_store import InMemoryMemoryRepository
 
-SECRET = "postgres://user:hunter2@db.internal:5432/memories"
+SECRET = "CANARY-DO-NOT-LEAK-a7f3e91c"
 
 
 def _record(
@@ -235,5 +235,4 @@ def test_failure_carries_only_the_enum():
 
     for rendered in (str(exc), repr(exc), str(exc.args)):
         assert SECRET not in rendered
-        assert "hunter2" not in rendered
-        assert "db.internal" not in rendered
+                
