@@ -9,10 +9,11 @@ the Core's `memory/` subsystem, which does not exist yet (ADR-003).
 """
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from typing import Sequence
 
 from ..core.domain import Event, Message, Session, User
 from ..core.errors import InvariantViolation
+from ..core.memory import MemoryRecord
 
 
 class InMemoryUserRepository:
@@ -70,24 +71,47 @@ class InMemoryEventRepository:
 
 
 class SealedMemoryStore:
-    """A MemoryStore that refuses every write.
+    """A MemoryStore that refuses every operation.
 
-    Phase 1 has no memory subsystem, and no conversation path may create one.
-    This makes that structural instead of aspirational: if any code in the
-    conversation flow ever reaches for memory, it raises here rather than
-    quietly succeeding.
+    The conversation path is given this store rather than the real one so
+    the `Event != Memory` invariant is structural, not aspirational: any
+    memory operation from the conversation flow raises here rather than
+    quietly succeeding (ADR-003).
 
-    `attempted_writes` lets a test assert zero attempts were even made, which
-    is the stronger claim.
+    Every method the `MemoryStore` protocol declares is implemented so the
+    sealed store still satisfies `isinstance(sealed, MemoryStore)` after
+    Phase 3 upgrades the protocol, and its annotations conform to the
+    typed contract. Each method raises before touching its argument, so
+    Python's non-enforcement of annotations means the existing test that
+    passes a dict to `write` still exercises the "loud refusal" path
+    unchanged.
+
+    `attempted_writes` lets a test assert zero attempts were even made,
+    which is the stronger claim than "writes raised."
     """
+
+    _SEAL_MESSAGE = (
+        "Event != Memory: a conversation turn attempted to reach memory "
+        "directly. Memory is written only by the promotion gate. See ADR-003."
+    )
 
     def __init__(self) -> None:
         self.attempted_writes = 0
 
-    def write(self, record: Mapping[str, Any]) -> None:
+    def write(self, record: MemoryRecord) -> MemoryRecord:
+        # Annotation matches the MemoryStore protocol. Python does not
+        # enforce it, so `test_the_sealed_store_refuses_writes_loudly` can
+        # still pass a plain dict here and the raise fires before any
+        # attribute access -- runtime behavior is unchanged, and the
+        # existing behavioral test is byte-for-byte unchanged.
         self.attempted_writes += 1
-        raise InvariantViolation(
-            "Event != Memory: a conversation turn attempted to write memory "
-            "directly. Memory is written only by the promotion gate, which is "
-            "a later phase. See ADR-003."
-        )
+        raise InvariantViolation(self._SEAL_MESSAGE)
+
+    def read(self, memory_id: str) -> MemoryRecord | None:
+        raise InvariantViolation(self._SEAL_MESSAGE)
+
+    def list_active(self) -> Sequence[MemoryRecord]:
+        raise InvariantViolation(self._SEAL_MESSAGE)
+
+    def supersede(self, old_id: str, new_record: MemoryRecord) -> MemoryRecord:
+        raise InvariantViolation(self._SEAL_MESSAGE)

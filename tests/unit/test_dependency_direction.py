@@ -43,6 +43,7 @@ LAYER_MAY_IMPORT = {
     "conversation": {"core"},                       # application -> contracts only
     "knowledge": {"core"},                          # Phase 2 retrieval stack
     "context": {"core"},                            # Phase 2 budgeting
+    "memory": {"core"},                             # Phase 3 promotion pipeline
 }
 COMPOSITION_ROOTS = {"conversation/factory.py"}
 

@@ -38,14 +38,17 @@ class SessionStatus(str, Enum):
 
 
 class EventType(str, Enum):
-    """Conversation events recorded in Phase 1, extended in Phase 2.
-
-    This is not the full learning event taxonomy; Phase 3 extends it further.
+    """Conversation events recorded in Phase 1, extended in Phase 2 and Phase 3.
 
     `CONTEXT_ASSEMBLED` and `RETRIEVAL_FAILED` exist because grounding an
     answer in retrieved evidence is only trustworthy if what was retrieved,
     what was dropped and why are all recoverable afterwards. An answer that
     cites evidence nobody can reconstruct is not grounded, it is decorated.
+
+    The `MEMORY_*` members are emitted by the Phase 3 promotion pipeline and
+    are never produced on the conversation path (ADR-003). Their string
+    values deliberately begin with "memory." so that a leak into the
+    conversation event stream would fail `test_event_not_memory.py`.
     """
 
     SESSION_STARTED = "session.started"
@@ -56,6 +59,9 @@ class EventType(str, Enum):
     GENERATION_COMPLETED = "generation.completed"
     GENERATION_FAILED = "generation.failed"
     SESSION_CLOSED = "session.closed"
+    MEMORY_PROMOTED = "memory.promoted"
+    MEMORY_REJECTED = "memory.rejected"
+    MEMORY_CONFLICT_DETECTED = "memory.conflict.detected"
 
 
 # Language is a Phase 1 field by decision, not a Phase 2 feature: messages are

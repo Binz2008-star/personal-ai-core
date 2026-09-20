@@ -22,6 +22,7 @@ from .knowledge import (
     RetrievalQuery,
     RetrievalResult,
 )
+from .memory import MemoryCandidate, MemoryRecord, PromotionOutcome
 
 
 @runtime_checkable
@@ -118,15 +119,48 @@ class EventRepository(Protocol):
 class MemoryStore(Protocol):
     """Persistent memory.
 
-    Declared in Phase 1 but **not implemented**. It exists here so the
-    `Event != Memory` invariant can be enforced structurally rather than by
-    convention: the conversation path is given a store that refuses writes, and
-    a test asserts the path never attempts one.
+    Two implementations coexist by design:
 
-    Phase 3 supplies a real implementation behind the promotion gate.
+    - `SealedMemoryStore` sits on the conversation path and raises on every
+      write. Its structural presence enforces the `Event != Memory`
+      invariant: a conversation turn that reaches for memory raises rather
+      than quietly succeeds (ADR-003).
+    - The real repository, written in Phase 3, sits behind the promotion
+      gate and is the only path through which a `MemoryRecord` reaches
+      durable storage.
+
+    Supersede is non-destructive: the old record is retained with
+    `status=SUPERSEDED` and linked from the new record. A deletion would
+    make the audit trail unrecoverable.
     """
 
-    def write(self, record: Mapping[str, Any]) -> None: ...
+    def write(self, record: MemoryRecord) -> MemoryRecord: ...
+
+    def read(self, memory_id: str) -> MemoryRecord | None: ...
+
+    def list_active(self) -> Sequence[MemoryRecord]: ...
+
+    def supersede(self, old_id: str, new_record: MemoryRecord) -> MemoryRecord: ...
+
+
+@runtime_checkable
+class PromotionGate(Protocol):
+    """Decides whether a candidate becomes a memory.
+
+    A pure function: `evaluate` never writes, never emits events and never
+    calls back into the pipeline. The gate's only job is to say
+    promoted / rejected / held; the pipeline acts on that decision.
+
+    A held decision is the conflict outcome: the candidate contradicts an
+    active record and the gate refuses to silently overwrite. The pipeline
+    records the conflict and hands the resolution to a later phase.
+    """
+
+    def evaluate(
+        self,
+        candidate: MemoryCandidate,
+        active: Sequence[MemoryRecord],
+    ) -> PromotionOutcome: ...
 
 
 # --- Phase 2 knowledge contracts ------------------------------------------
