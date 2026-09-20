@@ -15,14 +15,22 @@ Test verification (remote):
 - Phase 4: 494 passed / 14 skipped
 - pyright: 0 errors
 
-Local worktree: governance commit 80f0a8a (ahead of origin/main by 1)
 Synchronization: origin/main is at bbbf4c3 (Phase 4 merged)
 
 PHASE STATUS SUMMARY
 --------------------
-Phase 1 — HISTORICAL / COMPLETED
-  Scope: Core source audit, evidence freeze, component extraction matrix (Phase 0)
-  Note: Historical foundation; no separate acceptance gate — see docs/PHASE_1_RECONCILIATION.md and ec04071
+Phase 0 — HISTORICAL / COMPLETED
+  Scope: Core source audit, evidence freeze, component extraction matrix
+  Note: Historical foundation; no separate acceptance gate.
+        Evidence: docs/COMPONENT_EXTRACTION_MATRIX.md
+
+Phase 1 — PARTIAL / NOT COMPLETE
+  Scope: Core foundation vertical slice —
+         User → Session → Message → ModelProvider → Response → Event
+  Status: docs/PHASE_1_RECONCILIATION.md states two of the five playbook
+          components defined for Phase 1 are unbuilt. Phase 1 is therefore
+          NOT complete, and must not be summarised as completed.
+  Evidence: docs/PHASE_1_VERTICAL_SLICE.md, docs/PHASE_1_RECONCILIATION.md
 
 Phase 2 — ACCEPTED
   Commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511 (short: 0a8d798)
@@ -76,7 +84,9 @@ HARD ARCHITECTURAL INVARIANTS
 
 4. No dead RetrievalMethod or ExclusionReason members.
    Every declared member must have a producer in src/.
-   Enforced by test_enum_producer_guard.py (17 mutations killed, 0 survived).
+   Enforced by test_enum_producer_guard.py.
+   No mutation testing is configured in this project, so no mutation score
+   is claimed here.
 
 5. SealedMemoryStore remains sealed until explicit authorization.
    Refuses all write attempts with InvariantViolation("Event != Memory").
@@ -124,38 +134,57 @@ Core
   → contracts, schemas, errors, config, lifecycle
   → hard invariants enforced by tests
 Runtime
-  → ollama/, model_registry/, inference/, generation/
+  → ollama/ (provider adapter), model_registry.py
   → Boss model configuration only
 Conversation
   → sessions, messages, events
   → optional grounding (ContextBuilder injected)
   → EventRecorder only — never writes memory
 Knowledge
-  → ingestion, parsers, chunking, embeddings, indexing, retrieval, reranking, provenance
+  → catalog, chunking, embedding, fusion, ingestion, language,
+    lexical_index, retrieval, text, vector_index
   → all in-memory implementations behind core.contracts protocols
   → HashingEmbeddingProvider, InMemoryVectorIndex, InMemoryLexicalIndex, HybridRetriever, RRF
 Context
-  → retrieval, ranking, compression, budget
+  → assembler, budget, token_estimator
   → ReserveBasedBudgetPolicy, GreedyContextAssembler, ScriptAwareTokenEstimator
   → budget derives from active model in registry (ADR-005)
 
 Phase 3 (implemented & merged, f44de80 + ac41d27):
 Memory
-  → domain types (MemoryRecord, MemoryProvenance, Experience, Candidate, PromotionDecision)
-  → ExperiencePipeline (extracts candidates from events)
-  → PromotionGate (decides promotion)
-  → MemoryStore protocol + InMemoryMemoryStore implementation
-  → Persistence contracts (MemoryRepository, MemoryReader)
+  → domain types (MemoryRecord, MemoryProvenance, MemoryStatus, MemoryType,
+    ExperienceRecord, MemoryCandidate, PromotionDecision, PromotionOutcome)
+  → extraction rules (memory/rules.py) propose MemoryCandidate from an
+    ExperienceRecord — NOT from the event stream
+  → DefaultPromotionGate (pure decision: promoted / rejected / held)
+  → ExperiencePipeline — the SOLE writer to MemoryStore; it materialises a
+    MemoryRecord from the gate's decision and emits MEMORY_* events
+  → MemoryStore protocol + InMemoryMemoryRepository implementation
   → Event != Memory enforced: SealedMemoryStore remains on conversation path
 
 Phase 4 (implemented, e8062ff, PR #2):
 Memory Read/Recall
-  → MemoryReader protocol + InMemoryMemoryReader implementation
+  → MemoryReader — a NOMINAL CLASS in core/memory.py, deliberately NOT a
+    Protocol. A Protocol would be structurally satisfied by
+    SealedMemoryStore (same method names, raises on both), which would make
+    the boundary a convention rather than a type. Guarded by
+    test_memory_reader_is_a_class_not_a_protocol.
+    It exposes only read() and list_active_for_session(); no write, no
+    supersede. The session filter lives inside the read contract.
+  → SimpleMemoryRetriever (memory/retriever.py) — ranks memories for one
+    turn. It does NOT build hybrid context.
+  → HybridContextAssembler (context/assembler.py) — merges documents and
+    memories under ONE shared token budget, neither source privileged.
+    Document rank is the retriever's 1-based output position, not
+    provenance.ranks (per-arm, pre-fusion) and not fused_score.
   → session-scoped recall (ADR-009)
-  → MemoryRetriever (hybrid document/memory context)
-  → shared token budget across knowledge + memory
-  → Grounding integration (memory_enabled flag)
-  → degraded failure behavior (MemoryRetrievalError → fallback to knowledge-only)
+  → Grounding integration: memory_enabled is CONFIGURATION, not outcome —
+    true whenever a retriever is wired, including when recall returns
+    nothing or fails
+  → degraded failure behaviour: MemoryRetrievalError is a stable
+    classification (unavailable / invalid_query / internal); the turn
+    continues with documents only and never raises. Raw exception text
+    never reaches the event payload.
 
 Explicitly distinguished:
 - Event → conversation/event path (append-only evidence)
