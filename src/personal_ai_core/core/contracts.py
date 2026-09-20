@@ -11,7 +11,12 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
-from .context import BudgetedContext, ContextAllocation, ContextBudget
+from .context import (
+    BudgetedContext,
+    ContextAllocation,
+    ContextBudget,
+    HybridBudgetedContext,
+)
 from .domain import Event, Message, ModelResponse, Session, User
 from .knowledge import (
     CandidateList,
@@ -22,7 +27,13 @@ from .knowledge import (
     RetrievalQuery,
     RetrievalResult,
 )
-from .memory import MemoryCandidate, MemoryRecord, PromotionOutcome
+from .memory import (
+    MemoryCandidate,
+    MemoryEvidence,
+    MemoryQuery,
+    MemoryRecord,
+    PromotionOutcome,
+)
 
 
 @runtime_checkable
@@ -161,6 +172,28 @@ class PromotionGate(Protocol):
         candidate: MemoryCandidate,
         active: Sequence[MemoryRecord],
     ) -> PromotionOutcome: ...
+
+
+@runtime_checkable
+class MemoryRetriever(Protocol):
+    """Ranks stored memories for one turn's recall.
+
+    The read-side counterpart to `MemoryStore`, and deliberately a separate
+    contract: recall needs ranking and a query, which a store has no reason
+    to know about, and a store needs writes, which recall must never reach.
+
+    An implementation must scope by `MemoryQuery.session_id` as a hard
+    filter, treat `language` as a ranking signal only, and be
+    deterministic -- the same query against the same records produces the
+    same order, or the same turn stops being reproducible.
+
+    Failure is raised as `MemoryRetrievalFailure`, which carries only a
+    `MemoryRetrievalError` classification. Recall is enrichment, so the
+    grounding path degrades rather than failing the turn; that is only
+    safe if the failure is classified rather than free-form.
+    """
+
+    def retrieve(self, query: MemoryQuery) -> Sequence[MemoryEvidence]: ...
 
 
 # --- Phase 2 knowledge contracts ------------------------------------------
@@ -337,3 +370,23 @@ class ContextAssembler(Protocol):
     def assemble(
         self, results: Sequence[RetrievalResult], *, budget: ContextBudget
     ) -> BudgetedContext: ...
+
+
+@runtime_checkable
+class HybridContextAssembler(Protocol):
+    """Fits documents and recalled memories into one shared budget.
+
+    A separate contract from `ContextAssembler` rather than a widening of
+    it, because the two return different things and an implementation of
+    one is not a drop-in for the other. Keeping both declared lets a
+    deployment run without recall at all -- the Phase 2 path stays exactly
+    as it was rather than becoming a special case of the Phase 4 one.
+    """
+
+    def assemble(
+        self,
+        *,
+        results: Sequence[RetrievalResult],
+        memories: Sequence[MemoryEvidence],
+        budget: ContextBudget,
+    ) -> HybridBudgetedContext: ...

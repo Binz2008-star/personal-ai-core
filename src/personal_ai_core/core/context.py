@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .knowledge import RetrievalResult
+from .memory import MemoryEvidence
 
 
 class ExclusionReason(str, Enum):
@@ -133,3 +134,74 @@ class BudgetedContext:
     @property
     def dropped_count(self) -> int:
         return len(self.excluded)
+
+
+# --- Phase 4: documents and memories under one budget ----------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ExcludedMemory:
+    """A recalled memory that was not included, and why.
+
+    Reuses `ExclusionReason`. A memory is dropped for the same two reasons
+    a passage is -- the budget ran out, or it duplicates something already
+    selected -- and inventing parallel reasons would make the two halves of
+    one context report the same event under different names.
+    """
+
+    evidence: MemoryEvidence
+    reason: ExclusionReason
+    token_cost: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HybridBudgetedContext:
+    """Documents and memories fitted into one shared budget.
+
+    Composition, not inheritance. `document_context` is an ordinary
+    `BudgetedContext` and still means exactly what it meant in Phase 2:
+    which passages were selected, which were dropped, and how many tokens
+    the passages cost. Subclassing it would have quietly redefined
+    `token_estimate` for every existing reader of that type.
+
+    The two halves are tracked separately and summed here, so
+    "how much did evidence cost" and "how much did memory cost" remain
+    separately answerable after the fact.
+    """
+
+    document_context: BudgetedContext
+    selected_memories: tuple[MemoryEvidence, ...] = ()
+    excluded_memories: tuple[ExcludedMemory, ...] = ()
+    memory_token_estimate: int = 0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "selected_memories", tuple(self.selected_memories))
+        object.__setattr__(self, "excluded_memories", tuple(self.excluded_memories))
+        if self.memory_token_estimate < 0:
+            raise ValueError("memory_token_estimate must be non-negative")
+
+    @property
+    def token_estimate(self) -> int:
+        """Tokens spent across both sources.
+
+        Equal by construction to the assembler's cumulative counter: both
+        halves drew from one budget, so the total is what that budget saw.
+        """
+        return self.document_context.token_estimate + self.memory_token_estimate
+
+    @property
+    def budget(self) -> ContextBudget:
+        """The one budget both sources competed for."""
+        return self.document_context.budget
+
+    @property
+    def within_budget(self) -> bool:
+        return self.token_estimate <= self.budget.available_tokens
+
+    @property
+    def memories_used(self) -> int:
+        return len(self.selected_memories)
+
+    @property
+    def memories_dropped(self) -> int:
+        return len(self.excluded_memories)

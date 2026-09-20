@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol, Sequence
 
 from .domain import new_id, utcnow
 
@@ -205,3 +205,115 @@ class PromotionOutcome:
     reason: str
     conflicts_with: str | None = None
     memory_id: str | None = None
+
+
+# --- Phase 4: recall -------------------------------------------------------
+#
+# Reading memory is not writing memory. Everything below is read-only by
+# construction: no type here can reach `MemoryStore.write`, and the reader
+# is a nominal class rather than a Protocol precisely so a write-capable or
+# write-refusing store cannot be substituted for it structurally.
+
+
+class MemoryRetrievalError(str, Enum):
+    """Stable classification of a memory-retrieval failure.
+
+    These values travel into event payloads, so they are part of the
+    contract: an exception message, stack trace, URL, provider name or
+    connection string must never be substituted for one. A payload that
+    carries whatever the store happened to say is a payload nobody can
+    safely log.
+
+    Each member has exactly one producer region in `SimpleMemoryRetriever`,
+    and no member is reachable from more than one.
+    """
+
+    UNAVAILABLE = "unavailable"
+    INVALID_QUERY = "invalid_query"
+    INTERNAL = "internal"
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryQuery:
+    """One turn's recall request.
+
+    `session_id` is a hard filter, applied at the reader boundary so no
+    caller can widen it. `language` is a ranking signal only: dropping a
+    memory because the current turn is in another language would discard a
+    preference the user actually stated.
+
+    Validation here covers only what this type can know. A blank `text` or
+    an unbounded `limit` are the retriever's constraints, not the query's,
+    and are classified `INVALID_QUERY` there.
+    """
+
+    session_id: str
+    text: str
+    language: str
+    limit: int = 5
+
+    def __post_init__(self) -> None:
+        if not self.session_id:
+            raise ValueError("MemoryQuery.session_id must be non-empty")
+        if self.limit < 1:
+            raise ValueError(f"MemoryQuery.limit must be >= 1, got {self.limit}")
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryEvidence:
+    """A memory ranked for one recall turn.
+
+    `relevance` is the ranker's judgement for this query, deliberately
+    distinct from `record.confidence`, which is how sure the promotion gate
+    was that the claim is true. A certain memory can be irrelevant here.
+    """
+
+    record: MemoryRecord
+    relevance: float
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.relevance <= 1.0:
+            raise ValueError(
+                f"MemoryEvidence.relevance out of range: {self.relevance!r}"
+            )
+
+
+class _ReadableStore(Protocol):
+    """The read slice `MemoryReader` delegates to.
+
+    Declared here rather than imported from `core.contracts` because
+    `contracts` imports this module; naming the shape locally keeps the
+    dependency one-way.
+    """
+
+    def read(self, memory_id: str) -> "MemoryRecord | None": ...
+
+    def list_active(self) -> Sequence["MemoryRecord"]: ...
+
+
+class MemoryReader:
+    """A read-only view over a memory repository.
+
+    A class, not a Protocol, and that is the whole point. A Protocol would
+    be satisfied by `SealedMemoryStore` -- which has both method names and
+    raises on both -- leaving "this object is technically a reader but must
+    never be used as one" as a rule enforced by comment. Nominal typing
+    makes the boundary structural instead: a reader is something that was
+    deliberately constructed as one.
+
+    `list_active_for_session` folds the session filter into the read
+    contract so a caller cannot forget it.
+    """
+
+    def __init__(self, source: _ReadableStore) -> None:
+        self._source = source
+
+    def read(self, memory_id: str) -> MemoryRecord | None:
+        return self._source.read(memory_id)
+
+    def list_active_for_session(self, session_id: str) -> Sequence[MemoryRecord]:
+        return tuple(
+            record
+            for record in self._source.list_active()
+            if record.session_id == session_id
+        )

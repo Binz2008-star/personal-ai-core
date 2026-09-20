@@ -13,11 +13,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..context import (
-    GreedyContextAssembler,
     ReserveBasedBudgetPolicy,
     ScriptAwareTokenEstimator,
 )
+from ..context.assembler import HybridContextAssembler
 from ..core.config import Settings
+from ..core.memory import MemoryReader
+from ..memory.retriever import SimpleMemoryRetriever
+from ..persistence.memory_store import InMemoryMemoryRepository
 from ..knowledge import (
     FixedSizeChunker,
     HashingEmbeddingProvider,
@@ -86,6 +89,12 @@ class GroundedSlice:
     catalog: InMemoryChunkCatalog
     vector_index: InMemoryVectorIndex
     lexical_index: InMemoryLexicalIndex
+    # Present only when `enable_memory=True`. Handed back for the same
+    # reason the indexes are: a recall path whose stored state cannot be
+    # inspected cannot be debugged. The repository is the write side and is
+    # reachable only by a caller that also builds an ExperiencePipeline --
+    # the conversation path never sees it.
+    memories: InMemoryMemoryRepository | None = None
 
 
 def build_grounded_in_memory_service(
@@ -93,6 +102,7 @@ def build_grounded_in_memory_service(
     *,
     transport: Transport | None = None,
     evidence_limit: int = 5,
+    enable_memory: bool = False,
 ) -> GroundedSlice:
     """Build the slice with retrieval wired in.
 
@@ -127,6 +137,22 @@ def build_grounded_in_memory_service(
         catalog=catalog,
     )
     estimator = ScriptAwareTokenEstimator()
+
+    # Recall is opt-in. When it is off, no repository exists and no reader
+    # is constructed, so there is nothing for the conversation path to
+    # reach even by accident.
+    memories: InMemoryMemoryRepository | None = None
+    memory_retriever = None
+    if enable_memory:
+        memories = InMemoryMemoryRepository()
+        # The reader is wrapped here, in the composition root, and only
+        # around a real repository. A SealedMemoryStore is never wrapped:
+        # the seal belongs on the write path, and recall reaches a
+        # different object entirely.
+        memory_retriever = SimpleMemoryRetriever(
+            reader=MemoryReader(source=memories)
+        )
+
     context_builder = ContextBuilder(
         retriever=HybridRetriever(
             embedder=embedder,
@@ -134,9 +160,10 @@ def build_grounded_in_memory_service(
             lexical_index=lexical_index,
             catalog=catalog,
         ),
-        assembler=GreedyContextAssembler(estimator),
+        assembler=HybridContextAssembler(estimator),
         budget_policy=ReserveBasedBudgetPolicy(),
         estimator=estimator,
+        memory_retriever=memory_retriever,
         limit=evidence_limit,
     )
 
@@ -157,4 +184,5 @@ def build_grounded_in_memory_service(
         catalog=catalog,
         vector_index=vector_index,
         lexical_index=lexical_index,
+        memories=memories,
     )
