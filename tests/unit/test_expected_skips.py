@@ -83,12 +83,20 @@ def skips() -> list[str]:
     return _skip_report()
 
 
-def test_every_skip_comes_from_an_accounted_for_file(skips):
-    unexpected = [
+def _unaccounted_for(lines: list[str]) -> list[str]:
+    return [
         line
-        for line in skips
-        if not any(source in line for source in ALLOWED_SKIP_SOURCES)
+        for line in lines
+        if not any(source in _normalize(line) for source in ALLOWED_SKIP_SOURCES)
     ]
+
+
+def _re_entries(lines: list[str]) -> list[str]:
+    return [line for line in lines if SELF in _normalize(line)]
+
+
+def test_every_skip_comes_from_an_accounted_for_file(skips):
+    unexpected = _unaccounted_for(skips)
     assert not unexpected, (
         "tests are being skipped from files with no recorded reason to skip. "
         "A skip reads like a pass in every summary line, so each one has to be "
@@ -121,7 +129,32 @@ def test_the_audit_does_not_re_enter_itself(skips):
     If this file ever appears in its own child run, the subprocess is
     collecting the test that spawned it.
     """
-    assert all(SELF not in line for line in skips)
+    assert not _re_entries(skips)
+
+
+def _normalize(line: str) -> str:
+    """Render a SKIPPED line with one path separator, whatever the platform.
+
+    pytest prints skip locations with the *native* separator, so on Windows
+    the lines read `tests\\unit\\test_dependency_direction.py:148: ...`. Every
+    path constant in this file is written with `/`, so a plain `in` test
+    matched nothing there.
+
+    The consequence was not a cosmetic one. Two checks in this file are
+    substring tests against those constants, and both failed open or closed
+    in the wrong direction on Windows:
+
+      - the allowed-sources check matched no source, so every legitimate
+        exemption read as an unaccounted-for skip and the gate failed;
+      - the fork-bomb canary looked for `tests/unit/test_expected_skips.py`
+        in lines that could only ever say `tests\\unit\\...`, so it could
+        never fire. The guard most worth having was the one that had
+        quietly stopped working.
+
+    Normalizing at the single point where lines enter the assertions fixes
+    both, and is a no-op on any platform whose separator is already `/`.
+    """
+    return line.replace("\\", "/")
 
 
 def _count(line: str) -> int:
@@ -132,3 +165,54 @@ def _count(line: str) -> int:
         except ValueError:
             return 1
     return 1
+
+
+# --- The matchers themselves, on both platforms' output ------------------
+#
+# The suite above can only ever observe this platform. These drive the two
+# matchers directly with the line shapes pytest emits on each, which is the
+# only way a Linux-only CI can hold the Windows behaviour.
+
+WINDOWS_EXEMPT = (
+    "SKIPPED [1] tests\\unit\\test_dependency_direction.py:148: "
+    "composition root may wire concrete adapters"
+)
+POSIX_EXEMPT = (
+    "SKIPPED [1] tests/unit/test_dependency_direction.py:148: "
+    "composition root may wire concrete adapters"
+)
+
+
+def test_an_exempt_skip_is_recognized_with_either_separator():
+    """The gate must not fire on a legitimate exemption on Windows.
+
+    Before the fix this returned the line as unaccounted-for, which is the
+    tracked 389-vs-388 discrepancy: the check failed rather than skipped.
+    """
+    assert _unaccounted_for([POSIX_EXEMPT]) == []
+    assert _unaccounted_for([WINDOWS_EXEMPT]) == []
+
+
+def test_a_genuinely_unaccounted_skip_is_still_caught_with_either_separator():
+    """Normalizing must not have turned the gate into a rubber stamp."""
+    posix = "SKIPPED [1] tests/unit/test_something_new.py:12: because"
+    windows = "SKIPPED [1] tests\\unit\\test_something_new.py:12: because"
+    assert _unaccounted_for([posix]) == [posix]
+    assert _unaccounted_for([windows]) == [windows]
+
+
+def test_the_fork_bomb_canary_fires_with_either_separator():
+    """The guard that had silently stopped working on Windows.
+
+    `SELF` is written with `/`, so a Windows line naming this very file
+    could never match it -- the canary was inert on exactly the platform
+    where nobody would notice until the fork bomb ran.
+    """
+    posix = f"SKIPPED [1] {SELF}:60: nested run"
+    windows = "SKIPPED [1] tests\\unit\\test_expected_skips.py:60: nested run"
+    assert _re_entries([posix]) == [posix]
+    assert _re_entries([windows]) == [windows]
+
+
+def test_the_canary_does_not_fire_on_an_unrelated_file():
+    assert _re_entries([POSIX_EXEMPT, WINDOWS_EXEMPT]) == []
