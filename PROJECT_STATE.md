@@ -275,8 +275,7 @@ Those belong to later explicitly authorized work unless separately authorized.
 OPEN ITEMS
 ==========
 
-1. Resolve test-count accounting discrepancy on Windows (path-separator bug in skip accounting).
-2. ScriptAwareTokenEstimator calibration remains unverified where tokenizer infrastructure is unavailable.
+1. ScriptAwareTokenEstimator calibration remains unverified where tokenizer infrastructure is unavailable.
 
 Do not turn these open items into unauthorized implementation.
 
@@ -305,7 +304,9 @@ Do NOT push.
 
 Gaps verified:
 - Boss model test gap: no mechanical CI pin beyond code literal check (tracked)
-- Test-count discrepancy: 389 vs 388 passed on Windows (path-separator bug in skip accounting)
+- Test-count discrepancy on Windows (path-separator bug in skip accounting): FIXED -- the two
+  substring matchers in tests/unit/test_expected_skips.py now normalize the separator, and four
+  tests drive them with both platforms' line shapes so Linux-only CI holds the Windows behaviour.
 - ScriptAwareTokenEstimator calibration: unverified without tokenizer infrastructure
 
 TRACEABILITY
