@@ -1,8 +1,8 @@
 # Architecture
 
-**Status: Phase 0 — Core Source Audit: sufficiently verified for architecture drafting.**
+**Status: Phase 4 — Memory-Aware Context Recall ACCEPTED / MERGED (PR #2 — MERGED: `e8062ff2fa8b6eb5a4471ac8475f29bed76fd369` → main `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`; Phase 3 merged `f090100`, Phase 2 accepted `0a8d798`).**
 
-Evidence for every source claim is in [`COMPONENT_EXTRACTION_MATRIX.md`](COMPONENT_EXTRACTION_MATRIX.md).
+Evidence for every source claim is in [`COMPONENT_EXTRACTION_MATRIX.md`](COMPONENT_EXTRACTION_MATRIX.md). Current accepted state and roadmap: [`PROJECT_STATE.md`](../PROJECT_STATE.md). Phase 4 recall is session-scoped (ADR-009) — ACCEPTED / MERGED.
 
 ---
 
