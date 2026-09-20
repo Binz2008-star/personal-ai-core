@@ -30,7 +30,7 @@ def test_event_payload_cannot_be_mutated_after_recording():
     payload = {"model": "x"}
     event = Event(session_id="s", type=EventType.GENERATION_REQUESTED, payload=payload)
     with pytest.raises(TypeError):
-        event.payload["model"] = "y"
+        event.payload["model"] = "y"  # type: ignore[index]  # the point
     # mutating the caller's dict must not reach the recorded event
     payload["model"] = "z"
     assert event.payload["model"] == "x"

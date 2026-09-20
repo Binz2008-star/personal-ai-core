@@ -47,7 +47,7 @@ def test_mappings_cannot_be_mutated_after_construction():
     meta = {"k": "v"}
     doc = Document(source_uri="file://x", metadata=meta)
     with pytest.raises(TypeError):
-        doc.metadata["k"] = "other"
+        doc.metadata["k"] = "other"  # type: ignore[index]  # the point
     meta["k"] = "changed"
     assert doc.metadata["k"] == "v"
 
@@ -199,7 +199,7 @@ def test_provenance_is_a_type_not_a_metadata_dict():
     )
     assert not isinstance(prov, dict)
     with pytest.raises(TypeError):
-        prov.ranks[RetrievalMethod.VECTOR] = 1
+        prov.ranks[RetrievalMethod.VECTOR] = 1  # type: ignore[index]  # the point
 
 
 def test_result_rejects_provenance_for_a_different_chunk():

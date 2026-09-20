@@ -20,9 +20,7 @@ from personal_ai_core.core.knowledge import (
     DocumentVersion,
     Embedding,
     RetrievalMethod,
-    RetrievalProvenance,
     RetrievalQuery,
-    RetrievalResult,
 )
 
 
