@@ -391,3 +391,85 @@ def test_conversation_service_never_receives_a_memory_store():
     assert not offenders, (
         "ConversationService was handed a memory collaborator: " + str(offenders)
     )
+
+
+# --- recall failure must never escape the turn ------------------------------
+#
+# Each of these was a real escape found by an independent review of the
+# shipped Phase 4 code. The guard in `_recall` wrapped only the `retrieve()`
+# call, so anything that failed after it -- or while reading the failure --
+# left the classification boundary carrying its original message.
+
+
+class GeneratorRetriever:
+    """Returns a lazy iterable rather than a Sequence.
+
+    A contract violation, but a natural one: `def retrieve(...): yield ...`
+    is ordinary Python. The call itself does not raise, so the old guard
+    passed and the generator failed later, outside it.
+    """
+
+    def retrieve(self, query):
+        yield from ()
+
+
+class LateFailingGeneratorRetriever:
+    """Raises during iteration, not during the call."""
+
+    def retrieve(self, query):
+        if False:  # pragma: no cover - makes this a generator function
+            yield
+        raise RuntimeError(f"late failure: {SECRET}")
+
+
+class HostileClassificationRetriever:
+    """Raises an exception whose `classification` is a property that raises.
+
+    `getattr(exc, "classification", None)` suppresses only AttributeError,
+    so reading it re-raised and took the turn down.
+    """
+
+    class _Hostile(Exception):
+        @property
+        def classification(self):
+            raise RuntimeError(f"hostile property: {SECRET}")
+
+    def retrieve(self, query):
+        raise self._Hostile()
+
+
+def test_a_lazy_retriever_does_not_fail_the_turn():
+    grounding = build(builder(memory_retriever=GeneratorRetriever()))
+    assert grounding.memory_error is None
+    assert grounding.memories_retrieved == 0
+
+
+def test_a_retriever_failing_during_iteration_is_classified_not_raised():
+    grounding = build(builder(memory_retriever=LateFailingGeneratorRetriever()))
+    assert grounding.memory_error is MemoryRetrievalError.INTERNAL
+
+
+def test_a_hostile_classification_property_is_classified_not_raised():
+    grounding = build(builder(memory_retriever=HostileClassificationRetriever()))
+    assert grounding.memory_error is MemoryRetrievalError.INTERNAL
+
+
+def test_no_escaping_failure_leaks_its_message_into_the_payload():
+    """The point of classifying at all: the original text must not travel."""
+    for retriever in (
+        LateFailingGeneratorRetriever(),
+        HostileClassificationRetriever(),
+    ):
+        grounding = build(builder(memory_retriever=retriever))
+        rendered = repr(summarize(grounding))
+        assert SECRET not in rendered, f"{type(retriever).__name__} leaked"
+        assert "late failure" not in rendered
+        assert "hostile property" not in rendered
+
+
+def test_an_unbuildable_query_is_invalid_query_not_internal():
+    """A query fault is the caller's, and must not read as a store failure."""
+    grounding = builder(memory_retriever=GeneratorRetriever()).build(
+        session_id="", query="q", language="en", model=Spec(), history=[]
+    )
+    assert grounding.memory_error is MemoryRetrievalError.INVALID_QUERY

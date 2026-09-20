@@ -96,12 +96,23 @@ class GreedyContextAssembler:
 class HybridContextAssembler:
     """Fits documents and recalled memories into one shared budget.
 
-    Neither source is privileged. A document's rank and a memory's
-    relevance are normalized onto one scale, merged, and spent against a
-    single cumulative counter. Giving memory precedence would have been a
-    policy decision smuggled in as an implementation detail: a
-    low-relevance memory would then evict a high-relevance passage without
-    anyone having chosen that.
+    No source is given precedence *by rule*: both stream into one sort and
+    spend from one cumulative counter, and nothing checks the source type
+    when deciding what fits.
+
+    The two scores are not, however, on a calibrated common scale, and the
+    earlier wording here claimed they were. A document at output position
+    `r` scores `1/r`; a memory carries its ranker's relevance. So rank 1
+    scores 1.0 and always wins a contested slot, while rank 2 scores 0.5
+    and loses to any memory above it -- and `SimpleMemoryRetriever`
+    routinely produces 0.5-0.85. Under a tight budget, memories can
+    therefore displace documents ranked 2 and below.
+
+    That behaviour is defensible: a stated preference often should outrank
+    the fifth-best passage. It is written down because it is a real ranking
+    consequence of the chosen scales, not a neutral merge -- and a
+    docstring claiming neutrality would have hidden it. Calibrating the two
+    scales is a policy decision, deliberately not taken here.
 
     Document rank is the result's **1-based position in the retriever's
     output**, which is the interpretation the rest of the system already
