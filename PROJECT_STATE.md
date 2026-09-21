@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: 812f290f6b2fca1d922d5b932bf7e02b26048fb5 (short: 812f290 — Merge pull request #20)
-  The accepted PHASE is still Phase 4. PRs #3-#20 are correction, hardening
+Main branch head: 350d783df58bb578d2247796cde2d40c65fe91fd (short: 350d783 — Merge pull request #23)
+  The accepted PHASE is still Phase 4. PRs #3-#23 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
 Phase 2 accepted commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511
 Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
@@ -15,10 +15,10 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (812f290): 541 passed / 14 skipped (Linux CI and Windows)
+- Current main (350d783): 541 passed / 14 skipped (Linux CI and Windows)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at 812f290 (Phase 4 merged, plus PRs #3-#20)
+Synchronization: origin/main is at 350d783 (Phase 4 merged, plus PRs #3-#23)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -30,9 +30,14 @@ Phase 0 — HISTORICAL / COMPLETED
 Phase 1 — PARTIAL / NOT COMPLETE
   Scope: Core foundation vertical slice —
          User → Session → Message → ModelProvider → Response → Event
-  Status: docs/PHASE_1_RECONCILIATION.md states two of the five playbook
-          components defined for Phase 1 are unbuilt. Phase 1 is therefore
-          NOT complete, and must not be summarised as completed.
+  Status: docs/PHASE_1_RECONCILIATION.md states that ONE of the five playbook
+          components defined for Phase 1 is unbuilt -- identity. It was two
+          until PR #23; the memory foundation was built in Phase 3 and the
+          reconciliation had gone on saying otherwise. Phase 1 is therefore
+          still NOT complete, and must not be summarised as completed.
+          Verified at 350d783: src/personal_ai_core/identity/ does not exist,
+          and ResponsePolicy / BehavioralContract have 0 occurrences in src/.
+          Contract design: ADR-011 (PROPOSED, PR #24 open, NOT merged).
   Evidence: docs/PHASE_1_VERTICAL_SLICE.md, docs/PHASE_1_RECONCILIATION.md
 
 Phase 2 — ACCEPTED
@@ -140,6 +145,9 @@ claim written in one place with nothing that notices it going stale.
   #18 9f9cc20  docs: record #16 and #17 in the merge ledger
   #19 546238e  test: compare ledger SHAs exactly, not by seven characters
   #20 812f290  test: make the sole-writer guard separator-independent
+  #21 0b0e1e5  docs: record #18 #19 and #20 in the merge ledger
+  #22 bb2e953  docs: note cold-start request timeout and the env knob
+  #23 350d783  docs: correct the Phase 1 reconciliation to current reality
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -326,13 +334,16 @@ A phase becomes accepted only after:
 
 Design → Authorization → Implementation → Tests → Invariant review → Git verification → Owner acceptance
 
-Phase 1: HISTORICAL / COMPLETED (evidence freeze ec04071; reconciliation — no separate gate)
+Phase 0: HISTORICAL / COMPLETED (evidence freeze ec04071; no separate gate)
+Phase 1: PARTIAL / NOT COMPLETE — identity unbuilt; see PHASE_1_RECONCILIATION.md
+         and the PHASE STATUS SUMMARY above, which this line used to contradict.
 Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
 Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 → bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
 Phase 5: NOT AUTHORIZED / DESIGN NOT STARTED — UNAUTHORIZED / FUTURE DESIGN
-Post-Phase-4: PRs #3-#20, merged, no new phase (head 812f290) — see POST-PHASE-4 MERGES
+Post-Phase-4: PRs #3-#23, merged, no new phase (head 350d783) — see POST-PHASE-4 MERGES
 Persistence: ADR-010 PROPOSED, no option selected (PR #15)
+Identity: ADR-011 PROPOSED, contract design only, NOT merged (PR #24)
 
 BOSS MODEL
 ==========
@@ -379,8 +390,14 @@ Do not turn these open items into unauthorized implementation.
 DOCUMENTATION DISCIPLINE
 ========================
 
-ADR-001 through ADR-010 are present in docs/ADR/ and serve as the decision record.
-ADR-010 is PROPOSED, not accepted: it recommends without selecting.
+The ADRs in docs/ADR/ are the decision record. That directory is authoritative;
+this file does not enumerate them, because an enumeration here is a second source of
+truth that goes stale the moment one is added.
+
+Not every ADR is accepted. PROPOSED at 350d783:
+- ADR-010 (persistence) — recommends without selecting; nothing is selected.
+- ADR-011 (identity layer contract) — PR #24 is open and NOT merged, so the file
+  is not in docs/ADR/ at this commit.
 Do NOT create docs/DECISIONS.md — ADRs are the historical decision record.
 
 Avoid duplicate sources of truth.
