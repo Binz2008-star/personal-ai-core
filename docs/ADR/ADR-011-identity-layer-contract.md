@@ -1,9 +1,15 @@
 # ADR-011 — Identity layer contract
 
-**Status:** PROPOSED · design only · nothing selected, nothing built
+**Status:** PROPOSED · design only · nothing built
+
+- Design questions: **RESOLVED** (four, below; reviewed and accepted)
+- Identity contract: **PROPOSED**, not accepted
+- Identity implementation: **NOT AUTHORIZED**, and gated on two prerequisites
 
 This ADR defines a contract. It authorises no implementation, creates no package, and
-does not complete Phase 1. Its acceptance is a separate decision.
+does not complete Phase 1. Answering its open questions does not authorise building it:
+design-complete and implementable are different states, and the two prerequisites below
+are the distance between them.
 
 ## Context
 
@@ -142,17 +148,122 @@ That is a memory-rules defect, not an identity one.
 - **Phase 1 is not completed or authorised** by this ADR.
 - **No source repository is modified.** Rico at `215c316` is read as evidence only.
 
-## Open questions for the owner
+## Resolved design questions
 
-1. **Is the behavioural contract fixed or per-session?** Fixed is simpler and matches
-   the "independent of conversation length" property. Per-session invites drift and a
-   second source of truth.
-2. **Does identity vary by model?** Rule 4 makes its cost model-relative through
-   `context_window`, but the *text* could be constant across models or registry-driven.
-   Constant is proposed; not decided.
-3. **Characterization tests against Rico first?** `PHASE_1_RECONCILIATION.md` §4 item 1
-   says to write them against the pinned SHA before adapting. That is a cost worth
-   confirming, since the Core keeps only the substance of ~18 lines.
-4. **Does the response policy own answer length?** It is the natural home, but it
-   overlaps `generation_reserve` in ADR-005. Stated in the policy, enforced by the
-   budget, is the proposal — the two must not disagree silently.
+Answered from the code at `761accc` and reviewed; each records what was rejected, so a
+later reader sees the alternative that was considered rather than only the survivor.
+
+### 1. Is the behavioural contract fixed or per-session? — **FIXED**
+
+`Session` carries `user_id`, `id`, `status`, `created_at`. There is no configuration
+field of any kind. Per-session identity would extend a Phase 1 built domain type to
+serve a consumer that does not exist, and would put the contract in two places at once
+-- configuration and session state -- which is the defect class PRs #8-#13 and #23-#26
+closed elsewhere.
+
+It also contradicts the property the contract exists for: present in every call,
+*independent of conversation length*. A contract that varies per session is a default
+with extra steps.
+
+**Rejected:** per-session override. Revisit only for a concrete case, as its own ADR.
+
+### 2. Does identity text vary by model? — **CONSTANT**
+
+ADR-002 states the Boss model is "operationally primary and architecturally
+replaceable", and that "changing the Boss model is a configuration change plus an
+evaluation gate, not a code change". Identity text that varied by model would make a
+model swap silently change behaviour -- that replaceability claim failing quietly.
+
+What *is* model-relative is identity's **cost**, through `context_window`, which Rule 4
+already handles.
+
+`ModelSpec.metadata: dict[str, str]` exists and nothing reads it for behaviour. It is
+the escape hatch, usable only when an eval demonstrates a specific model needs different
+phrasing. Evidence first, not anticipation.
+
+**Rejected:** registry-driven identity text.
+
+### 3. Characterization tests against Rico first? — **NO**
+
+**VERIFIED SOURCE FACT**, at the pinned SHA `215c316`:
+`tests/test_rico_identity_guardrails.py` has 32 tests. Six mention `get_language_rule`;
+**two** test it. Both assert substrings of Rico's own English wording -- `"الفصحى" in
+rule`, `"Modern Standard Arabic" in rule`, `"Reply in English" in rule`. The other
+thirty test `get_rico_system_prompt`: pricing, the product domain, auto-apply, job
+listings -- all dropped by this Core.
+
+A characterization test characterises behaviour the new implementation intends to
+preserve. This ADR already decided the Core owns its own text, so those assertions would
+pin strings the Core will never use: they would pass by copying Rico's words, creating
+textual coupling to a source repository the hard invariants keep at arm's length. That is
+the opposite of what the technique is for.
+
+**What transfers instead is the incident**, recorded in that suite's own docstring as an
+owner escalation dated 2026-07-21: a Jordanian user addressed in hardcoded Gulf dialect
+(`"Use natural, professional Gulf Arabic"` had been living in the runtime language rule),
+replies rambling with emoji menus. The Core encodes that **behavioural requirement** in
+its own tests against its own text. Transfer the failure, not the fixture.
+
+**Rejected:** characterization tests against the pinned SHA, and with them
+`PHASE_1_RECONCILIATION.md` §4 item 1's suggestion to write them first.
+
+### 4. Does the response policy own answer length? — **THE PREMISE WAS INCOMPLETE**
+
+The question assumed the policy and the budget might disagree about a number. They
+cannot currently disagree, because **neither enforces anything**.
+
+`DEFAULT_GENERATION_RESERVE = 1024` is documented as "room the model needs to write its
+answer. Reserved first." **VERIFIED SOURCE FACT:** there is no `max_tokens`, no
+`num_predict` and no equivalent anywhere in `src/`; `runtime/ollama/provider.py` sends
+`{model, messages, stream}` and caps nothing. The reserve is an accounting assumption
+that the generation path never asks the model to respect.
+
+A model that writes past it overflows the window as truncation -- no error, no log line.
+That is the ADR-005 failure mode, already live, and entirely independent of identity.
+
+**Decision, in three layers that must not be collapsed into one abstraction:**
+
+```text
+identity policy      -> tells the model how to respond   (register, concision)
+generation budget    -> determines how much it may generate (the number)
+provider enforcement -> makes that number real            (missing today)
+```
+
+The policy owns the instruction. The budget owns the number. Enforcement does not exist
+and is recorded as **prerequisite B** rather than assumed.
+
+## Prerequisites before any implementation
+
+Both touch built contracts, both are small, and **neither is identity work**. Identity
+stays untouched until both are settled.
+
+```text
+ADR-011 identity implementation
+        |
+        +-- prerequisite A
+        |   ContextAllocation gains an explicit identity share
+        |
+        +-- prerequisite B
+            generation_reserve becomes an enforced provider limit
+            (num_predict or equivalent)
+        |
+        v
+    Identity layer implementation
+```
+
+**A** is Rule 4 above. **B** is the Q4 finding. Each is its own authorisation and its own
+change; answering the four questions authorises neither.
+
+## Scope guardrails
+
+The Q4 finding is a narrow defect, and a narrow defect is not a licence to reshape the
+generation path. Nothing here authorises:
+
+- a new provider abstraction
+- persistence changes, Neon or pgvector
+- model-specific identity templates
+- a new session configuration mechanism
+- any change to the Boss model
+
+Implementing `identity/` because the four questions are answered would be premature: the
+questions were the design gate, not the implementation gate.
