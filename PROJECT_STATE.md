@@ -69,11 +69,21 @@ Phase 5 — NOT AUTHORIZED / DESIGN NOT STARTED
   Note: UNAUTHORIZED / FUTURE DESIGN — no contract, no implementation, no cross-session recall approval
   Not gated by persistence. ADR-010 (PROPOSED, PR #15) records that
          cross-session memory semantics and durable persistence are separate
-         concerns. Cross-session recall is exercisable in-process with the
-         existing in-memory repositories: what scopes it is the session filter
-         in MemoryReader (ADR-009), not the absence of durability. An earlier
-         draft of ADR-010 claimed the opposite; that claim was corrected before
-         merge and is not the project's position.
+         concerns.
+
+         Cross-session memory SEMANTICS can be designed and contract-validated
+         against the existing in-memory repositories. Recall in Phase 4 REMAINS
+         SESSION-SCOPED (ADR-009): no cross-session recall implementation
+         exists and none is authorized. What scopes recall today is the session
+         filter in MemoryReader, not the absence of durability -- which is a
+         statement about where the constraint lives, not about a capability
+         being available.
+
+         This is a limit on what persistence can be claimed to block, not a
+         widening of what Phase 5 is permitted to be. An earlier draft of
+         ADR-010 claimed persistence gated Phase 5; that claim was corrected
+         before merge. See also CURRENT LIMITATIONS and BLOCKED WORK, which
+         state the same thing from the feature side and remain accurate.
 
 PERSISTENCE — DESIGN PROPOSED, NOT SELECTED
   ADR-010 (docs/ADR/ADR-010-persistence-model.md, PR #15) compares four
@@ -267,7 +277,9 @@ Do NOT imply that conversation turns directly write memory.
 
 CURRENT LIMITATIONS (ACCEPTED)
 ------------------------------
-- Phase 4 recall is session-scoped (ADR-009) — no cross-session recall
+- Phase 4 recall is session-scoped (ADR-009) — no cross-session recall.
+  Unchanged by ADR-010: that a contract could be validated in-process says
+  nothing about a capability existing. None does.
 - No semantic embedding-based memory ranking (Phase 2 HashingEmbeddingProvider is not semantic)
 - Memory retrieval is enrichment/degradation, not a write path
 - Phase 2 rendering overhead limitation remains out of scope
@@ -340,7 +352,8 @@ Explicitly recorded as BLOCKED / NOT AUTHORIZED:
 - modifications to legacy/source repositories
 - Phase 5 implementation
 - any unapproved Phase 3/4 expansion
-- cross-session memory recall (deferred with ADR-009)
+- cross-session memory recall (deferred with ADR-009) — still blocked, and not
+  unblocked by ADR-010, which addresses persistence only
 
 Important:
 Do NOT imply that real embedding adaptation or BM25/stemming is a prerequisite for Phase 3/4 Memory Foundation.
