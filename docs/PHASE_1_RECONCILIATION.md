@@ -1,21 +1,35 @@
 # Phase 1 Reconciliation
 
-**Status: Phase 1 is NOT complete.** Two of its five playbook components are unbuilt.
+**Status: Phase 1 is NOT complete.** One of its five playbook components is unbuilt.
 Nothing here is marked done that is not done.
+
+> Written at `03f2287`, when two were unbuilt. Corrected at `bb2e953`, because the
+> memory foundation was built in Phase 3 and this document went on saying it was
+> missing -- a claim written in one place with nothing watching it go stale, the
+> same defect class PRs #8-#13 closed elsewhere. Section 2's source analysis is
+> kept: it is still valid research about the two source repositories, and only its
+> *status* was wrong. The identity row is unchanged, because it is still true.
 
 `ENGINEERING_PLAYBOOK.md` defines Phase 1 as
 `core + runtime + identity + conversation + memory foundation`.
 
-| Component | State at `03f2287` |
-|---|---|
-| core | **built** — domain, contracts, config, errors |
-| runtime | **built** — `ModelRegistry`, `ModelProvider`, `OllamaProvider` |
-| conversation | **built** — sessions, messages, events, the vertical slice |
-| **identity** | **NOT BUILT** — §1 |
-| **memory foundation** | **NOT BUILT** — §2 |
+| Component | State at `03f2287` | State at `bb2e953` |
+|---|---|---|
+| core | **built** | **built** — domain, contracts, config, errors |
+| runtime | **built** | **built** — `ModelRegistry`, `ModelProvider`, `OllamaProvider` |
+| conversation | **built** | **built** — sessions, messages, events, the vertical slice |
+| **identity** | **NOT BUILT** | **NOT BUILT** — §1. `src/personal_ai_core/identity/` does not exist |
+| memory foundation | **NOT BUILT** | **built** — Phase 3; §2 |
 
-Phase 2 has not begun. Phase 2 domain types added in error during this session were
-reverted before any commit; the tree at `03f2287` is unchanged.
+Verified against `src/` at `bb2e953`, not from the record.
+
+At `03f2287`, Phase 2 had not begun: Phase 2 domain types added in error during that
+session were reverted before any commit, and the tree at `03f2287` is unchanged.
+
+Phases 2, 3 and 4 have since been accepted and merged, plus PRs #3-#22 of correction
+and hardening on top. See `PROJECT_STATE.md`. **This does not complete Phase 1.** The
+later phases were authorised and built over a Phase 1 that is still missing its
+identity foundation; that gap is not closed by anything above it.
 
 ---
 
@@ -59,11 +73,24 @@ the model registry rather than a hard-coded template.
 
 ---
 
-## 2. Missing memory foundation — exact
+## 2. Memory foundation — built in Phase 3
 
-`memory/` does not exist. `MemoryStore` is a contract plus `SealedMemoryStore`, which
-refuses every write. That is a deliberate Phase 1 decision enforcing ADR-003, not an
-omission — but it is also not a memory foundation.
+**Was:** *"`memory/` does not exist. `MemoryStore` is a contract plus `SealedMemoryStore`,
+which refuses every write. That is a deliberate Phase 1 decision enforcing ADR-003, not an
+omission — but it is also not a memory foundation."*
+
+**Now, verified at `bb2e953`:** `src/personal_ai_core/memory/` exists —
+`gate.py`, `pipeline.py`, `retriever.py`, `rules.py`. `MemoryRecord`
+(`core/memory.py`) carries every field this section recorded as having no home:
+`provenance`, `confidence`, `version`, `supersedes`, `status` and `language`.
+`MemoryStatus` models the `ACTIVE` / `REJECTED` / `SUPERSEDED` lifecycle, and
+`ExperiencePipeline` is the sole writer, statically enforced. `SealedMemoryStore`
+remains on the conversation path and still refuses every write — the ADR-003 guard
+was kept, not traded away for the foundation.
+
+The source analysis below is unchanged and still stands: it is what was measured
+against the two source repositories, and the Core built its own contract rather than
+adopting either.
 
 ### Neither memory implementation carries the Core contract
 
@@ -131,12 +158,18 @@ Its two heuristics map directly onto rules already specified in `MEMORY_ARCHITEC
 produces no Arabic candidates. Same failure shape as ADR-006: it does not error, it
 under-detects.
 
-### Must be built
+### Built (was: must be built)
 
 Event → experience → candidate → promotion gate → memory, with provenance, confidence,
-versioning, supersession and rejection retention. No source provides it; this was already
-recorded as `DESIGN TO BUILD` in the extraction matrix §4 and this reconciliation confirms
-it against a second source.
+versioning, supersession and rejection retention. No source provided it; it was recorded
+as `DESIGN TO BUILD` in the extraction matrix §4, and Phase 3 built it against the Core
+contract as specified.
+
+**One limitation carried forward and still open.** The English-only correction markers
+noted above did carry forward: `memory/rules.py` states that `CorrectionRule` inspects
+English markers only, and that Arabic corrections are therefore not detected. That module
+records the gap rather than papering over it — `ExplicitInstructionRule` does handle both
+languages — but the gap is real and unclosed.
 
 ---
 
@@ -147,12 +180,16 @@ modified. No Phase 0 document modified. No component marked complete.
 
 ## 4. Ordered remainder of Phase 1
 
-1. **Identity foundation** — adapt `get_language_rule` and the grounding/integrity
-   contracts behind Core-owned interfaces; write characterization tests against Rico at its
-   pinned SHA first.
-2. **Memory foundation** — build the promotion pipeline against the Core contract, with an
-   in-memory store, keeping `SealedMemoryStore` as the guard on the conversation path.
-3. **Neon memory adapter** — only after 2, and only once the six missing contract fields
-   have an agreed home. A decision, not an implementation detail.
+1. **Identity foundation** — **STILL OPEN.** Adapt `get_language_rule` and the
+   grounding/integrity contracts behind Core-owned interfaces; write characterization
+   tests against Rico at its pinned SHA first. This is the whole of what remains of
+   Phase 1.
+2. **Memory foundation** — **DONE (Phase 3).** The promotion pipeline was built against
+   the Core contract with an in-memory store, and `SealedMemoryStore` was kept as the
+   guard on the conversation path, as specified here.
+3. **Neon memory adapter** — **STILL OPEN, and now governed by ADR-010.** That ADR
+   compares four persistence options and selects none; the six-fields-have-no-column
+   problem recorded in §2 is one of its inputs. No option is selected, no schema exists,
+   and no Neon object has been touched.
 
-Phase 2 remains unauthorised and unstarted.
+Phase 2 was subsequently authorised, built and accepted, as were Phases 3 and 4.
