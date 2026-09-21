@@ -63,7 +63,13 @@ jobs:
       # fails for reasons unrelated to the change is one people learn to
       # override. Bumping these is a deliberate PR that shows what the new
       # version found.
-      - run: pip install ruff==0.15.8 pyright==1.1.408
+      #
+      # pytest is here for pyright, not to run anything. Type-checking
+      # `tests/` means resolving what `tests/` imports, and without it every
+      # test file reported `Import "pytest" could not be resolved` -- 33
+      # errors that said nothing about the code. A type gate drowning in
+      # unresolved-import noise is one whose real findings get skimmed past.
+      - run: pip install ruff==0.15.8 pyright==1.1.408 pytest==9.1.1
 
       - name: Lint
         run: ruff check .
