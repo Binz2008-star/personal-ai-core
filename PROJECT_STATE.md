@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: 350d783df58bb578d2247796cde2d40c65fe91fd (short: 350d783 — Merge pull request #23)
-  The accepted PHASE is still Phase 4. PRs #3-#23 are correction, hardening
+Main branch head: 8fe4bc9fd50f021e364ea8da72acc062e02bda97 (short: 8fe4bc9 — Merge pull request #24)
+  The accepted PHASE is still Phase 4. PRs #3-#25 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
 Phase 2 accepted commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511
 Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
@@ -15,10 +15,10 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (350d783): 541 passed / 14 skipped (Linux CI and Windows)
+- Current main (8fe4bc9): 541 passed / 14 skipped (Linux CI and Windows)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at 350d783 (Phase 4 merged, plus PRs #3-#23)
+Synchronization: origin/main is at 8fe4bc9 (Phase 4 merged, plus PRs #3-#25)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -35,9 +35,11 @@ Phase 1 — PARTIAL / NOT COMPLETE
           until PR #23; the memory foundation was built in Phase 3 and the
           reconciliation had gone on saying otherwise. Phase 1 is therefore
           still NOT complete, and must not be summarised as completed.
-          Verified at 350d783: src/personal_ai_core/identity/ does not exist,
+          Verified at 8fe4bc9: src/personal_ai_core/identity/ does not exist,
           and ResponsePolicy / BehavioralContract have 0 occurrences in src/.
-          Contract design: ADR-011 (PROPOSED, PR #24 open, NOT merged).
+          Contract design: ADR-011 — PROPOSED, not accepted. It fixes the shape
+          of the contract and authorises no implementation, so Phase 1 is not
+          advanced by it.
   Evidence: docs/PHASE_1_VERTICAL_SLICE.md, docs/PHASE_1_RECONCILIATION.md
 
 Phase 2 — ACCEPTED
@@ -148,6 +150,10 @@ claim written in one place with nothing that notices it going stale.
   #21 0b0e1e5  docs: record #18 #19 and #20 in the merge ledger
   #22 bb2e953  docs: note cold-start request timeout and the env knob
   #23 350d783  docs: correct the Phase 1 reconciliation to current reality
+  #24 8fe4bc9  docs(adr): ADR-011 identity layer contract, PROPOSED
+  #25 1b42368  docs: PROJECT_STATE current; Phase 1 read COMPLETED in the
+               gates list and NOT COMPLETE in the summary -- Phase 0 had no
+               row and its description had drifted onto the Phase 1 line
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -341,9 +347,9 @@ Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
 Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 → bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
 Phase 5: NOT AUTHORIZED / DESIGN NOT STARTED — UNAUTHORIZED / FUTURE DESIGN
-Post-Phase-4: PRs #3-#23, merged, no new phase (head 350d783) — see POST-PHASE-4 MERGES
+Post-Phase-4: PRs #3-#25, merged, no new phase (head 8fe4bc9) — see POST-PHASE-4 MERGES
 Persistence: ADR-010 PROPOSED, no option selected (PR #15)
-Identity: ADR-011 PROPOSED, contract design only, NOT merged (PR #24)
+Identity: ADR-011 PROPOSED, not accepted — contract design only, nothing built (PR #24)
 
 BOSS MODEL
 ==========
@@ -394,10 +400,17 @@ The ADRs in docs/ADR/ are the decision record. That directory is authoritative;
 this file does not enumerate them, because an enumeration here is a second source of
 truth that goes stale the moment one is added.
 
-Not every ADR is accepted. PROPOSED at 350d783:
+Not every ADR is accepted. PROPOSED, not accepted:
 - ADR-010 (persistence) — recommends without selecting; nothing is selected.
-- ADR-011 (identity layer contract) — PR #24 is open and NOT merged, so the file
-  is not in docs/ADR/ at this commit.
+- ADR-011 (identity layer contract) — fixes the shape of the contract;
+  authorises no implementation.
+
+Record what is PROPOSED versus accepted, never whether a PR has merged. The
+previous wording said ADR-011 was "NOT merged (PR #24)", which was true when it
+was written and false one merge later -- a claim whose truth depended on merge
+order, written into the very change that de-enumerated this list so it could not
+go stale. Whether a file is in docs/ADR/ is git's business; whether a decision is
+accepted is this file's.
 Do NOT create docs/DECISIONS.md — ADRs are the historical decision record.
 
 Avoid duplicate sources of truth.
