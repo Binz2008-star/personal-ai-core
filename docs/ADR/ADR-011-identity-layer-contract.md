@@ -215,11 +215,15 @@ cannot currently disagree, because **neither enforces anything**.
 `DEFAULT_GENERATION_RESERVE = 1024` is documented as "room the model needs to write its
 answer. Reserved first." **VERIFIED SOURCE FACT:** there is no `max_tokens`, no
 `num_predict` and no equivalent anywhere in `src/`; `runtime/ollama/provider.py` sends
-`{model, messages, stream}` and caps nothing. The reserve is an accounting assumption
-that the generation path never asks the model to respect.
+`{model, messages, stream}` and caps nothing.
 
-A model that writes past it overflows the window as truncation -- no error, no log line.
-That is the ADR-005 failure mode, already live, and entirely independent of identity.
+**`generation_reserve` is currently accounting-only and is not enforced by the
+provider.** The budget subtracts it during context assembly so evidence cannot crowd out
+the answer's room, and no code path passes it to the generation call as a request
+option. With no `num_predict` equivalent, nothing constrains how much the model may
+write; a completion that exceeds the reserve does so with no Core code observing it.
+That is the ADR-005 budget shape -- an unenforced number -- entirely independent of
+identity, and recorded here as a reported gap rather than an observed truncation.
 
 **Decision, in three layers that must not be collapsed into one abstraction:**
 
