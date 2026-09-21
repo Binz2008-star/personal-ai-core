@@ -1,4 +1,4 @@
-"""Phase 3: the memory subsystem.
+"""The memory subsystem: promotion (Phase 3) and recall (Phase 4).
 
 The pipeline in this package is the sole writer to `MemoryStore` in the
 codebase. It is deliberately not wired into `ConversationService`
@@ -8,6 +8,7 @@ not.
 """
 from .gate import DefaultPromotionGate
 from .pipeline import ExperiencePipeline
+from .retriever import MemoryRetrievalFailure, SimpleMemoryRetriever
 from .rules import (
     CorrectionRule,
     ExplicitInstructionRule,
@@ -24,6 +25,8 @@ __all__ = [
     "ExplicitInstructionRule",
     "ExtractionRule",
     "InferenceRule",
+    "MemoryRetrievalFailure",
     "RepetitionRule",
+    "SimpleMemoryRetriever",
     "default_rules",
 ]
