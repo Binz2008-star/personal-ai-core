@@ -29,6 +29,41 @@ projects are separate layers with their own contracts.
 that no source repository provides the event, experience, promotion, verifier or
 reranking subsystems. Existing repositories supply **edge components and patterns**.
 
+**ARCHITECTURAL DECISION — DEPLOYMENT SHAPE.** The Core runs as **one user, one process,
+on the local machine**. The model is local (Ollama); nothing here is served over a
+network to other people.
+
+This is a constraint, not an observation, and it is written down because everything
+below already assumed it without saying so. The tree at `cd40871` contains no `async`
+or `await`, no `threading`, `asyncio` or `multiprocessing` import, and no lock or
+semaphore anywhere in `src/`; every store in the tree — the repositories, the memory
+store, the registry, the catalogue and both indexes — holds its state in a process-local
+`dict` or `list`. A reader had no way to tell whether that was a decision or an
+oversight.
+
+What it permits, and what the persistence design may therefore rely on:
+
+- **A single writer.** Append order is a total order, so an event log needs no sequence
+  column and no sortable id. This matters because the alternatives do not work:
+  `new_id()` is `uuid4`, which does not sort, and `utcnow()` collides heavily — 2000
+  successive calls yielded 499–632 distinct values across repeated runs, so roughly
+  three in four share a timestamp with another. Without this constraint the event log
+  would have **no** total order that survives a durable store.
+- **Synchronous contracts.** Every protocol in `core/contracts.py` is sync. Serving the
+  Core over a network would make that the wrong choice, and changing it later is a
+  breaking change to every contract and every caller.
+- **No coordination layer.** No locks, no transactions across processes, no leader
+  election, no connection pool.
+
+What would invalidate it, and must therefore reopen the persistence decision before any
+code is written against it: a second concurrent writer, a second user, or serving the
+Core over a network. Any of the three, and the three bullets above stop holding
+together.
+
+This constraint does **not** by itself select a storage backend. It removes options that
+only concurrency justifies; choosing among what remains is a separate decision, not yet
+taken.
+
 ## 2. System boundaries
 
 ```text
