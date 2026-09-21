@@ -181,9 +181,11 @@ modified. No Phase 0 document modified. No component marked complete.
 ## 4. Ordered remainder of Phase 1
 
 1. **Identity foundation** — **STILL OPEN.** Adapt `get_language_rule` and the
-   grounding/integrity contracts behind Core-owned interfaces; write characterization
-   tests against Rico at its pinned SHA first. This is the whole of what remains of
-   Phase 1.
+   grounding/integrity contracts behind Core-owned interfaces. The prior instruction to
+   write characterization tests against Rico at its pinned SHA first is **superseded**:
+   ADR-011, design question 3, resolved **NO** — the Core owns its own text, so those
+   tests would pin strings it will never use. The incident transfers, not the fixture.
+   This is the whole of what remains of Phase 1.
 2. **Memory foundation** — **DONE (Phase 3).** The promotion pipeline was built against
    the Core contract with an in-memory store, and `SealedMemoryStore` was kept as the
    guard on the conversation path, as specified here.
