@@ -150,3 +150,24 @@ def test_the_type_checker_can_resolve_the_test_dependencies(workflow_text):
         "the static job no longer installs pytest, so pyright cannot resolve "
         "what the test tree imports"
     )
+
+
+# --- Full history for the merge-ledger check ------------------------------
+
+def test_the_suite_job_checks_out_full_history(workflow_text):
+    """`fetch-depth: 0`, without which the merge-ledger check has no input.
+
+    The default is a depth-1 clone, where `git log --merges` returns nothing.
+    `test_merge_ledger.py` fails loudly in that case rather than comparing
+    against an empty set, so removing this would turn one test red rather than
+    silent -- but it would still remove a working check for no reason, and the
+    reason it is here would not be obvious from the diff that removed it.
+    """
+    suite = workflow_text[workflow_text.index("\n  suite:"):]
+    static_at = suite.find("\n  static:")
+    if static_at != -1:
+        suite = suite[:static_at]
+    assert re.search(r"fetch-depth:\s*0", suite), (
+        "the suite job no longer checks out full history, so "
+        "tests/unit/test_merge_ledger.py cannot read `git log --merges`"
+    )

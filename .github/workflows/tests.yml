@@ -9,7 +9,15 @@ jobs:
   suite:
     runs-on: ubuntu-latest
     steps:
+      # Full history, not the default shallow clone.
+      # `tests/unit/test_merge_ledger.py` checks PROJECT_STATE.md's merge
+      # ledger against `git log --merges`. At fetch-depth 1 that log is empty
+      # and the comparison has nothing to compare, so the test fails rather
+      # than passing quietly -- but the right fix is to give it the history,
+      # not to weaken the test.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
