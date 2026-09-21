@@ -18,3 +18,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+# Stated rather than inferred. pyright resolves this layout without it, but
+# by auto-detection -- and a type gate that silently stops resolving the
+# package would keep passing while checking nothing.
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]

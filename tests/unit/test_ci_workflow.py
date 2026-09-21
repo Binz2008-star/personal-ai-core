@@ -91,3 +91,62 @@ def test_no_test_directory_is_left_unrun(referenced_paths, workflow_text):
     }
     unrun = sorted(d for d in on_disk if d not in referenced_paths)
     assert not unrun, f"test directories exist that CI never names: {unrun}"
+
+
+# --- The static-analysis gate ---------------------------------------------
+#
+# Same shape as everything above: the gate is only a gate while it runs, and
+# nothing would notice if the job were deleted or quietly emptied. Regex
+# again, for the reason this module's docstring gives.
+
+def test_the_static_analysis_gate_exists(workflow_text):
+    """Lint and types are checked, not merely checkable."""
+    assert re.search(r"^  static:$", workflow_text, re.MULTILINE), (
+        "the `static` job is gone. Ruff and pyright findings then accumulate "
+        "unread again, which is the state that let 13 of them build up."
+    )
+    assert re.search(r"^\s*run: ruff check", workflow_text, re.MULTILINE)
+    assert re.search(r"^\s*run: pyright\b", workflow_text, re.MULTILINE)
+
+
+def test_the_static_gate_is_its_own_job_not_a_step_on_suite(workflow_text):
+    """Steps are sequential: as steps on `suite`, a red suite skips them.
+
+    A gate that stops running on exactly the commits most likely to need it
+    is worse than none, because the checks list still shows green for it.
+    """
+    static_at = workflow_text.index("\n  static:")
+    suite_at = workflow_text.index("\n  suite:")
+    assert static_at > suite_at
+    # Nothing between the two job keys may be indented as a step of `suite`
+    # *after* `static` begins -- i.e. `static` really opens a new job block.
+    assert re.match(r"\n  static:\n    runs-on:", workflow_text[static_at:])
+
+
+def test_the_static_tools_are_pinned(workflow_text):
+    """An unpinned linter makes every upstream release a possible red build.
+
+    A gate that fails for reasons unrelated to the change is one people learn
+    to override, so the versions move by deliberate PR or not at all.
+    """
+    install = re.search(r"run: pip install ([^\n]*ruff[^\n]*)", workflow_text)
+    assert install, "the static job installs no tools"
+    for tool in ("ruff", "pyright", "pytest"):
+        assert re.search(rf"\b{tool}==\d", install.group(1)), (
+            f"{tool} is not pinned in the static job: {install.group(1)!r}"
+        )
+
+
+def test_the_type_checker_can_resolve_the_test_dependencies(workflow_text):
+    """pytest is installed for pyright, and it is easy to drop as 'unused'.
+
+    It is not unused: type-checking `tests/` means resolving what `tests/`
+    imports. Without it pyright reported 33 unresolved-import errors that
+    said nothing about the code -- and a gate full of noise is one whose real
+    findings get skimmed past.
+    """
+    static = workflow_text[workflow_text.index("\n  static:"):]
+    assert re.search(r"pip install[^\n]*\bpytest==", static), (
+        "the static job no longer installs pytest, so pyright cannot resolve "
+        "what the test tree imports"
+    )
