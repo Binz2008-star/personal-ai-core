@@ -236,29 +236,22 @@ def _docstring_nodes(tree: ast.AST) -> set[int]:
     return found
 
 
-@pytest.mark.parametrize(
-    "path",
-    sorted((SRC / "core").rglob("*.py")),
-    ids=lambda p: p.name,
-)
-def test_core_contracts_name_no_infrastructure_in_code(path):
-    """Infrastructure may be discussed in prose, never named in code.
+def _infrastructure_offenders(tree: ast.AST) -> list[str]:
+    """Every place this tree names infrastructure in code rather than prose.
 
-    The Second Brain retrieval, pgvector and HNSW are assets to adapt behind
-    these contracts. The moment one of them appears in an identifier, a
-    signature or a runtime string here, it has begun owning the architecture
-    instead of serving it.
+    Extracted so that the check and the adversarial proof that the check
+    works run the *same* code. They did not. The proof reimplemented a
+    subset of this scan -- three node kinds of five, and it computed the
+    docstring-exemption set and then never consulted it -- so it could only
+    ever prove that its own copy detected a leak.
 
-    Docstrings are exempt: several deliberately explain *why* a technology is
-    excluded, and that reasoning is the most useful thing in the file.
+    That is the failure mode the proof exists to rule out. A regression in
+    the `Name`, `Attribute` or `Constant` branch, or a docstring exemption
+    widened until it swallowed real string constants, would have stopped
+    the check detecting anything while the proof kept passing.
     """
-    if path.name in CONTRACT_PURITY_EXEMPT:
-        pytest.skip(f"{path.name} is the provider-configuration boundary")
-
-    source = path.read_text(encoding="utf-8")
-    tree = ast.parse(source)
     skip = _docstring_nodes(tree)
-    offenders = []
+    offenders: list[str] = []
 
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -281,35 +274,79 @@ def test_core_contracts_name_no_infrastructure_in_code(path):
             if term in lowered:
                 offenders.append(f"{term} in {name[:50]!r}")
 
+    return offenders
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted((SRC / "core").rglob("*.py")),
+    ids=lambda p: p.name,
+)
+def test_core_contracts_name_no_infrastructure_in_code(path):
+    """Infrastructure may be discussed in prose, never named in code.
+
+    The Second Brain retrieval, pgvector and HNSW are assets to adapt behind
+    these contracts. The moment one of them appears in an identifier, a
+    signature or a runtime string here, it has begun owning the architecture
+    instead of serving it.
+
+    Docstrings are exempt: several deliberately explain *why* a technology is
+    excluded, and that reasoning is the most useful thing in the file.
+    """
+    if path.name in CONTRACT_PURITY_EXEMPT:
+        pytest.skip(f"{path.name} is the provider-configuration boundary")
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    offenders = _infrastructure_offenders(tree)
     assert not offenders, f"{path.name} names infrastructure in code: {offenders}"
 
 
-def test_the_contract_purity_check_actually_detects_a_leak():
-    """Adversarial: prove the check above is not vacuous."""
-    import tempfile
+# Adversarial: the check above is only worth having if it fires. Each case
+# is a leak through one of the five node kinds the scanner inspects, driven
+# through `_infrastructure_offenders` itself -- the production scanner, not
+# a copy of it.
+#
+# The earlier proof reimplemented three of those kinds and asserted against
+# its own reimplementation. It would have passed unchanged while the real
+# scanner's `Name`, `Attribute` and `Constant` branches did nothing.
 
-    leak = "def build_pgvector_index(hnsw_m: int) -> None: ...\n"
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".py", delete=False, encoding="utf-8"
-    ) as f:
-        f.write(leak)
-        path = Path(f.name)
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        skip = _docstring_nodes(tree)
-        found = []
-        for node in ast.walk(tree):
-            name = None
-            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
-                name = node.name
-            elif isinstance(node, ast.arg):
-                name = node.arg
-            if name and any(t in name.lower() for t in INFRASTRUCTURE_TERMS):
-                found.append(name)
-        assert "build_pgvector_index" in found, "leak went undetected"
-        assert "hnsw_m" in found, "parameter leak went undetected"
-    finally:
-        path.unlink()
+LEAKS = {
+    "function name": "def build_pgvector_index() -> None: ...",
+    "argument name": "def f(hnsw_m: int) -> None: ...",
+    "class name": "class PostgresAdapter: ...",
+    "bound name": "psycopg_conn = None",
+    "attribute access": "x.tsvector_column",
+    "runtime string": 'QUERY = "select from pgvector"',
+}
+
+
+@pytest.mark.parametrize("kind", sorted(LEAKS))
+def test_the_contract_purity_check_detects_a_leak_through_each_node_kind(kind):
+    offenders = _infrastructure_offenders(ast.parse(LEAKS[kind]))
+    assert offenders, f"a leak via {kind} went undetected: {LEAKS[kind]!r}"
+
+
+def test_the_contract_purity_check_is_silent_on_clean_source():
+    """The other half: a scanner that fires on everything proves nothing."""
+    clean = "def build_index(limit: int) -> None:\n    rows = limit\n"
+    assert _infrastructure_offenders(ast.parse(clean)) == []
+
+
+def test_prose_is_exempt_but_only_where_it_is_prose():
+    """The docstring exemption must not extend to string *code*.
+
+    Several core docstrings explain at length why pgvector is excluded, and
+    that reasoning is worth more than the rule. But the exemption is scoped
+    to a docstring -- the first statement of a module, class or function.
+    The same text as a runtime value is a leak, and the previous proof never
+    exercised this branch at all: it computed the exemption set and then
+    ignored it.
+    """
+    as_docstring = '"""We deliberately do not use pgvector here."""'
+    assert _infrastructure_offenders(ast.parse(as_docstring)) == []
+
+    as_value = 'NOTE = "We deliberately do not use pgvector here."'
+    assert _infrastructure_offenders(ast.parse(as_value))
 
 
 def test_no_core_module_imports_anything_from_the_test_tree():
