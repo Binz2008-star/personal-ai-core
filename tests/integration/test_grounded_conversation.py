@@ -18,10 +18,10 @@ from personal_ai_core.conversation.factory import (
     build_in_memory_service,
 )
 from personal_ai_core.context import (
-    GreedyContextAssembler,
     ReserveBasedBudgetPolicy,
     ScriptAwareTokenEstimator,
 )
+from personal_ai_core.context.assembler import HybridContextAssembler
 from personal_ai_core.conversation.grounding import GROUNDING_PREAMBLE, ContextBuilder
 from personal_ai_core.conversation.service import ConversationService
 from personal_ai_core.core.config import Settings
@@ -281,7 +281,7 @@ def test_a_retrieval_failure_is_recorded_and_fails_the_turn(transport):
         registry=ModelRegistry.from_settings(Settings()),
         context_builder=ContextBuilder(
             retriever=BrokenRetriever(),
-            assembler=GreedyContextAssembler(estimator),
+            assembler=HybridContextAssembler(estimator),
             budget_policy=ReserveBasedBudgetPolicy(),
             estimator=estimator,
         ),

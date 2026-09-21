@@ -28,7 +28,6 @@ from ..core.contracts import (
 )
 from ..core.domain import (
     UNDETERMINED_LANGUAGE,
-    Event,
     EventType,
     Message,
     Role,

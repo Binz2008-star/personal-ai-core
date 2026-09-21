@@ -18,7 +18,7 @@ from personal_ai_core.conversation.grounding import (
     render_evidence,
     summarize,
 )
-from personal_ai_core.core.context import ContextBudget, ExclusionReason
+from personal_ai_core.core.context import ExclusionReason
 from personal_ai_core.core.domain import Message, Role
 from personal_ai_core.core.errors import RetrievalError
 from personal_ai_core.core.knowledge import (
@@ -107,6 +107,7 @@ def test_the_grounding_message_belongs_to_the_turn_it_grounds(make_chunk):
     grounding = builder(retriever).build(
         session_id="session-42", query="q", language="en", model=Spec(), history=[]
     )
+    assert grounding.message is not None
     assert grounding.message.session_id == "session-42"
 
 

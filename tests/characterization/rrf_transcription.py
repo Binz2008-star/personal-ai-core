@@ -65,8 +65,8 @@ def lexical_candidates(rows: list[Row], k: int) -> dict[int, int]:
     - LIMIT candidate_k
     - Returns rank only; no lexical score reaches the final output.
     """
-    matching = [r for r in rows if r.ts_rank is not None]
-    ordered = sorted(matching, key=lambda r: -r.ts_rank)[:k]
+    matching = [(r, r.ts_rank) for r in rows if r.ts_rank is not None]
+    ordered = [r for r, rank in sorted(matching, key=lambda pair: -pair[1])[:k]]
     return {r.id: i + 1 for i, r in enumerate(ordered)}
 
 

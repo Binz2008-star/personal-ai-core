@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from .domain import UNDETERMINED_LANGUAGE, new_id, utcnow
 

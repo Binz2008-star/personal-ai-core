@@ -43,7 +43,9 @@ def test_the_conversation_service_has_no_memory_collaborator():
 def test_the_sealed_store_refuses_writes_loudly():
     memory = SealedMemoryStore()
     with pytest.raises(InvariantViolation, match="Event != Memory"):
-        memory.write({"type": "preference", "content": "prefers Arabic"})
+        memory.write(
+            {"type": "preference", "content": "prefers Arabic"}  # type: ignore[arg-type]
+        )
     assert memory.attempted_writes == 1
 
 
