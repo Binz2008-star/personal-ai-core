@@ -13,13 +13,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..context import (
+    HybridContextAssembler,
     ReserveBasedBudgetPolicy,
     ScriptAwareTokenEstimator,
 )
-from ..context.assembler import HybridContextAssembler
 from ..core.config import Settings
 from ..core.memory import MemoryReader
-from ..memory.retriever import SimpleMemoryRetriever
+from ..memory import SimpleMemoryRetriever
 from ..persistence.memory_store import InMemoryMemoryRepository
 from ..knowledge import (
     FixedSizeChunker,
