@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: 99221604539d677aa2794cd5fd2f305f56bc0227 (short: 9922160 — Merge pull request #15)
-  The accepted PHASE is still Phase 4. PRs #3-#15 are correction, hardening
+Main branch head: 0af4a9442d369b1f422d07daa9754dd780ace3b3 (short: 0af4a94 — Merge pull request #17)
+  The accepted PHASE is still Phase 4. PRs #3-#17 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
 Phase 2 accepted commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511
 Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
@@ -15,10 +15,10 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (9922160): 524 passed / 14 skipped
+- Current main (0af4a94): 528 passed / 14 skipped
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at 9922160 (Phase 4 merged, plus PRs #3-#15)
+Synchronization: origin/main is at 0af4a94 (Phase 4 merged, plus PRs #3-#17)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -130,6 +130,13 @@ claim written in one place with nothing that notices it going stale.
   #14 5dcf3ce  docs: deployment shape recorded as a constraint --
                one user, one process, local machine.
   #15 9922160  docs(adr): ADR-010 persistence model, PROPOSED not accepted.
+  #16 15ba882  docs: this ledger. Written because the record had stopped at
+               PR #2 while main advanced thirteen merges.
+  #17 0af4a94  test: the ledger is now checked against `git log --merges`
+               (tests/unit/test_merge_ledger.py). Writing the list down did
+               not fix the defect; only something that rereads git does.
+               Requires fetch-depth: 0, since CI's default shallow clone shows
+               no merges and the comparison would pass having compared nothing.
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -321,7 +328,7 @@ Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
 Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 → bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
 Phase 5: NOT AUTHORIZED / DESIGN NOT STARTED — UNAUTHORIZED / FUTURE DESIGN
-Post-Phase-4: PRs #3-#15, merged, no new phase (head 9922160) — see POST-PHASE-4 MERGES
+Post-Phase-4: PRs #3-#17, merged, no new phase (head 0af4a94) — see POST-PHASE-4 MERGES
 Persistence: ADR-010 PROPOSED, no option selected (PR #15)
 
 BOSS MODEL
@@ -401,6 +408,9 @@ Gaps verified:
   EventRepository; does not block a cross-session memory contract. See ADR-010.
 - CI does not require the `suite` and `static` checks to pass before merge, and no
   independent review is required on main. Both are owner decisions, PENDING.
+- This ledger is enforced: tests/unit/test_merge_ledger.py (PR #17) compares it to
+  `git log --merges` and fails on a wrong SHA, an invented PR, or a lag of more than
+  three merges. A PR cannot record its own merge, so a lag of one or two is normal.
 
 TRACEABILITY
 ============
