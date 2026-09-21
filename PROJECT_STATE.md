@@ -4,7 +4,9 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a (short: bbbf4c3 — Merge pull request #2 — PR #2 MERGED)
+Main branch head: 99221604539d677aa2794cd5fd2f305f56bc0227 (short: 9922160 — Merge pull request #15)
+  The accepted PHASE is still Phase 4. PRs #3-#15 are correction, hardening
+  and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
 Phase 2 accepted commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511
 Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
 Phase 4 implementation: e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 (PR #2, branch claude/phase-4-memory-aware-context)
@@ -13,9 +15,10 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- pyright: 0 errors
+- Current main (9922160): 524 passed / 14 skipped
+- ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at bbbf4c3 (Phase 4 merged)
+Synchronization: origin/main is at 9922160 (Phase 4 merged, plus PRs #3-#15)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -57,9 +60,78 @@ Phase 4 — ACCEPTED / MERGED (PR #2)
   Architectural review: PASS
   Post-commit audit: PASS
   Push verification: PASS
+  Subsequent corrections: defects in this phase's shipped code were found
+         after acceptance and fixed in PRs #5, #10 and #12. Acceptance did not
+         catch them; an independent review did. Recorded so the acceptance gate
+         is not read as stronger than it proved to be.
 
 Phase 5 — NOT AUTHORIZED / DESIGN NOT STARTED
   Note: UNAUTHORIZED / FUTURE DESIGN — no contract, no implementation, no cross-session recall approval
+  Not gated by persistence. ADR-010 (PROPOSED, PR #15) records that
+         cross-session memory semantics and durable persistence are separate
+         concerns. Cross-session recall is exercisable in-process with the
+         existing in-memory repositories: what scopes it is the session filter
+         in MemoryReader (ADR-009), not the absence of durability. An earlier
+         draft of ADR-010 claimed the opposite; that claim was corrected before
+         merge and is not the project's position.
+
+PERSISTENCE — DESIGN PROPOSED, NOT SELECTED
+  ADR-010 (docs/ADR/ADR-010-persistence-model.md, PR #15) compares four
+  options and recommends a hybrid with SQLite, recording why an append-only
+  log remains defensible. NOTHING IS SELECTED. No schema, no migration, no
+  dependency, no Neon, no pgvector. Choosing an option authorizes nothing
+  about Phase 5, and authorizing Phase 5 would not select an option.
+  Prerequisite for a durable backend only: Event.payload is Mapping[str, Any]
+  with no serialisation contract.
+
+POST-PHASE-4 MERGES
+-------------------
+None of these is a phase. Phase 4 remains the accepted phase. This section
+exists because the record previously stopped at PR #2 while main advanced by
+thirteen merges -- the same defect several of these PRs found elsewhere: a
+claim written in one place with nothing that notices it going stale.
+
+  #3  6171cdc  docs: sync PROJECT_STATE after Phase 4. Landed unreviewed and
+               carried factual errors; corrected by #4. This file is itself an
+               instance of the defect it now records.
+  #4  4e3074b  docs: correct the errors introduced by #3
+  #5  ca9f7ab  fix(memory): stop recall failures escaping the turn
+               FOUR DEFECTS ON MAIN, each reproduced before being fixed. One
+               let a credential-shaped exception message escape the turn --
+               the exact failure MemoryRetrievalError exists to prevent.
+  #6  657fc5e  docs: ARCHITECTURE.md marked as target, not built state.
+               Established that identity/, agent/, learning/, evaluation/,
+               projects/, api/, ui/ do not exist.
+  #7  c2cca65  test: non-URL sentinel for the leak-detection canary
+  #8  7b22345  test: path-separator bug in the skip-accounting gate.
+               The fork-bomb canary could never fire on Windows.
+  #9  5d67e71  test: the contract-purity proof now runs the real scanner.
+               It had been asserting against its own reimplementation.
+  #10 dc693d9  chore: clear the static-analysis backlog -- 13 findings, 2 real
+  #11 034284b  ci: gate lint and types, not just tests. CI had run pytest
+               alone; ruff and pyright findings had accumulated unread for the
+               life of the repository.
+  #12 9341e6e  feat(packaging): Phase 4 implementations on their package
+               surface, + tests/unit/test_package_surface.py
+  #13 cd40871  test: two guards now cover what they claim. The dependency
+               guard skipped any package with no layer rule -- silently, for
+               every future package -- and MemoryStore conformance had only
+               ever been checked against the sealed decoy.
+  #14 5dcf3ce  docs: deployment shape recorded as a constraint --
+               one user, one process, local machine.
+  #15 9922160  docs(adr): ADR-010 persistence model, PROPOSED not accepted.
+
+Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
+claim written down with nothing checking it, so a guard had quietly stopped
+guarding. Each fix added the missing check and proved it non-vacuous by
+mutation.
+
+Governance note: all thirteen merged without an independent review being
+required on main, because no such requirement exists. #13 and #15 did receive
+substantive owner review before merge, and #15's review caught a factual error
+in the ADR. A proposal to require the `suite` and `static` checks plus review
+is PENDING OWNER DECISION and was deliberately not acted on -- branch
+protection is the owner's to change, not the agent's.
 
 HARD ARCHITECTURAL INVARIANTS
 =============================
@@ -237,6 +309,8 @@ Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
 Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 → bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
 Phase 5: NOT AUTHORIZED / DESIGN NOT STARTED — UNAUTHORIZED / FUTURE DESIGN
+Post-Phase-4: PRs #3-#15, merged, no new phase (head 9922160) — see POST-PHASE-4 MERGES
+Persistence: ADR-010 PROPOSED, no option selected (PR #15)
 
 BOSS MODEL
 ==========
@@ -282,7 +356,8 @@ Do not turn these open items into unauthorized implementation.
 DOCUMENTATION DISCIPLINE
 ========================
 
-ADR-001 through ADR-009 are present in docs/ADR/ and serve as the decision record.
+ADR-001 through ADR-010 are present in docs/ADR/ and serve as the decision record.
+ADR-010 is PROPOSED, not accepted: it recommends without selecting.
 Do NOT create docs/DECISIONS.md — ADRs are the historical decision record.
 
 Avoid duplicate sources of truth.
@@ -308,6 +383,11 @@ Gaps verified:
   substring matchers in tests/unit/test_expected_skips.py now normalize the separator, and four
   tests drive them with both platforms' line shapes so Linux-only CI holds the Windows behaviour.
 - ScriptAwareTokenEstimator calibration: unverified without tokenizer infrastructure
+- Event.payload has no serialisation contract (Mapping[str, Any]; an event holding a
+  non-serialisable value constructs successfully and fails json.dumps). Blocks a durable
+  EventRepository; does not block a cross-session memory contract. See ADR-010.
+- CI does not require the `suite` and `static` checks to pass before merge, and no
+  independent review is required on main. Both are owner decisions, PENDING.
 
 TRACEABILITY
 ============
