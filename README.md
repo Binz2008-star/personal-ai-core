@@ -67,6 +67,19 @@ never named in business logic. Distinct from `local-llm-rig`'s benchmark results
 `local-llm-rig` is a separate repository owning the model runtime, Modelfiles, benchmarks
 and hardware evidence. This Core sits above it and consumes its measurements as evidence.
 
+## Request timeout and cold starts
+
+The first `/api/chat` request after a reboot or an unloaded model can exceed the configured
+`DEFAULT_REQUEST_TIMEOUT_SECONDS` (`120`), because the model has to be loaded into VRAM before
+the first token and that load does not count as prompt processing. Observed live on a Windows
+rig: the first request after a cold start timed out at the configured `120`s; the identical
+request completed instantly once the model was resident.
+
+The knob is the environment variable `PAC_REQUEST_TIMEOUT_SECONDS` (read at runtime by the
+Ollama provider, no code change needed), e.g. `600` for a cold start. The `120`s default is
+deliberately unchanged — raising it is a configuration decision the project tracks, not an
+assumption to bake in silently.
+
 ## Architectural invariants (hard)
 
 1. **Event != Memory** — conversations create events; memories are promoted
