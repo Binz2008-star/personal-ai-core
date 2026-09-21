@@ -44,3 +44,32 @@ jobs:
       # actually enforces which skips are allowed.
       - name: Report skips with reasons
         run: python -m pytest tests/ -q -rs
+
+  # A separate job, not more steps on `suite`, for the same reason the layers
+  # above are run separately: a lint failure and a test failure mean different
+  # things and should not hide each other. Steps are sequential, so a red
+  # suite would mean these never ran -- and the moment they stop running is
+  # the moment they stop being a gate.
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Pinned deliberately. An unpinned linter turns every upstream release
+      # into a possible red build on code nobody touched, and a gate that
+      # fails for reasons unrelated to the change is one people learn to
+      # override. Bumping these is a deliberate PR that shows what the new
+      # version found.
+      - run: pip install ruff==0.15.8 pyright==1.1.408
+
+      - name: Lint
+        run: ruff check .
+
+      # Resolves `personal_ai_core` from the src/ layout via `extraPaths` in
+      # pyproject.toml -- no editable install, so what CI checks is the tree
+      # as committed.
+      - name: Types
+        run: pyright
