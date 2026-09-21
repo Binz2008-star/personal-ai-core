@@ -1,14 +1,31 @@
 """Contract tests: adapters satisfy the Core protocols."""
 from personal_ai_core.core.contracts import (
+    ContextBudgetPolicy,
     EventRepository,
+    MemoryRetriever,
     MemoryStore,
     MessageRepository,
     ModelProvider,
     ModelRegistry,
     ModelSpecLike,
+    PromotionGate,
     SessionRepository,
     UserRepository,
 )
+# Aliased on import because `core.contracts` and `context.assembler` both
+# define a `HybridContextAssembler` -- one a Protocol, one a class. Without
+# the alias this module would bind one name to two different objects and the
+# check below would compare a thing to itself.
+from personal_ai_core.core.contracts import (
+    HybridContextAssembler as HybridContextAssemblerProtocol,
+)
+from personal_ai_core.context.assembler import HybridContextAssembler
+from personal_ai_core.context.budget import ReserveBasedBudgetPolicy
+from personal_ai_core.context.token_estimator import ScriptAwareTokenEstimator
+from personal_ai_core.core.memory import MemoryReader
+from personal_ai_core.memory.gate import DefaultPromotionGate
+from personal_ai_core.memory.retriever import SimpleMemoryRetriever
+from personal_ai_core.persistence.memory_store import InMemoryMemoryRepository
 from personal_ai_core.core.config import Settings
 from personal_ai_core.core.domain import EventType, Role
 from personal_ai_core.runtime.model_registry import ModelRegistry as ConcreteRegistry
@@ -29,6 +46,66 @@ def test_adapters_satisfy_their_protocols():
     assert isinstance(InMemoryEventRepository(), EventRepository)
     assert isinstance(SealedMemoryStore(), MemoryStore)
     assert isinstance(OllamaProvider("http://x"), ModelProvider)
+
+
+def test_the_real_memory_store_satisfies_its_contract():
+    """The store that actually writes, checked against the contract.
+
+    `SealedMemoryStore` was the only thing ever checked against `MemoryStore`,
+    and it is the decoy: it implements all four methods and raises on every
+    one. So the conformance evidence covered the implementation whose whole
+    job is to refuse, and not the one a durable backend will replace.
+
+    `MemoryStore` is the boundary that is supposed to make that replacement
+    safe. Checking only the sealed store proves it holds for an object that
+    does nothing.
+    """
+    assert isinstance(InMemoryMemoryRepository(), MemoryStore)
+
+
+def test_four_declared_protocols_have_a_conforming_implementation():
+    """Four protocols had no conformance evidence at all.
+
+    `PromotionGate` and `MemoryRetriever` arrived in Phases 3 and 4,
+    `ContextBudgetPolicy` in Phase 2, the hybrid assembler in Phase 4. Each
+    was declared, implemented, and never checked against its own declaration.
+    """
+    assert isinstance(DefaultPromotionGate(), PromotionGate)
+    assert isinstance(
+        SimpleMemoryRetriever(reader=MemoryReader(source=InMemoryMemoryRepository())),
+        MemoryRetriever,
+    )
+    assert isinstance(ReserveBasedBudgetPolicy(), ContextBudgetPolicy)
+    assert isinstance(
+        HybridContextAssembler(ScriptAwareTokenEstimator()),
+        HybridContextAssemblerProtocol,
+    )
+
+
+# --- Signature conformance, which the assertions above do NOT establish ----
+#
+# `isinstance` against a runtime_checkable Protocol is a PRESENCE check. It
+# verifies the method names exist and nothing else: a class whose every
+# method takes the wrong arguments passes it. Measured, not assumed --
+#
+#     missing method   -> isinstance False
+#     wrong signatures -> isinstance True
+#
+# These annotated assignments are what pins the signatures. They are checked
+# by pyright, which CI runs since PR #11, and rejected there if an
+# implementation's signature drifts from the contract it claims to satisfy.
+# Nothing here runs at test time beyond construction; the assertion is
+# static, and its absence from a pytest report is the point, not an omission.
+
+_memory_store: MemoryStore = InMemoryMemoryRepository()
+_promotion_gate: PromotionGate = DefaultPromotionGate()
+_memory_retriever: MemoryRetriever = SimpleMemoryRetriever(
+    reader=MemoryReader(source=InMemoryMemoryRepository())
+)
+_budget_policy: ContextBudgetPolicy = ReserveBasedBudgetPolicy()
+_hybrid_assembler: HybridContextAssemblerProtocol = HybridContextAssembler(
+    ScriptAwareTokenEstimator()
+)
 
 
 def test_event_repository_exposes_no_mutation():

@@ -149,7 +149,23 @@ def test_internal_layering_is_respected(path):
 
     layer = path.relative_to(SRC).parts[0]
     if layer not in LAYER_MAY_IMPORT:
-        pytest.skip(f"no layer rule for {layer}")
+        # Fail, not skip. A skip here made this check go dark for exactly the
+        # packages it was most needed for: every future one. A new `agent/`
+        # or `api/` would be scanned, matched against no rule, silently
+        # skipped, and reported green while importing whatever it liked.
+        #
+        # The suite did notice, but indirectly and with the wrong message:
+        # `test_expected_skips.py` caps structural skips at two, so a third
+        # made it fail saying "found 3 skips". That points at the skip
+        # budget, not at the missing rule -- and raising the budget is the
+        # obvious way to make it stop, which turns this check off for that
+        # package permanently. The easier lever was the wrong one. This names
+        # the right one instead.
+        pytest.fail(
+            f"'{layer}/' has no entry in LAYER_MAY_IMPORT, so its imports "
+            "were never checked. Add one -- a new package starts at "
+            f'{{"{layer}": {{"core"}}}} and widens only with a stated reason.'
+        )
 
     allowed = LAYER_MAY_IMPORT[layer] | {layer}
     offenders = internal_imports(path) - allowed
