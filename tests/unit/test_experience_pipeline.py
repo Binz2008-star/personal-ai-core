@@ -8,7 +8,8 @@ exists so that cannot happen.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
+from collections.abc import Iterable, Iterator
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 from personal_ai_core.core.domain import EventType
 from personal_ai_core.core.memory import (
@@ -23,6 +24,26 @@ from personal_ai_core.persistence.memory_store import InMemoryMemoryRepository
 
 
 SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "personal_ai_core"
+
+# The one module permitted to call MemoryStore.write. Written with forward
+# slashes, and module-level so the guard below and the tests that prove the
+# guard works compare against the same set rather than two copies of it.
+ALLOWED_WRITERS = {"memory/pipeline.py"}
+
+
+def _relative_module(root: PurePath, path: PurePath) -> str:
+    """Path relative to `root`, always with forward slashes.
+
+    `str(PurePath)` renders the host separator, so on Windows
+    `str(path.relative_to(SRC_ROOT))` is `memory\\pipeline.py`, which never
+    matches an ALLOWED_WRITERS entry written with `/`. The sole writer was
+    then reported as breaking the invariant it satisfies -- a false alarm on
+    the project's most load-bearing architectural claim, visible only off
+    ubuntu-latest. PR #8 fixed the same defect in test_expected_skips.py and
+    test_dependency_direction.py normalises too; this guard was the sibling
+    that did not.
+    """
+    return path.relative_to(root).as_posix()
 
 
 def _build_pipeline():
@@ -111,17 +132,17 @@ def test_rejected_candidates_are_retained_with_rejected_status():
     assert retained.status is MemoryStatus.REJECTED
 
 
-def test_pipeline_is_the_only_module_that_writes_to_memory_store():
-    """Sole-writer invariant, statically enforced.
+def _memory_store_writers(
+    root: PurePath, sources: Iterable[tuple[PurePath, str]]
+) -> list[str]:
+    """Modules under `root` that call `.write(` on a MemoryStore.
 
-    Scans every src/ file for a call whose receiver is a name bound to a
-    MemoryStore. Only pipeline.py may contain one.
+    Takes the sources rather than reading them, so the same collection code
+    that guards src/ can be driven with paths CI never sees. Returned names
+    are relative to `root`, with forward slashes.
     """
-    offenders = []
-    for path in SRC_ROOT.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        source = path.read_text(encoding="utf-8")
+    offenders: list[str] = []
+    for path, source in sources:
         tree = ast.parse(source)
         binds_memory_store: set[str] = set()
         for node in ast.walk(tree):
@@ -147,21 +168,155 @@ def test_pipeline_is_the_only_module_that_writes_to_memory_store():
                 continue
             receiver = func.value
             if isinstance(receiver, ast.Name) and receiver.id in binds_memory_store:
-                offenders.append(str(path.relative_to(SRC_ROOT)))
+                offenders.append(_relative_module(root, path))
             elif (
                 isinstance(receiver, ast.Attribute)
                 and receiver.attr in {"_store", "store"}
             ):
-                offenders.append(str(path.relative_to(SRC_ROOT)))
+                offenders.append(_relative_module(root, path))
+    return offenders
 
-    allowed = {"memory/pipeline.py"}
-    unexpected = [o for o in offenders if o not in allowed]
+
+def _src_sources() -> Iterator[tuple[PurePath, str]]:
+    for path in SRC_ROOT.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        yield path, path.read_text(encoding="utf-8")
+
+
+def test_pipeline_is_the_only_module_that_writes_to_memory_store():
+    """Sole-writer invariant, statically enforced.
+
+    Scans every src/ file for a call whose receiver is a name bound to a
+    MemoryStore. Only pipeline.py may contain one.
+    """
+    offenders = _memory_store_writers(SRC_ROOT, _src_sources())
+    unexpected = [o for o in offenders if o not in ALLOWED_WRITERS]
     assert not unexpected, (
         "MemoryStore.write is called outside memory/pipeline.py:\n  "
         + "\n  ".join(unexpected)
         + "\n\nExperiencePipeline is the sole writer. If a second writer is needed, "
-        "the invariant is being lost; add the new caller to `allowed` only after "
-        "the design has been reconsidered."
+        "the invariant is being lost; add the new caller to `ALLOWED_WRITERS` only "
+        "after the design has been reconsidered."
+    )
+
+
+def test_the_scan_still_finds_the_sole_writer():
+    """The guard passes either by finding nothing wrong or by finding nothing.
+
+    `unexpected` is empty both when every writer is permitted and when the
+    scan has stopped detecting writers at all. pipeline.py must appear.
+    """
+    offenders = _memory_store_writers(SRC_ROOT, _src_sources())
+    assert "memory/pipeline.py" in offenders, (
+        "the scan found no write call in memory/pipeline.py, so it is no "
+        f"longer detecting writers at all; it reported: {offenders}"
+    )
+
+
+# --- Proof that the guard above works off ubuntu-latest -------------------
+#
+# On Linux the separator fix is a no-op, so running the guard proves nothing
+# about it. These tests drive the comparison with Windows-shaped paths
+# directly, which is the only way to check the behaviour CI cannot reach.
+
+WINDOWS_SRC = PureWindowsPath(r"C:\repo\src\personal_ai_core")
+POSIX_SRC = PurePosixPath("/repo/src/personal_ai_core")
+
+
+def test_relative_module_uses_forward_slashes_on_a_windows_path():
+    assert (
+        _relative_module(WINDOWS_SRC, WINDOWS_SRC / "memory" / "pipeline.py")
+        == "memory/pipeline.py"
+    )
+
+
+def test_relative_module_is_unchanged_on_a_posix_path():
+    assert (
+        _relative_module(POSIX_SRC, POSIX_SRC / "memory" / "pipeline.py")
+        == "memory/pipeline.py"
+    )
+
+
+def test_the_sole_writer_is_not_reported_as_an_offender_on_windows():
+    """The false positive itself.
+
+    Before this fix the guard appended `memory\\pipeline.py` on Windows and
+    compared it against ALLOWED_WRITERS, whose entry uses `/`. The permitted
+    sole writer was therefore reported as violating the sole-writer
+    invariant, on every Windows checkout, for every run. CI runs only
+    ubuntu-latest, so the failure was unreachable there and stayed.
+    """
+    sole_writer = _relative_module(
+        WINDOWS_SRC, WINDOWS_SRC / "memory" / "pipeline.py"
+    )
+    assert sole_writer in ALLOWED_WRITERS, (
+        f"{sole_writer!r} is not in {ALLOWED_WRITERS}, so pipeline.py itself "
+        "would be reported as breaking the invariant it satisfies"
+    )
+
+
+WRITER_SOURCE = """
+from personal_ai_core.core.contracts import MemoryStore
+
+
+def promote(store: MemoryStore, record) -> None:
+    store.write(record)
+"""
+
+
+def test_the_scan_reports_windows_paths_with_forward_slashes():
+    """End-to-end through the guard's own collection code.
+
+    The three tests above check `_relative_module` in isolation, which a
+    guard that no longer calls it would still pass -- mutating only the
+    `offenders.append` sites left them all green. This drives
+    `_memory_store_writers` itself with a Windows path, so the normalisation
+    is checked where the guard actually uses it.
+    """
+    offenders = _memory_store_writers(
+        WINDOWS_SRC, [(WINDOWS_SRC / "memory" / "pipeline.py", WRITER_SOURCE)]
+    )
+    assert offenders == ["memory/pipeline.py"], (
+        f"the scan reported {offenders}, which would not match "
+        f"ALLOWED_WRITERS ({ALLOWED_WRITERS}) on a Windows checkout"
+    )
+
+
+def test_the_scan_reports_a_windows_offender_outside_the_allowed_set():
+    """The same path, for a module that is not permitted to write."""
+    offenders = _memory_store_writers(
+        WINDOWS_SRC, [(WINDOWS_SRC / "context" / "assembler.py", WRITER_SOURCE)]
+    )
+    assert offenders == ["context/assembler.py"]
+    assert not set(offenders) & ALLOWED_WRITERS
+
+
+def test_a_real_offender_is_still_caught_on_windows():
+    """The fix must not be a way of matching everything.
+
+    Normalising separators would be worthless if it also made a genuine
+    second writer match ALLOWED_WRITERS. A module outside memory/pipeline.py
+    must still fall outside the permitted set on Windows exactly as it does
+    on Linux.
+    """
+    offender = _relative_module(
+        WINDOWS_SRC, WINDOWS_SRC / "context" / "assembler.py"
+    )
+    assert offender == "context/assembler.py"
+    assert offender not in ALLOWED_WRITERS
+
+
+def test_allowed_writers_entries_are_written_with_forward_slashes():
+    """ALLOWED_WRITERS is one half of the comparison.
+
+    `_relative_module` always produces forward slashes, so an entry added
+    later with a backslash could never match anything and would silently
+    widen nothing while looking like it granted an exemption.
+    """
+    wrong = [entry for entry in ALLOWED_WRITERS if "\\" in entry]
+    assert wrong == [], (
+        f"ALLOWED_WRITERS entries must use '/', not '\\': {wrong}"
     )
 
 
