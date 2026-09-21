@@ -11,13 +11,50 @@ Everything the Core stores lives in process memory and is lost on exit. `persist
 contains `in_memory.py` and `memory_store.py`; `grep` for `psycopg`, `sqlite`,
 `sqlalchemy` or `asyncpg` across `src/` returns nothing.
 
-Phase 5 is **cross-session personal memory**. A memory that does not survive the
-process cannot be cross-session, so Phase 5 cannot begin until this is settled. That is
-why this ADR comes first.
+This ADR is about **durable persistence** and nothing else. It does not gate any phase.
 
-The decisive constraint is already recorded (ARCHITECTURE.md §1): **one user, one
-process, local machine**. It is load-bearing here — most of what separates the options
-below is concurrency, and there is none.
+### Not to be conflated with cross-session memory
+
+An earlier draft of this ADR claimed that "a memory that does not survive the process
+cannot be cross-session, so Phase 5 cannot begin until this is settled." **That claim
+is false and has been removed.** It confused two independent concerns:
+
+| | |
+|---|---|
+| **Cross-session memory semantics** | *Whose* memories a turn may recall. Today `MemoryQuery.session_id` is a hard filter in `MemoryReader.list_active_for_session` (ADR-009). Widening it is a contract and policy question. |
+| **Durable persistence** | *Whether* anything survives process exit. This ADR. |
+
+They are orthogonal. Demonstrated against the current in-memory repositories: two
+sessions write to the same `InMemoryMemoryRepository` within one process, and both
+records are present in `list_active()`. Session-scoped recall returns only the second;
+the first is filtered out by the reader, not absent from the store.
+
+```
+session-scoped (today)   session-B sees: ['something else']
+unfiltered (the store)   session-B sees: ['user prefers Arabic', 'something else']
+```
+
+**What blocks cross-session recall is the filter, not the lack of durability.** So
+cross-session memory contracts can be designed and validated against the existing
+in-memory repositories, and this ADR takes no position on when or whether that happens.
+If evidence later shows a cross-session contract that genuinely cannot be exercised
+in-process, that evidence — not this document — is what would change the sequencing.
+
+### The deployment constraint, and what kind of claim it is
+
+`ARCHITECTURE.md` §1 records an owner decision: **one user, one process, local
+machine**. Two distinct things follow, and they should not be read as one:
+
+- **The constraint is a decision**, recorded in a document whose header states it
+  describes the target architecture. It is not an observed property of a running
+  system, and nothing enforces it.
+- **The current implementation is consistent with it** — separately verified, and this
+  part is evidence: no `async`/`await`, no threading or asyncio import, and no lock
+  anywhere in `src/`.
+
+The options below are weighed against the constraint as a *decision*. Where the text
+cites code, it is citing implementation evidence. Where it cites the constraint, it is
+citing a choice that can be revisited.
 
 ## Requirements, derived rather than assumed
 
@@ -163,6 +200,10 @@ that binding them to one store is what makes option C look necessary.
 
 ## Recommendation
 
+**This is a persistence decision only.** Choosing among A–D authorizes nothing about
+cross-session memory, and authorizing cross-session memory would not select an option
+here. Neither decision implies the other, and neither is taken in this document.
+
 **Option D, with B (SQLite) as the durable store.**
 
 Reasoning, in the order the criteria actually decide it:
@@ -192,15 +233,25 @@ changes.
 
 ## What this does not decide
 
-- **Phase 5 scope.** Cross-session recall needs a `user_id` on `MemoryRecord` or a
-  session→user resolution (ADR-009). That is a Phase 5 design question, not this one.
+- **Anything about cross-session memory.** Cross-session recall needs a `user_id` on
+  `MemoryRecord` or a session→user resolution (ADR-009). That is a separate design
+  question, exercisable against the in-memory repositories, and nothing here advances
+  or blocks it.
 - **Schema.** No tables, columns or types are proposed here.
 - **Where the file lives**, and how configuration names it.
 - **Snapshot or compaction policy**, if A is chosen.
 - **Whether the event log is bounded at all.** R4 notes it grows without bound; no
   retention policy exists, under any option.
 
-## Prerequisite that blocks any implementation
+## Prerequisite — for a durable backend only
+
+Classified precisely, because the earlier draft overstated its reach:
+
+- It **is** a prerequisite for implementing a durable `EventRepository` or any backend
+  that must write an event to disk.
+- It is **not** a prerequisite for defining a cross-session memory contract. That
+  contract concerns `MemoryRecord` and the reader's filter; it does not serialise
+  anything.
 
 **`Event.payload` has no serialisation contract.** It is typed `Mapping[str, Any]` and
 nothing validates the values. Verified:
@@ -212,8 +263,9 @@ json.dumps(dict(event.payload))               ->  TypeError: not JSON serializab
 
 Any durable backend must serialise this. Today a caller can record an event that cannot
 be stored, and nothing says so until the write fails — at which point the event is the
-thing being lost. Whatever is chosen, this contract has to be settled first, and it is a
-change to `core/domain.py`, not to a persistence adapter.
+thing being lost. Whichever of A–D is chosen, this contract has to be settled before
+that backend is built, and it is a change to `core/domain.py`, not to a persistence
+adapter.
 
 A second, smaller one: `add` and `append` return `None`, so a caller cannot distinguish
 a completed write from an accepted one. With an in-memory dict the distinction is empty.
@@ -233,5 +285,9 @@ With a durable store and an `fsync` policy it is not.
 ## Decision
 
 **None.** This ADR is proposed for review. It recommends D+B and records why A remains
-defensible. Implementation requires separate owner authorization, and the
-`Event.payload` prerequisite has to be resolved before any backend work begins.
+defensible.
+
+Its scope is durable persistence. It does not gate, sequence or authorize Phase 5, and
+Phase 5 remains NOT AUTHORIZED / DESIGN NOT STARTED independently of it. Implementation
+of any option requires separate owner authorization, and the `Event.payload`
+prerequisite has to be resolved before durable backend work begins.
