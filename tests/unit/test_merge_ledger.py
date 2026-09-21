@@ -38,7 +38,15 @@ REPO = Path(__file__).resolve().parents[2]
 STATE = REPO / "PROJECT_STATE.md"
 
 # `  #12 9341e6e  feat(packaging): ...`
-LEDGER_ROW = re.compile(r"^  #(\d+)\s+([0-9a-f]{7,40})\s", re.MULTILINE)
+#
+# Deliberately permissive about the SHA token: it captures whatever follows
+# the PR number and `_valid_sha` judges it. Matching `[0-9a-f]{7,40}` here
+# instead meant a row with a malformed SHA matched nothing and was dropped
+# from the ledger entirely -- silently, so a corrupt row read as an absent
+# one. Found by a mutation that wrote a 41-character SHA and watched the
+# check pass.
+LEDGER_ROW = re.compile(r"^  #(\d+)\s+(\S+)", re.MULTILINE)
+VALID_SHA = re.compile(r"^[0-9a-f]{7,40}$")
 MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+)\b")
 
 # The ledger starts after Phase 4; #1 and #2 are the phase merges themselves
@@ -70,11 +78,13 @@ def merges_in_git() -> dict[int, str]:
         )
 
     found: dict[int, str] = {}
-    for line in _git("log", "--merges", "--format=%h%x00%s").splitlines():
-        short, _, subject = line.partition("\x00")
+    # %H, not %h. An abbreviation cannot be compared exactly against a claim
+    # of unknown length, and git chooses the abbreviation length itself.
+    for line in _git("log", "--merges", "--format=%H%x00%s").splitlines():
+        full, _, subject = line.partition("\x00")
         match = MERGE_SUBJECT.match(subject)
         if match:
-            found[int(match.group(1))] = short
+            found[int(match.group(1))] = full
     if not found:
         pytest.fail(
             "no `Merge pull request #N` commits found in git history at all. "
@@ -94,7 +104,38 @@ def ledger() -> dict[int, str]:
             "section is the thing this test checks; if it is gone, the record "
             "is back to where it was before it existed."
         )
+    malformed = {num: sha for num, sha in rows if not VALID_SHA.match(sha)}
+    if malformed:
+        pytest.fail(
+            "PROJECT_STATE.md has ledger rows whose SHA is not 7-40 hex "
+            f"characters: {malformed}. Reported rather than skipped -- a row "
+            "that cannot be parsed is a row that is not being checked."
+        )
     return {int(num): sha for num, sha in rows}
+
+
+def mismatched(
+    ledger: dict[int, str], merges: dict[int, str]
+) -> dict[int, tuple[str, str]]:
+    """Ledger rows whose SHA is not a true prefix of the real merge commit.
+
+    Exact to the length of the claim. `merges` holds FULL SHAs and a claim of
+    any accepted length must prefix one of them, so a seven-character row is
+    validated on all seven and a forty-character row on all forty.
+
+    An earlier version compared `merges[num].startswith(claimed[:7])` against
+    an abbreviated SHA, which checked seven characters and no more. A wrong
+    forty-character SHA sharing its first seven with the real one passed.
+    Review caught it; the mutation round did not, because every mutation it
+    tried differed inside those seven.
+
+    A pure function so the cases below can drive it without a repository.
+    """
+    return {
+        num: (claimed, merges[num])
+        for num, claimed in ledger.items()
+        if num in merges and not merges[num].startswith(claimed)
+    }
 
 
 def test_every_recorded_sha_is_the_real_merge_commit(ledger, merges_in_git):
@@ -104,11 +145,7 @@ def test_every_recorded_sha_is_the_real_merge_commit(ledger, merges_in_git):
     every other row has a merge commit (4e3074b). A mechanical check caught it;
     reading did not.
     """
-    wrong = {
-        num: (claimed, merges_in_git[num])
-        for num, claimed in ledger.items()
-        if num in merges_in_git and not merges_in_git[num].startswith(claimed[:7])
-    }
+    wrong = mismatched(ledger, merges_in_git)
     assert not wrong, (
         "PROJECT_STATE.md records merge SHAs that do not match git "
         f"(pr: recorded -> actual): {wrong}"
@@ -138,3 +175,65 @@ def test_the_ledger_has_not_fallen_behind(ledger, merges_in_git):
         "Add them to POST-PHASE-4 MERGES. A ledger that drifts is the defect "
         "that section was written to end."
     )
+
+
+# --- The comparison itself, driven without a repository -------------------
+
+REAL = "0af4a9442d369b1f422d07daa9754dd780ace3b3"
+
+
+def test_a_wrong_sha_sharing_the_first_seven_characters_is_caught():
+    """The case review found, and the reason %H replaced %h.
+
+    Seven characters of agreement is not agreement. Against an abbreviated
+    SHA there was nothing left to disagree with; against the full one there
+    are thirty-three more characters, and they are checked.
+    """
+    liar = "0af4a94" + "d" * 33
+    assert liar[:7] == REAL[:7] and liar != REAL
+    assert mismatched({17: liar}, {17: REAL}) == {17: (liar, REAL)}
+
+
+def test_an_honest_abbreviation_still_passes():
+    """Seven characters that are true remain true. The fix is not a tightening
+    of what the ledger must record, only of how it is compared."""
+    assert mismatched({17: REAL[:7]}, {17: REAL}) == {}
+    assert mismatched({17: REAL[:12]}, {17: REAL}) == {}
+    assert mismatched({17: REAL}, {17: REAL}) == {}
+
+
+def test_a_sha_differing_in_the_first_seven_is_still_caught():
+    """The case the original comparison did catch, kept so the fix is not a
+    trade of one blind spot for another."""
+    assert mismatched({17: "deadbee"}, {17: REAL}) == {17: ("deadbee", REAL)}
+
+
+def test_a_pr_git_has_no_merge_for_is_not_reported_here():
+    """`mismatched` compares; it does not decide what is missing. That is
+    `test_no_recorded_merge_is_invented`, and keeping the two apart means
+    neither failure is reported as the other."""
+    assert mismatched({99: "abc1234"}, {17: REAL}) == {}
+
+
+def test_a_malformed_sha_is_reported_rather_than_skipped():
+    """A row that cannot be parsed is a row that is not being checked.
+
+    The first version of this file matched the SHA with `[0-9a-f]{7,40}`
+    inside the row pattern. A 41-character SHA matched neither that nor the
+    surrounding row, so the entry vanished from the ledger and the check
+    passed -- and `the_ledger_has_not_fallen_behind` then counted the vanished
+    row as merely unrecorded, inside its lag budget. Two assertions agreed
+    that nothing was wrong.
+
+    Found by a mutation of this file's own subject, not by review.
+    """
+    assert VALID_SHA.match("9341e6e")
+    assert VALID_SHA.match("9341e6e220b6eaefca395cdb8f6896c76b97856d")
+    assert not VALID_SHA.match("9341e6e2" + "d" * 33)   # 41 characters
+    assert not VALID_SHA.match("9341e6")                # 6
+    assert not VALID_SHA.match("9341g6e")               # not hex
+
+    # And the row pattern now captures such a token rather than ignoring it,
+    # which is what lets the fixture fail on it.
+    row = "  #12 " + "9341e6e2" + "d" * 33 + "  subject\n"
+    assert LEDGER_ROW.findall(row) == [("12", "9341e6e2" + "d" * 33)]
