@@ -4,9 +4,15 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: 156c17bdb4c5a0843a947f140b9a3a6a66b3cc90 (short: 156c17b — Merge pull request #36)
-  The accepted PHASE is still Phase 4. PRs #3-#37 are correction, hardening
+Main branch head: a9c3b6147cf78f5e4fcb694998c50c18129aaa18 (short: a9c3b61 — Merge pull request #39)
+  The accepted PHASE is still Phase 4. PRs #3-#39 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
+  One exception is worth naming: PR #39 BUILT Phase 1's last component
+  rather than correcting Phase 4. It completes a phase's components; it does
+  not accept that phase, and it does not make a new one.
+  (Phrased so the line does not begin with a "#<number> " token: the ledger
+  parser reads any such line as a row, and the first draft of this paragraph
+  was picked up as a row whose SHA was the word "is". The guard caught it.)
 Phase 2 accepted commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511
 Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
 Phase 4 implementation: e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 (PR #2, branch claude/phase-4-memory-aware-context)
@@ -15,16 +21,18 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (156c17b): 561 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
-  (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard.
+- Current main (a9c3b61): 585 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
+  (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard,
+   +24 the identity layer -- 19 of them new, the rest from the layering
+   check, which is parametrised over src/ and so grew with the package.
    The long-standing caveat -- 541 the last two-platform figure, 561 Linux
-   only -- is closed by PR #36: `suite-windows` runs the whole suite on
-   windows-latest and reported 561 passed / 14 skipped there. The figure is
-   no longer a single-platform claim, and the gate that confirms it is in CI
-   rather than in someone remembering to run it)
+   only -- was closed by PR #36: `suite-windows` runs the whole suite on
+   windows-latest. The figure is no longer a single-platform claim, and the
+   gate that confirms it is in CI rather than in someone remembering to run
+   it on a laptop)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at 156c17b (Phase 4 merged, plus PRs #3-#37)
+Synchronization: origin/main is at a9c3b61 (Phase 4 merged, plus PRs #3-#39)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -33,25 +41,31 @@ Phase 0 — HISTORICAL / COMPLETED
   Note: Historical foundation; no separate acceptance gate.
         Evidence: docs/COMPONENT_EXTRACTION_MATRIX.md
 
-Phase 1 — PARTIAL / NOT COMPLETE
+Phase 1 — COMPONENTS COMPLETE / NOT ACCEPTED
   Scope: Core foundation vertical slice —
          User → Session → Message → ModelProvider → Response → Event
-  Status: docs/PHASE_1_RECONCILIATION.md states that ONE of the five playbook
-          components defined for Phase 1 is unbuilt -- identity. It was two
-          until PR #23; the memory foundation was built in Phase 3 and the
-          reconciliation had gone on saying otherwise. Phase 1 is therefore
-          still NOT complete, and must not be summarised as completed.
-          Re-verified at 156c17b: src/personal_ai_core/identity/ does not
-          exist, and ResponsePolicy / BehavioralContract have 0 occurrences in
-          src/.
-          Contract design: ADR-011 — PROPOSED. Shape (questions 1-4) and how
-          the text is governed (5-8). Contract text: ADR-012 — PROPOSED,
-          five numbered rules and the response policy's wording, each rule
-          naming the behavioural failure it answers.
-          Neither ADR authorises implementation, so neither advances Phase 1.
-          What Phase 1 now waits on is the BUILD, not a further decision: the
-          design is complete and unaccepted, which are different states.
-  Evidence: docs/PHASE_1_VERTICAL_SLICE.md, docs/PHASE_1_RECONCILIATION.md
+  Status: all five playbook components are now built. Identity was the last,
+          and it was the reason this line read PARTIAL from the beginning:
+          two were missing until PR #23 established that the memory
+          foundation had in fact been built in Phase 3, and identity remained
+          until PR #39.
+          Measured at a9c3b61, not asserted: src/personal_ai_core/identity/
+          exists (__init__.py, composer.py, text.py), ResponsePolicy and
+          BehavioralContract occur in src/ -- core/identity.py defines them,
+          identity/text.py supplies their content -- and the identity message
+          is first in every prompt the provider receives.
+          Design: ADR-011 (shape, questions 1-4; governance, 5-8) and ADR-012
+          (the text). Both remain PROPOSED. PR #39 implements them; it does
+          not accept them, and this file will not read an implementation as
+          an acceptance.
+          COMPONENTS COMPLETE IS NOT ACCEPTED. The phase gate is
+          Design -> Authorization -> Implementation -> Tests -> Invariant
+          review -> Git verification -> Owner acceptance. Everything up to
+          and including tests is done; the last step is the owner's and has
+          not been taken.
+  Evidence: docs/PHASE_1_VERTICAL_SLICE.md, docs/PHASE_1_RECONCILIATION.md,
+          docs/ADR/ADR-011-identity-layer-contract.md,
+          docs/ADR/ADR-012-identity-text.md
 
 Phase 2 — ACCEPTED
   Commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511 (short: 0a8d798)
@@ -219,6 +233,19 @@ claim written in one place with nothing that notices it going stale.
                a live surface -- grounding.py puts retrieved user documents in
                the SAME Role.SYSTEM message as the contract, and nothing said
                which wins
+  #38 c742663  docs: record #35-#37 and close the two-platform caveat. 561 is
+               a figure confirmed on Linux and Windows from here, by a CI job
+               rather than by someone remembering to run it
+  #39 a9c3b61  feat(identity): BUILD the identity layer -- Phase 1's last
+               component. Types in core, text in identity/, injected by the
+               composition root; identity first in every prompt, before the
+               evidence, because rule 5 decides what to do with a retrieved
+               document and has to be read before it. The share is funded by
+               MEASURING the composed text, not by a constant: a constant
+               would be ADR-005's 24000 again. Five mutations, each the
+               precise failure. The layering guard failed on the new package
+               until LAYER_MAY_IMPORT gained it -- which is what that check
+               was rewritten to do instead of skipping
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -418,23 +445,27 @@ Post-Phase-4: merged, no new phase — see POST-PHASE-4 MERGES for the
   because nothing checks a summary line. A phase gate is a durable fact;
   a head is not.
 Persistence: ADR-010 PROPOSED, no option selected (PR #15)
-Identity: ADR-011 PROPOSED, not accepted — contract design only, nothing built
-  Prerequisite A: DONE — ContextAllocation carries identity, funded at zero
+Identity: BUILT (PR #39). ADR-011 and ADR-012 remain PROPOSED, not accepted
+  Prerequisite A: DONE — ContextAllocation carries identity. No longer funded
+    at zero: the factory measures the composed text with the same estimator
+    the rest of the budget uses, and `source` records the figure
   Prerequisite B: DONE — generation_reserve is an enforced provider limit
-  BOTH DONE does NOT authorise identity implementation. They were obstacles,
-  not permission. identity/ does not exist and must not be created without a
-  separate decision.
   Contract questions 5-8 (PR #34): DECIDED, not reviewed — they govern the
   text: where it lives, what yields on conflict, how a rule may change, which
-  layer holds it.
+  layer holds it. #39 follows all four.
   Contract text (ADR-012, PR #37): PROPOSED, not accepted — ResponsePolicy's
-  wording and five numbered rules, each naming the failure it answers. Rules 4
-  and 5 close an omission rather than extending scope: ADR-011 carried three
-  of the five ADAPT assets, and rule 5 answers a surface that exists in built
-  code today.
-  Nothing about identity is BUILT. The design is now complete and the
-  implementation is a separate decision -- design-complete and authorised are
-  different states, and this file will not blur them.
+  wording and five numbered rules, each naming the failure it answers.
+  Built (PR #39): core/identity.py holds the TYPES, identity/ holds the TEXT
+  and the composer, conversation/factory.py injects it. The identity message
+  is first in every prompt, ahead of the evidence, because rule 5 decides
+  what a retrieved document's instructions are worth and must be read before
+  the document.
+  WHAT IS STILL NOT TRUE: neither ADR is accepted. An implementation is not
+  an acceptance, and this file will not read one as the other. Nothing in
+  src/ ENFORCES any rule -- the contract is an instruction to the model, as
+  ADR-011 question 6 states plainly. Whether rules 3 and 5 deserve a
+  code-level guard in addition to their sentence is undecided and is the
+  first identity question left.
 
 BOSS MODEL
 ==========
