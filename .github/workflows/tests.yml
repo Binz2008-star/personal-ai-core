@@ -7,15 +7,7 @@ on:
 
 jobs:
   suite:
-    # Windows is here because Linux CI could not see it: two path-separator
-    # defects reached main because every check ran on ubuntu-latest alone.
-    # fail-fast: false so a red Windows leg does not cancel the Linux one --
-    # "it broke somewhere" is not the same finding as which platform broke.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       # Full history, not the default shallow clone.
       # `tests/unit/test_merge_ledger.py` checks PROJECT_STATE.md's merge
@@ -95,3 +87,43 @@ jobs:
       # as committed.
       - name: Types
         run: pyright
+
+  # Windows exists as its own job, NOT as a matrix leg on `suite`, and the
+  # reason is worth stating so nobody "simplifies" it back.
+  #
+  # A matrix renames the check: `suite` becomes `suite (ubuntu-latest)` and
+  # `suite (windows-latest)`. Branch protection on main requires a check named
+  # `suite`. A matrix therefore means that check is never reported again --
+  # the first attempt at this change sat at mergeable_state `blocked` with
+  # every leg green, and merging it would have left main requiring a check
+  # that no run can produce, blocking every later PR.
+  #
+  # So the name stays put and Windows arrives beside it. Adding this job to
+  # the required checks is a protection change, and a separate decision.
+  #
+  # It runs the full suite and nothing else. The named steps on `suite` exist
+  # to make a Linux failure legible; on Windows the question is narrower --
+  # does the suite pass on a platform whose path separator differs -- and two
+  # defects reached main because nothing asked it.
+  suite-windows:
+    runs-on: windows-latest
+    steps:
+      # fetch-depth: 0 for the same reason as `suite`: the merge-ledger test
+      # compares PROJECT_STATE.md against `git log --merges`, and a shallow
+      # clone gives it nothing to compare.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+
+      - name: Full suite
+        run: python -m pytest tests/ -v
+
+      # Same reason as on `suite`: a skipped test must never read as a passed
+      # one, and a skip that only happens on Windows is exactly the kind this
+      # job exists to surface.
+      - name: Report skips with reasons
+        run: python -m pytest tests/ -q -rs
