@@ -4,12 +4,13 @@
 
 - Design questions: **RESOLVED** (four, below; reviewed and accepted)
 - Identity contract: **PROPOSED**, not accepted
-- Identity implementation: **NOT AUTHORIZED**, gated on two prerequisites
+- Identity implementation: **NOT AUTHORIZED**, gated on prerequisite A
+- Prerequisite B: **DONE** — the generation reserve is an enforced provider limit
 
 This ADR defines a contract. It authorises no implementation, creates no package, and
 does not complete Phase 1. Answering its design questions does not authorise building it:
-design-complete and implementable are different states, and the two prerequisites below
-are the distance between them.
+design-complete and implementable are different states, and the prerequisites below are
+the distance between them. One of the two is now closed.
 
 ## Context
 
@@ -135,19 +136,24 @@ must reflect this decision so the two architectural records do not disagree.
 The original question assumed that the response policy and generation budget might
 disagree about the answer-length number.
 
-The current implementation shows that the problem is earlier than that: the generation
-reserve is currently accounting-only.
+The implementation showed that the problem was earlier than that: the generation reserve
+was accounting-only.
 
-`DEFAULT_GENERATION_RESERVE = 1024` represents reserved generation capacity, but the
-generation path does not currently enforce that value as a provider output limit.
+**As measured when this ADR was written:** `DEFAULT_GENERATION_RESERVE = 1024` represented
+reserved generation capacity, but the generation path did not enforce it as a provider
+output limit. There was no `max_tokens`, `num_predict` or equivalent cap anywhere in
+`src/`. `OllamaProvider` accepted provider options; nothing populated them with the
+reserve.
 
-At the current implementation there is no `max_tokens`, `num_predict`, or equivalent
-generation cap in `src/`. `OllamaProvider` supports provider options, but the normal
-generation path does not currently use those options to enforce `generation_reserve`.
-
-The directly established architectural fact is therefore:
+The finding stood as:
 
 > `generation_reserve` is currently accounting-only and is not enforced by the provider.
+
+**That is no longer the state.** Prerequisite B closed it: `ConversationService` now
+derives the limit from the budget policy and sends it as `num_predict` on every turn,
+grounded or not. The finding is kept rather than deleted, because the *reasoning* below
+is what makes the three-way separation necessary, and that reasoning does not expire with
+the defect that exposed it.
 
 The responsibilities must remain separate:
 
@@ -162,7 +168,7 @@ generation budget
 
 provider enforcement
     → makes that number real
-      (currently missing)
+      (prerequisite B — done)
 ```
 
 The policy owns the instruction.
@@ -225,22 +231,25 @@ class and no file: see **Scope guardrails**, which forbids creating
 The four design questions are now resolved, but identity implementation remains
 unauthorised.
 
-Two prerequisites must be handled as separate changes and separately authorised.
+Each prerequisite is a separate change, separately authorised. One remains.
 
 ```text
 ADR-011 identity implementation
         |
-        +-- prerequisite A
+        +-- prerequisite A   OPEN
         |   ContextAllocation gains an explicit identity share
         |   (Implementation boundary: "explicit context-budget share")
         |
-        +-- prerequisite B
-            generation_reserve becomes an enforced provider limit
+        +-- prerequisite B   DONE
+            generation_reserve is an enforced provider limit
             (Q4 finding)
         |
         v
     Identity layer implementation
 ```
+
+Prerequisite A being the only one left does **not** authorise identity implementation.
+Closing A is its own decision, and building identity after it is another.
 
 ### Prerequisite A — explicit identity budget share
 
@@ -260,17 +269,30 @@ authorised independently.
 
 This ADR does **not** implement that change.
 
-### Prerequisite B — enforce generation reserve
+### Prerequisite B — enforce generation reserve — **DONE**
 
-The current generation path reserves `generation_reserve` for accounting but does not
-pass an equivalent output limit to the provider.
+**Was:** the generation path reserved `generation_reserve` for accounting and passed no
+equivalent output limit to the provider.
 
-Making the reserve enforceable is therefore a separate generation-path change.
+**Now:** `ConversationService` takes a `ContextBudgetPolicy` and derives the turn's limit
+from it, sending it as `num_predict`. Verified against the payload the transport
+received, not against the allocation — asserting on the allocation would re-check the
+accounting that was already true.
 
-The existing `OllamaProvider` already accepts provider options; this does not authorise
-creating a new provider abstraction.
+Two points of the closed change are worth keeping, because they were decisions rather
+than mechanics:
 
-This ADR does **not** implement that change.
+- **Enforcement is unconditional.** The reserve is unreachable on the ungrounded path:
+  `_ground` returns `None` without a `context_builder`, so there is no allocation to
+  read. Enforcing only where an allocation exists would have made the limit conditional
+  on whether retrieval happened to be wired, which is not a limit. The policy is
+  therefore a required constructor argument: no service can exist without one.
+- **An explicit caller value wins.** A caller naming `num_predict` has said something
+  more specific than the default, and silently overriding it would make the `options`
+  parameter a lie. The limit is recorded on `GENERATION_REQUESTED` either way.
+
+No new provider abstraction was created: `OllamaProvider` already accepted options and
+is untouched.
 
 ## Scope guardrails
 
