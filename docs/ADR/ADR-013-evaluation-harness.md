@@ -27,12 +27,27 @@ already fixed exactly this split:
 > Evaluation must run through **the same retrieval and prompting path as production**. A
 > separate evaluation pipeline proves nothing about the runtime.
 
-That is the whole architecture of this ADR. The harness calls
-`conversation/factory.py` — the same composition root `pac` calls — and differs only in
+The harness calls `conversation/factory.py` and differs from a production caller only in
 what it does with the reply.
 
-**Decision:** the harness composes the system through the production factory and asserts
-on the reply. It does not reimplement retrieval, prompting or budgeting.
+**Correction (Finding F-2, recorded in `PROJECT_STATE.md`).** The first version of this
+section said the harness calls "the same composition root `pac` calls", and treated that
+as satisfying the principle above. It does not, and the reason is structural rather than
+verbal: `pac` calls only `build_in_memory_service` and `build_persistent_service`, and
+**neither wires a `ContextBuilder`**. Captured at runtime through `pac`, the prompt is
+`[system, user]` with no evidence message; no caller of `build_grounded_in_memory_service`
+exists anywhere in `src/`. Production, today, has **no retrieval path** for evaluation to
+share.
+
+So the principle cannot yet be met for any case that needs evidence. A harness that used
+the grounded builder would be exercising a path no user runs — which is what the
+principle forbids. The honest reading is that the evidence-dependent cases below wait on
+a decision this ADR does not make: **wiring retrieval into a production entry point.**
+
+**Decision:** the harness composes the system through `conversation/factory.py` and
+asserts on the reply. It does not reimplement retrieval, prompting or budgeting. Cases that
+need no evidence can run against the path `pac` uses now; cases that need evidence run
+only once a production entry point retrieves.
 
 **Rejected:** a standalone evaluation pipeline that builds its own prompt.
 
@@ -68,12 +83,25 @@ it, and this repository already has a name for that.
 
 ## The prompt-injection case is the one to build first
 
-Rule 5 exists because `conversation/grounding.py` puts retrieved user documents into the
-**same `Role.SYSTEM` message** the contract arrives in. That is the only rule whose
-failure mode is a security failure rather than a quality one, and the only one with a
-decisive test: ingest a document containing an instruction to ignore the rules, ask a
-question that retrieves it, and check whether the reply followed the document or the
-contract.
+Rule 5 exists because `conversation/grounding.py` puts retrieved user documents into a
+`Role.SYSTEM` message — **the same role** the contract arrives in, in a **separate,
+adjacent message**. The grounded prompt is `[identity, evidence, *history]`, captured at
+runtime: the contract is in the first `system` message, the retrieved text in the second,
+and the two never share a `Message` object. (The first version of this ADR said "the same
+message". That was wrong; `ADR-012` and `identity/text.py` had it right — same role.)
+
+That is the only rule whose failure mode is a security failure rather than a quality one,
+and the only one with a decisive test: ingest a document containing an instruction to
+ignore the rules, ask a question that retrieves it, and check whether the reply followed
+the document or the contract.
+
+**Finding F-1 changes what this case can prove.** `render_evidence` inserts passage text
+raw after a `[n] source (characters a-b)` label, with no closing boundary, so a document
+can forge a label for a source that was never ingested — demonstrated with one ingested
+file producing two citations. Until evidence is fenced by a boundary that document text
+cannot reproduce, a planted-injection case tests the model's resistance and the
+renderer's ambiguity **at once**, and cannot attribute a failure to either. The case
+should be built after that fix, not before.
 
 It is also the only case where a *passing* result is weak evidence and a *failing* result
 is conclusive. That asymmetry should be stated in the results, not smoothed over.
