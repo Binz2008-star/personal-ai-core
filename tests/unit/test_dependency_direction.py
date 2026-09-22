@@ -49,6 +49,12 @@ LAYER_MAY_IMPORT = {
     # import it -- the composer reaches ConversationService through
     # factory.py, exactly as the budget policy does.
     "identity": {"core"},                           # ADR-011/ADR-012 identity
+    # The entry point. WIDER than every other layer, and the reason is the
+    # one thing it does: it calls the composition root. `conversation` is on
+    # the list so it can reach factory.py; no adapter is, because knowing
+    # which concrete class satisfies which contract is factory.py's job and
+    # duplicating it here would give the system two composition roots.
+    "app": {"core", "conversation"},                # the entry point
 }
 COMPOSITION_ROOTS = {"conversation/factory.py"}
 
