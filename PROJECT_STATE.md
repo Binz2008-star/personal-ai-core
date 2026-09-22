@@ -4,12 +4,13 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: b2bcd834b9852bc27d53a78a8f7fd06e08da13f8 (short: b2bcd83 — Merge pull request #42)
-  The accepted PHASE is still Phase 4. PRs #3-#42 are correction, hardening
+Main branch head: 29f77705d99ae01e5141dd5b20b35e3abf31262f (short: 29f7770 — Merge pull request #45)
+  The accepted PHASE is still Phase 4. PRs #3-#45 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
-  One exception is worth naming: PR #39 BUILT Phase 1's last component
-  rather than correcting Phase 4. It completes a phase's components; it does
-  not accept that phase, and it does not make a new one.
+  Three exceptions are worth naming, because "correction and hardening" no
+  longer covers them: PR #39 BUILT Phase 1's last component; PR #44 wired a
+  durable store; PR #45 added an entry point, so the system can be RUN rather
+  than only imported. None of the three accepts a phase or starts one.
   (Phrased so the line does not begin with a "#<number> " token: the ledger
   parser reads any such line as a row, and the first draft of this paragraph
   was picked up as a row whose SHA was the word "is". The guard caught it.)
@@ -21,7 +22,7 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (b2bcd83): 626 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
+- Current main (29f7770): 648 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
   (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard,
    +24 the identity layer -- 19 of them new, the rest from the layering
    check, which is parametrised over src/ and so grew with the package;
@@ -35,7 +36,7 @@ Test verification (remote):
    it on a laptop)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at b2bcd83 (Phase 4 merged, plus PRs #3-#42)
+Synchronization: origin/main is at 29f7770 (Phase 4 merged, plus PRs #3-#45)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -52,7 +53,7 @@ Phase 1 — COMPONENTS COMPLETE / NOT ACCEPTED
           two were missing until PR #23 established that the memory
           foundation had in fact been built in Phase 3, and identity remained
           until PR #39.
-          Re-measured at b2bcd83, not carried over: src/personal_ai_core/identity/
+          Re-measured at 29f7770, not carried over: src/personal_ai_core/identity/
           exists (__init__.py, composer.py, text.py), ResponsePolicy and
           BehavioralContract occur in src/ -- core/identity.py defines them,
           identity/text.py supplies their content -- and the identity message
@@ -120,7 +121,7 @@ Phase 5 — NOT AUTHORIZED / DESIGN NOT STARTED
          before merge. See also CURRENT LIMITATIONS and BLOCKED WORK, which
          state the same thing from the feature side and remain accurate.
 
-PERSISTENCE — ADR PROPOSED; THE RECOMMENDED OPTION IS BUILT AND UNWIRED
+PERSISTENCE — ADR PROPOSED; THE RECOMMENDED OPTION IS BUILT AND WIRED
   ADR-010 (docs/ADR/ADR-010-persistence-model.md, PR #15) compares four
   options and recommends D+B -- a durable store for what cannot be rebuilt,
   knowledge left in memory -- recording why an append-only log remains
@@ -130,12 +131,13 @@ PERSISTENCE — ADR PROPOSED; THE RECOMMENDED OPTION IS BUILT AND UNWIRED
   contract, checked at construction. The second, smaller one is still open:
   `add` and `append` return None, so a caller cannot distinguish a completed
   write from an accepted one.
+  WIRED (PR #44): build_persistent_service composes the ungrounded slice on
+  SQLite, and PR #45's `pac` uses it by default. The in-memory builder is
+  unchanged and is still what --ephemeral and most tests use.
   Built (PR #42): persistence/sqlite.py -- users, sessions, messages, events
   and memory records. A schema, no migration yet, NO new dependency (sqlite3
   is stdlib), no Neon, no pgvector. Knowledge is deliberately not stored: it
   is derived and rebuildable by re-ingestion (R4).
-  NOT WIRED. The default composition still uses the in-memory repositories.
-  Which store a built system uses is its own decision and has not been taken.
   Choosing an option authorizes nothing about Phase 5, and authorizing
   Phase 5 would not select an option.
 
@@ -278,6 +280,21 @@ claim written in one place with nothing that notices it going stale.
                No new dependency -- sqlite3 is stdlib. NOT wired into the
                factory: which store the default composition uses is its own
                decision
+  #43 06b8a24  docs: record #40-#42 and rewrite the persistence block, every
+               line of which had stopped being true
+  #44 71e6a42  feat(conversation): build_persistent_service -- the durable
+               slice. `database` is REQUIRED with no default: a library that
+               writes where the caller did not name loses data where the
+               caller does not look. Restart tests, not reopen tests -- the
+               second process sends the first process's turns to the model
+  #45 29f7770  feat(app): the entry point. `pac`, and `python -m
+               personal_ai_core.app` -- NOT a root __main__.py, which belongs
+               to no layer and fails the layering guard. app/ is the widest
+               rule in the project ({"core", "conversation"}) for the one
+               thing an entry point does: call the composition root. No
+               adapter is on that list, or the system has two composition
+               roots. Failures are sentences: an unreachable model names
+               PAC_OLLAMA_HOST rather than raising
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
