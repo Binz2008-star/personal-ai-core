@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: 6213d81e2794f20fe8ec906fe73a377295be574e (short: 6213d81 — Merge pull request #46)
-  The accepted PHASE is still Phase 4. PRs #3-#46 are correction, hardening
+Main branch head: b7fcb0a4cea8a26871c24cb30a6c35a432ba3ae0 (short: b7fcb0a — Merge pull request #49)
+  The accepted PHASE is still Phase 4. PRs #3-#49 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
   Three exceptions are worth naming, because "correction and hardening" no
   longer covers them: PR #39 BUILT Phase 1's last component; PR #44 wired a
@@ -22,11 +22,11 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (6213d81): 648 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
+- Current main (b7fcb0a): 659 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
   (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard,
    +24 the identity layer -- 19 of them new, the rest from the layering
    check, which is parametrised over src/ and so grew with the package;
-   +14 the Event.payload contract, +27 the SQLite backend, of which the
+   +14 the Event.payload contract, +11 the F-1 evidence boundary, +27 the SQLite backend, of which the
    conformance cases run TWICE because they are parametrised over both the
    in-memory and the SQLite implementation.
    The long-standing caveat -- 541 the last two-platform figure, 561 Linux
@@ -36,7 +36,7 @@ Test verification (remote):
    it on a laptop)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at 6213d81 (Phase 4 merged, plus PRs #3-#46)
+Synchronization: origin/main is at b7fcb0a (Phase 4 merged, plus PRs #3-#49)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -301,6 +301,20 @@ claim written in one place with nothing that notices it going stale.
                because it cannot be run where it was written. Scores the
                CONTRACT, not quality; rejects an LLM judge. Two of its claims
                were wrong and are corrected under Findings F-1/F-2
+  #47 e2a0969  docs: record #43-#45 in the merge ledger. Opened after #46 and
+               merged before it; the rows are in PR order, not merge order
+  #48 74912ed  docs: record Findings F-1 (citation spoofing from inside a
+               document, demonstrated) and F-2 (ADR-013 assumed a retrieval
+               path `pac` does not have), and correct ADR-013's two wrong
+               claims in place. The audit trail was checked and left OUT of
+               the finding: it recorded the one chunk actually retrieved
+  #49 b7fcb0a  fix(grounding): fence each passage and recollection between
+               lines carrying a boundary token the document cannot forge --
+               SHA-256 over every rendered item, the attacker's own text
+               included, so forging it is a fixed-point search. Derived, not
+               random, because rendering is deterministic on purpose. Closes
+               F-1. Also repaired a guard #39 had made vacuous: it read
+               last_messages[0], which had been identity since #39
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -570,7 +584,7 @@ independent sources that agreed on every point: the prompt the transport actuall
 received, captured at runtime, and a static read by an agent given the questions but
 not the reviewer's conclusions -- because the reviewer had written ADR-013.
 
-F-1  CITATION SPOOFING FROM INSIDE A DOCUMENT                            OPEN
+F-1  CITATION SPOOFING FROM INSIDE A DOCUMENT                  CLOSED BY #49
      conversation/grounding.py `render_evidence` (:115-116) renders each passage as
      `[n] <source> (characters a-b)` followed by the passage text RAW -- no fence, no
      escaping, no closing boundary. A document can therefore write a line that is
@@ -590,6 +604,12 @@ F-1  CITATION SPOOFING FROM INSIDE A DOCUMENT                            OPEN
      The only trust boundary between the contract and retrieved text is PROSE --
      rule 5, in a different message. No code marks retrieved content as untrusted.
      render_memories (:148-164) inserts memory content raw in the same way.
+     CLOSED by #49: each passage and each recollection now sits between an opening
+     and a closing line carrying a boundary token derived from every rendered item,
+     and both preambles say what is inside is data, not instructions. The exact
+     attack above is a test (tests/unit/test_evidence_boundary.py). What the fix does
+     NOT claim: that a model reading the fenced block will obey rule 5. That is a
+     behavioural property and belongs to ADR-013's injection case, still unbuilt.
 
 F-2  ADR-013 ASSUMED A PRODUCTION RETRIEVAL PATH THAT DOES NOT EXIST      DOCUMENTED
      `pac` calls only build_in_memory_service and build_persistent_service; neither
