@@ -160,6 +160,27 @@ def test_no_recorded_merge_is_invented(ledger, merges_in_git):
     )
 
 
+def test_the_ledger_rows_are_in_order(ledger):
+    """Rows must read in ascending PR order.
+
+    Written because this went wrong twice, both times the same way: an edit
+    anchored on a row's FIRST line inserts before it, so a multi-line entry
+    above ends up after the rows meant to follow it. The exact-SHA check does
+    not look at order, so both times the suite stayed green and only a human
+    reading the file caught it -- a claim with nothing checking it.
+
+    `ledger` is a dict built from the file in document order, and Python
+    preserves insertion order, so its keys are the rows as they appear.
+    """
+    rows = list(ledger)
+    assert rows == sorted(rows), (
+        "ledger rows are out of order: "
+        f"{[n for n, nxt in zip(rows, rows[1:]) if n > nxt]} appear after a "
+        "lower-numbered row. An edit anchored on a row's first line inserts "
+        "before that row; anchor on its complete entry instead."
+    )
+
+
 def test_the_ledger_has_not_fallen_behind(ledger, merges_in_git):
     """The original defect: the record stopped while main moved on.
 
