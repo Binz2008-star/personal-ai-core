@@ -10,7 +10,9 @@ by accident.
 """
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..context import (
     HybridContextAssembler,
@@ -36,6 +38,13 @@ from ..persistence.in_memory import (
     InMemoryMessageRepository,
     InMemorySessionRepository,
     InMemoryUserRepository,
+)
+from ..persistence.sqlite import (
+    SqliteEventRepository,
+    SqliteMessageRepository,
+    SqliteSessionRepository,
+    SqliteUserRepository,
+    connect,
 )
 from ..runtime.model_registry import ModelRegistry
 from ..runtime.ollama.provider import OllamaProvider, Transport
@@ -87,6 +96,73 @@ def build_in_memory_service(
         identity=identity,
     )
     return service, events
+
+
+@dataclass(frozen=True, slots=True)
+class PersistentSlice:
+    """The ungrounded slice on a durable store, plus the handles to inspect it.
+
+    The connection is handed back because the caller opened a file and is the
+    one who must close it. A factory that hides an open file handle makes the
+    caller responsible for a resource it cannot see.
+    """
+
+    service: ConversationService
+    events: SqliteEventRepository
+    connection: sqlite3.Connection
+
+    def close(self) -> None:
+        self.connection.close()
+
+
+def build_persistent_service(
+    settings: Settings | None = None,
+    *,
+    database: str | Path,
+    transport: Transport | None = None,
+) -> PersistentSlice:
+    """The same slice as `build_in_memory_service`, on SQLite (ADR-010 D+B).
+
+    Identical in every respect a caller can observe except one: it is still
+    there after the process exits. Everything above `core.contracts` is
+    unchanged, which is the substitution that boundary was built for and this
+    is its first real exercise.
+
+    `database` is REQUIRED and has no default. A default would have to be a
+    path -- some directory under the user's home -- and a library that writes
+    to a place the caller did not name is a library that loses data somewhere
+    the caller does not look. The entry point decides where the file lives;
+    this only decides what goes in it.
+
+    Knowledge is not persisted and this slice does not retrieve, which are the
+    same decision seen from two sides: chunks and vectors are derived (ADR-010
+    R4) and rebuilt by re-ingestion, so a durable grounded slice needs an
+    answer to "when is the corpus re-ingested?" that nothing has given yet.
+    """
+    settings = settings or Settings.from_env()
+    registry = ModelRegistry.from_settings(settings)
+    provider = OllamaProvider(
+        settings.ollama_host,
+        timeout_seconds=settings.request_timeout_seconds,
+        transport=transport,
+    )
+    connection = connect(database)
+    events = SqliteEventRepository(connection)
+    identity = DefaultIdentityComposer()
+    budget_policy = ReserveBasedBudgetPolicy(
+        identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
+    )
+    service = ConversationService(
+        users=SqliteUserRepository(connection),
+        sessions=SqliteSessionRepository(connection),
+        messages=SqliteMessageRepository(connection),
+        events=events,
+        provider=provider,
+        registry=registry,
+        budget_policy=budget_policy,
+        identity=identity,
+    )
+    return PersistentSlice(service=service, events=events, connection=connection)
 
 
 @dataclass(frozen=True, slots=True)
