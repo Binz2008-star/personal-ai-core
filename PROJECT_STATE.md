@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: 5136e8492fd31f8f6b05084c6d528264652dd5f2 (short: 5136e84 — Merge pull request #28)
-  The accepted PHASE is still Phase 4. PRs #3-#28 are correction, hardening
+Main branch head: 512d51071b899053a93ff2b23c780d69aa25d362 (short: 512d510 — Merge pull request #30)
+  The accepted PHASE is still Phase 4. PRs #3-#30 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
 Phase 2 accepted commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511
 Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
@@ -15,10 +15,11 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (5136e84): 541 passed / 14 skipped (Linux CI and Windows)
+- Current main (512d510): 550 passed / 14 skipped
+  (+9 from prerequisite B; the 541 figure was confirmed on Linux CI and Windows)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at 5136e84 (Phase 4 merged, plus PRs #3-#28)
+Synchronization: origin/main is at 512d510 (Phase 4 merged, plus PRs #3-#30)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -35,7 +36,7 @@ Phase 1 — PARTIAL / NOT COMPLETE
           until PR #23; the memory foundation was built in Phase 3 and the
           reconciliation had gone on saying otherwise. Phase 1 is therefore
           still NOT complete, and must not be summarised as completed.
-          Verified at 5136e84: src/personal_ai_core/identity/ does not exist,
+          Verified at 512d510: src/personal_ai_core/identity/ does not exist,
           and ResponsePolicy / BehavioralContract have 0 occurrences in src/.
           Contract design: ADR-011 — PROPOSED, not accepted. It fixes the shape
           of the contract and authorises no implementation, so Phase 1 is not
@@ -164,6 +165,12 @@ claim written in one place with nothing that notices it going stale.
   #28 5136e84  docs(adr): restore ResponsePolicy, BehavioralContract and
                IdentityComposer, dropped by #27's rewrite, and replace a
                citation to a list that renumbering had invalidated
+  #29 885494f  docs: record #26 #27 and #28 in the merge ledger
+  #30 512d510  feat(generation): enforce the generation reserve as a provider
+               output limit -- ADR-011 prerequisite B. The reserve was
+               computed and recorded and never sent; it is now sent as
+               num_predict on every turn, grounded or not. First production
+               change since Phase 4
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -359,7 +366,10 @@ Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 �
 Phase 5: NOT AUTHORIZED / DESIGN NOT STARTED — UNAUTHORIZED / FUTURE DESIGN
 Post-Phase-4: PRs #3-#28, merged, no new phase (head 5136e84) — see POST-PHASE-4 MERGES
 Persistence: ADR-010 PROPOSED, no option selected (PR #15)
-Identity: ADR-011 PROPOSED, not accepted — contract design only, nothing built (PR #24)
+Identity: ADR-011 PROPOSED, not accepted — contract design only, nothing built
+  Prerequisite A: OPEN — explicit identity share in ContextAllocation. NOT AUTHORIZED
+  Prerequisite B: DONE — generation_reserve is an enforced provider limit
+  A being the only one left does NOT authorise identity implementation
 
 BOSS MODEL
 ==========
