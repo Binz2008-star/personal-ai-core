@@ -2,7 +2,8 @@
 
 **Status:** PROPOSED · design only · nothing built
 
-- Design questions: **RESOLVED** (four, below; reviewed and accepted)
+- Design questions 1-4: **RESOLVED** (reviewed and accepted)
+- Contract questions 5-8: **DECIDED HERE**, not yet reviewed
 - Identity contract: **PROPOSED**, not accepted
 - Prerequisites A and B: **BOTH DONE**
 - Identity implementation: **NOT AUTHORIZED** — and no longer blocked by anything
@@ -228,6 +229,123 @@ class and no file: see **Scope guardrails**, which forbids creating
 
 ---
 
+## Contract questions the shape did not answer
+
+Naming `ResponsePolicy`, `BehavioralContract` and `IdentityComposer` fixes the contract's
+**shape**. Four questions are not answered by a shape, and each of them decides something
+the first line of code would otherwise decide by accident:
+
+| | |
+|---|---|
+| where the text lives | boundary rule 4 says "configuration-driven" and not where |
+| what happens on conflict | the only conflict resolved so far is answer length |
+| how the text may change | ADR-002 gates a model change; nothing gates a rule change |
+| which layer holds it | `conversation` may import `core` only, and this is enforced |
+
+They are decided here, before the classes, for the reason stated above: classes built
+before the words exist are empty containers.
+
+### 5. Where does the identity text live? — **IN CODE, IN THE CORE'S TREE**
+
+Boundary rule 4 requires identity to be "configuration-driven rather than embedded as
+scattered business logic". That is a rule against *scattering*, not a requirement to
+*externalise*: one named place that the composer reads satisfies it.
+
+An external file (YAML, TOML, environment) would add a load path, a parse failure mode
+and a second source of truth for behaviour. It would also let the behavioural contract
+change **without a diff**, which removes the review gate that question 7 below depends
+on. Against that it buys deployment flexibility, and the recorded deployment constraint
+is one user, one process, local machine: there is no deployment to be flexible for.
+
+A durable store is worse on both counts, and would couple identity to ADR-010, which is
+PROPOSED with no option selected. Boundary rule 2 already forbids persisting identity as
+conversation memory; this decision says the text is not persisted at all.
+
+**Decision:** the identity text lives in the Core's source tree, in one named module,
+read through the `IdentityComposer` protocol.
+
+**Rejected:** external configuration file; persistence in a durable store.
+
+**Consequence, and the point of the decision:** changing a rule is a reviewable diff.
+
+### 6. What happens on conflict? — **TWO CONFLICTS, ONE ANSWERED**
+
+**A user instruction against the contract.** `BehavioralContract` does not yield. A rule
+a user can talk the system out of is not a rule, and the three rules that transfer are
+exactly the ones whose failure is unrecoverable: fabricated credentials, action without
+explicit confirmation, disclosed secrets.
+
+`ResponsePolicy` is different and **does** yield, inside its own scope. The dialect
+exception already written into the policy — Modern Standard Arabic *unless the user asks
+for a regional dialect* — is the model for the whole of it: the policy governs register,
+and register is the user's to ask about.
+
+This is an instruction-level guarantee. Nothing in `src/` enforces it, and this ADR does
+not claim otherwise. Whether any contract rule deserves a code-level guard in addition to
+its sentence is a question for the first implementation, not for this section.
+
+**An identity share larger than the window.** Today `ContextAllocation` reports
+`overcommitted` and `evidence` falls to zero — observed, and asserted by
+`test_identity_can_overcommit_the_window_visibly`. That is the right *signal*. Whether it
+is the right *ending* — a turn that runs with no evidence rather than failing — is a
+different question, and identity is funded at zero, so nothing can reach it.
+
+**Decision:** deferred, with its trigger named. The first non-zero `identity_reserve`
+must arrive together with the decision about what the conversation path does with
+`overcommitted`. Writing that rule now would put a sentence in this file that no code
+can reach and nothing can check, which is the defect class this repository keeps closing.
+
+### 7. How may the identity text change? — **ONLY AGAINST A STATED FAILURE**
+
+ADR-002 treats replacing the Boss model as a configuration change **plus an evaluation
+gate**. The behavioural text deserves a gate for the same reason: it is the product's
+behaviour, and a repository that treats an untraceable `24000` as a defect worth an ADR
+must not leave the rules that shape every reply ungoverned.
+
+**Decision:** a change to a numbered `BehavioralContract` rule, or to the substance of
+`ResponsePolicy`, is admissible only in a pull request that states the behavioural
+failure it answers. The escalation recorded in design question 3 — a Jordanian user
+addressed in hardcoded Gulf dialect, replies turning verbose with emoji menus, dated
+2026-07-21 — is the template: an observed, dated failure, not a preference.
+
+**Rejected:** an evaluation-suite gate on ADR-002's model. ADR-002 can require an
+evaluation because model replacement has a measurable comparison; this repository has no
+evaluation harness, and naming one as a gate would make the gate fictional. **Revisit
+this decision when evals exist** — that is the change that should reopen it.
+
+**Rejected:** no gate. The text is the behaviour.
+
+### 8. Which layer holds it? — **PROTOCOL IN `core`, TEXT OUTSIDE IT**
+
+`conversation` may import `core` only. This is not a convention: `LAYER_MAY_IMPORT` in
+`tests/unit/test_dependency_direction.py` enforces it, and `conversation/factory.py` is
+the single named composition root.
+
+Prerequisite B settled the same problem for the budget and is the precedent to follow:
+`ContextBudgetPolicy` is a protocol in `core/contracts.py`, implemented in `context/`,
+and injected by the factory. `ConversationService` never names the implementation.
+
+The text stays out of `core` for a separate reason: `core` depends on nothing and states
+contracts. Product wording is not a contract.
+
+**Decision:** the contract types and the `IdentityComposer` protocol belong in `core`;
+the identity text and the default composer belong in their own package, injected by the
+composition root.
+
+**Rejected:** text in `core`; `identity/` imported directly by `conversation`, which the
+layering guard would reject.
+
+Already guarded, and worth knowing before the package exists: that test **fails rather
+than skips** for any package with no `LAYER_MAY_IMPORT` entry, and names the starting
+rule — `{"identity": {"core"}}`. The first identity package cannot go unchecked.
+
+---
+
+**None of the four authorises implementation.** They remove the objection that the
+contract's shape was settled while its text was not. The contract remains **PROPOSED**.
+
+---
+
 ## Prerequisites before identity implementation
 
 The four design questions are now resolved, but identity implementation remains
@@ -253,11 +371,12 @@ ADR-011 identity implementation
 **Both prerequisites being done does not authorise identity implementation.** They were
 obstacles, not permission. What remains is a decision, and it is the owner's.
 
-One thing worth deciding before the shape: the contract's **text**. This ADR fixes what
-`ResponsePolicy` and `BehavioralContract` are and what governs them; it does not author
-the rules themselves. Building the classes before the words exist would produce empty
-containers -- the failure this ADR already suffered once, when a rewrite left a
-"behavioural contract" with no rules in it.
+The thing to settle before the shape is the contract's **text**. Questions 5-8 settle how
+that text is *governed* -- where it lives, what overrides it, how it may change, which
+layer holds it. They do not author the rules, and this ADR still does not: what
+`ResponsePolicy` and `BehavioralContract` **say** remains unwritten. Building the classes
+before the words exist would produce empty containers -- the failure this ADR already
+suffered once, when a rewrite left a "behavioural contract" with no rules in it.
 
 ### Prerequisite A — explicit identity budget share
 
@@ -350,7 +469,9 @@ identity implementation should be created.
 
 ## Status
 
-**Design questions:** RESOLVED
+**Design questions 1-4:** RESOLVED
+
+**Contract questions 5-8:** DECIDED, awaiting review
 
 **Identity contract:** PROPOSED, not accepted
 
