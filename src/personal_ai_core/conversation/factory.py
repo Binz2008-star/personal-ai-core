@@ -19,6 +19,7 @@ from ..context import (
 )
 from ..core.config import Settings
 from ..core.memory import MemoryReader
+from ..identity import DefaultIdentityComposer
 from ..memory import SimpleMemoryRetriever
 from ..persistence.memory_store import InMemoryMemoryRepository
 from ..knowledge import (
@@ -63,6 +64,14 @@ def build_in_memory_service(
         transport=transport,
     )
     events = InMemoryEventRepository()
+    # The identity share is funded from the composed text, measured by the
+    # same estimator the rest of the budget uses. ADR-005: a budget is derived
+    # and its inputs recorded. Zero was the honest figure while identity/ did
+    # not exist; any constant would be an invented one now that it does.
+    identity = DefaultIdentityComposer()
+    budget_policy = ReserveBasedBudgetPolicy(
+        identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
+    )
     # ADR-011 prerequisite B: this slice retrieves nothing, so it has no
     # allocation to read the reserve from. It still gets the policy, because
     # an output limit that applies only where retrieval is wired is not a
@@ -74,7 +83,8 @@ def build_in_memory_service(
         events=events,
         provider=provider,
         registry=registry,
-        budget_policy=ReserveBasedBudgetPolicy(),
+        budget_policy=budget_policy,
+        identity=identity,
     )
     return service, events
 
@@ -128,10 +138,14 @@ def build_grounded_in_memory_service(
         transport=transport,
     )
 
-    # One policy instance, handed to both the context builder and the service.
-    # Two instances would be two sources for the same number: identical today,
-    # divergent the moment either is configured.
-    budget_policy = ReserveBasedBudgetPolicy()
+    # One composer and one policy instance, each handed to everything that
+    # needs it. Two policy instances would be two sources for the same number;
+    # two composers would be two sources for the text the first was costed
+    # from.
+    identity = DefaultIdentityComposer()
+    budget_policy = ReserveBasedBudgetPolicy(
+        identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
+    )
 
     embedder = HashingEmbeddingProvider()
     vector_index = InMemoryVectorIndex(
@@ -186,6 +200,7 @@ def build_grounded_in_memory_service(
         provider=provider,
         registry=registry,
         budget_policy=budget_policy,
+        identity=identity,
         context_builder=context_builder,
     )
     return GroundedSlice(

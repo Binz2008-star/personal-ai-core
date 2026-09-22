@@ -28,7 +28,7 @@ from personal_ai_core.memory.gate import DefaultPromotionGate
 from personal_ai_core.memory.retriever import SimpleMemoryRetriever
 from personal_ai_core.persistence.memory_store import InMemoryMemoryRepository
 from personal_ai_core.core.config import Settings
-from personal_ai_core.core.domain import EventType, Role
+from personal_ai_core.core.domain import EventType, Message, Role
 from personal_ai_core.runtime.model_registry import ModelRegistry as ConcreteRegistry
 from personal_ai_core.persistence.in_memory import (
     InMemoryEventRepository,
@@ -158,6 +158,19 @@ class StubBudgetPolicy:
         )
 
 
+class StubIdentityComposer:
+    """A foreign IdentityComposer, for the same reason as StubBudgetPolicy.
+
+    Passing DefaultIdentityComposer would exercise the real text and prove
+    nothing about whether the service depends on the protocol.
+    """
+
+    def compose(self, *, session_id):
+        return Message(
+            session_id=session_id, role=Role.SYSTEM, content="stub identity"
+        )
+
+
 def test_the_service_accepts_any_protocol_compatible_registry():
     """The service must not require the concrete registry or budget policy.
 
@@ -186,6 +199,7 @@ def test_the_service_accepts_any_protocol_compatible_registry():
         ),
         registry=StubRegistry(),
         budget_policy=StubBudgetPolicy(),
+        identity=StubIdentityComposer(),
     )
 
     session = service.start_session(service.create_user().id)

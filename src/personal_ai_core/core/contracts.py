@@ -345,6 +345,38 @@ class TokenEstimator(Protocol):
 
 
 @runtime_checkable
+class IdentityComposer(Protocol):
+    """Produces the one `Role.SYSTEM` message that carries identity.
+
+    A protocol with a default implementation in `personal_ai_core.identity`,
+    so the composition is replaceable without modifying `ConversationService`
+    (ADR-011, "IdentityComposer -- assembly").
+
+    It takes a `session_id` and nothing else, and that is a decision rather
+    than an omission:
+
+    * **Not the model.** ADR-011 question 2 fixed identity TEXT as constant
+      across models; identity COST is model-relative, and cost belongs to the
+      budget. A model parameter here would invite the registry-driven identity
+      text that question 2 rejected.
+    * **Not the turn's language.** ADR-011 describes the policy as derived
+      from the turn's language, and ADR-012's wording made that unnecessary by
+      stating the rule for every language at once. The deciding evidence is in
+      this codebase: `Message.language` defaults to `UNDETERMINED_LANGUAGE`
+      and that is the commonest value a turn carries, so a language-branched
+      policy would have no branch for the ordinary case. One text cannot drift
+      between its branches.
+
+    The `session_id` is carried so the message is coherent with the turn it
+    belongs to. Like the grounding message, it is never persisted: identity is
+    composed per turn and is not conversation memory (ADR-011 implementation
+    boundary, rule 2).
+    """
+
+    def compose(self, *, session_id: str) -> Message: ...
+
+
+@runtime_checkable
 class ContextBudgetPolicy(Protocol):
     """Decides how much of a model's window retrieved evidence may use.
 

@@ -25,6 +25,7 @@ from personal_ai_core.context.assembler import HybridContextAssembler
 from personal_ai_core.conversation.grounding import GROUNDING_PREAMBLE, ContextBuilder
 from personal_ai_core.conversation.service import ConversationService
 from personal_ai_core.core.config import Settings
+from personal_ai_core.identity import DefaultIdentityComposer
 from personal_ai_core.persistence.in_memory import (
     InMemoryEventRepository,
     InMemoryMessageRepository,
@@ -109,7 +110,41 @@ def test_the_ungrounded_factory_is_unchanged(transport):
         EventType.GENERATION_REQUESTED,
         EventType.GENERATION_COMPLETED,
     ]
-    assert [m["role"] for m in transport.last_messages] == ["user"]
+    # Identity, then the turn. This path retrieves nothing and so carries no
+    # evidence block -- but it does carry the contract, because a contract
+    # present only where retrieval happens to be wired is not a contract
+    # (ADR-011: present in every model call).
+    assert [m["role"] for m in transport.last_messages] == ["system", "user"]
+    assert GROUNDING_PREAMBLE not in transport.last_messages[0]["content"]
+
+
+def evidence_message(transport):
+    """The system message carrying retrieved evidence, or None.
+
+    Since ADR-011's identity layer, a prompt carries TWO system messages:
+    identity first, then evidence. Reaching for `last_messages[0]` and calling
+    it "the system message" stopped being correct then, and would now assert
+    things about the identity text while claiming to be about evidence.
+    """
+    return next(
+        (
+            m
+            for m in transport.last_messages
+            if m["role"] == "system" and GROUNDING_PREAMBLE in m["content"]
+        ),
+        None,
+    )
+
+
+def identity_message(transport):
+    """The identity system message, which must be first in every prompt."""
+    first = transport.last_messages[0]
+    assert first["role"] == "system", "identity must be the first message"
+    assert GROUNDING_PREAMBLE not in first["content"], (
+        "the first system message is the evidence block -- identity must "
+        "precede it (ADR-011 implementation boundary, rule 3)"
+    )
+    return first
 
 
 # --- evidence actually reaches the model ----------------------------------
@@ -121,9 +156,9 @@ def test_retrieved_evidence_reaches_the_prompt(slice_, transport):
 
     slice_.service.send(session_id=session.id, content="what does fusion combine?")
 
-    system, user = transport.last_messages[0], transport.last_messages[1]
-    assert system["role"] == "system"
-    assert GROUNDING_PREAMBLE in system["content"]
+    identity_message(transport)
+    system, user = evidence_message(transport), transport.last_messages[-1]
+    assert system is not None
     assert "rank" in system["content"].lower()
     assert user["role"] == "user"
 
@@ -133,7 +168,7 @@ def test_the_prompt_citation_resolves_back_to_the_source(slice_, transport):
     session = slice_.service.start_session(slice_.service.create_user().id)
     slice_.service.send(session_id=session.id, content="provenance and ranks")
 
-    system = transport.last_messages[0]["content"]
+    system = evidence_message(transport)["content"]
     assert "file:///notes/en.md" in system
 
     # Every chunk named in the audit event still resolves in the catalog.
@@ -154,8 +189,8 @@ def test_an_arabic_turn_is_grounded_in_arabic_evidence(slice_, transport):
         session_id=session.id, content="ماذا يوحد دمج الرتب المتبادلة؟", language="ar"
     )
 
-    system = transport.last_messages[0]
-    assert system["role"] == "system"
+    system = evidence_message(transport)
+    assert system is not None
     assert "الرتب" in system["content"]
 
 
@@ -184,23 +219,36 @@ def test_evidence_is_not_charged_twice_across_turns(slice_, transport):
     slice_.service.send(session_id=session.id, content="what does fusion combine?")
     slice_.service.send(session_id=session.id, content="and what records the rank?")
 
-    # Exactly one system message in the second prompt, not two.
-    roles = [m["role"] for m in transport.last_messages]
-    assert roles.count("system") == 1
-    assert roles[0] == "system"
+    # Exactly one EVIDENCE block in the second prompt, not two: the first
+    # turn's evidence was never persisted, so it cannot be charged again.
+    # Identity is the other system message and is composed fresh each turn --
+    # counting system messages would now conflate the two.
+    evidence_blocks = [
+        m
+        for m in transport.last_messages
+        if m["role"] == "system" and GROUNDING_PREAMBLE in m["content"]
+    ]
+    assert len(evidence_blocks) == 1
+    identity_message(transport)
 
 
 # --- no evidence -----------------------------------------------------------
 
 
-def test_an_empty_index_sends_no_system_message(slice_, transport):
-    """No evidence means no message: an empty evidence block invites an answer
-    that claims to have consulted sources it never received."""
+def test_an_empty_index_sends_no_evidence_message(slice_, transport):
+    """No evidence means no evidence block: an empty one invites an answer
+    that claims to have consulted sources it never received.
+
+    Renamed from "...sends_no_system_message" when identity arrived. A prompt
+    now always has a system message; what an empty index must not produce is
+    an evidence block, and that is what this asserts.
+    """
     session = slice_.service.start_session(slice_.service.create_user().id)
     reply = slice_.service.send(session_id=session.id, content="anything at all")
 
     assert reply.role is Role.ASSISTANT
-    assert [m["role"] for m in transport.last_messages] == ["user"]
+    assert evidence_message(transport) is None
+    assert [m["role"] for m in transport.last_messages] == ["system", "user"]
 
 
 def test_a_turn_with_no_evidence_still_records_the_attempt(slice_):
@@ -281,6 +329,7 @@ def test_a_retrieval_failure_is_recorded_and_fails_the_turn(transport):
         provider=OllamaProvider("http://unused", transport=transport),
         registry=ModelRegistry.from_settings(Settings()),
         budget_policy=budget_policy,
+        identity=DefaultIdentityComposer(),
         context_builder=ContextBuilder(
             retriever=BrokenRetriever(),
             assembler=HybridContextAssembler(estimator),

@@ -20,6 +20,7 @@ from typing import Any, Mapping, Sequence
 from ..core.contracts import (
     ContextBudgetPolicy,
     EventRepository,
+    IdentityComposer,
     ModelSpecLike,
     MessageRepository,
     ModelProvider,
@@ -51,6 +52,7 @@ class ConversationService:
         provider: ModelProvider,
         registry: ModelRegistry,
         budget_policy: ContextBudgetPolicy,
+        identity: IdentityComposer,
         context_builder: ContextBuilder | None = None,
     ) -> None:
         self._users = users
@@ -59,6 +61,10 @@ class ConversationService:
         self._provider = provider
         self._registry = registry
         self._budget_policy = budget_policy
+        # Required, not defaulted, for the reason the budget policy is: the
+        # contract must be present in EVERY model call (ADR-011). A service
+        # that can be constructed without one can make a call without one.
+        self._identity = identity
         self._context_builder = context_builder
         self._recorder = EventRecorder(events)
 
@@ -132,13 +138,21 @@ class ConversationService:
             message_id=user_message.id,
         )
 
-        # The grounding message is prepended for this call only. It is never
-        # given to the message repository: it is derived from the index at this
-        # moment, it is rebuilt next turn, and persisting it would charge the
-        # budget for the same evidence again on every later turn.
-        prompt: Sequence[Message] = history
+        # Identity first, then evidence, then the conversation -- ADR-011's
+        # implementation boundary, rule 3. The order is the point: the rules
+        # that govern the reply are read before the material they govern, and
+        # rule 5 is what says which of the two wins when a retrieved document
+        # argues with them.
+        #
+        # Neither message is given to the message repository. The grounding
+        # message is derived from the index at this moment and is rebuilt next
+        # turn; identity is composed per turn and is not conversation memory
+        # (boundary rule 2). Persisting either would charge the budget for the
+        # same text again on every later turn.
+        identity_message = self._identity.compose(session_id=session_id)
+        prompt: Sequence[Message] = [identity_message, *history]
         if grounding is not None and grounding.message is not None:
-            prompt = [grounding.message, *history]
+            prompt = [identity_message, grounding.message, *history]
 
         self._recorder.record(
             session_id=session_id,
