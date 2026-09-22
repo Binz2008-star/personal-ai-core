@@ -45,11 +45,11 @@ answer would put a guess in the composition root.
 
 Phases:
 - **Phase 0** — HISTORICAL / COMPLETED — core source audit, evidence freeze, extraction matrix (no separate gate; see [`docs/COMPONENT_EXTRACTION_MATRIX.md`](docs/COMPONENT_EXTRACTION_MATRIX.md))
-- **Phase 1** — PARTIAL / NOT COMPLETE — core foundation vertical slice
+- **Phase 1** — COMPONENTS COMPLETE / NOT ACCEPTED — core foundation vertical slice
   (User → Session → Message → ModelProvider → Response → Event).
-  [`docs/PHASE_1_RECONCILIATION.md`](docs/PHASE_1_RECONCILIATION.md) records that two of its five
-  playbook components are unbuilt. Later phases proceeded on the parts that exist; Phase 1 itself
-  was never closed.
+  All five playbook components are built; identity was the last and arrived in PR #39.
+  The phase is still not **accepted** — that gate ends with the owner, and the two are
+  different states. See [`PROJECT_STATE.md`](PROJECT_STATE.md).
 - **Phase 2** — ACCEPTED (`0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511`)
   Knowledge & context foundations. In-memory contracts, retrieval, budgeting.
   Tests: 389 passed / 14 skipped.
@@ -155,7 +155,10 @@ Explicit distinction:
 - No semantic embedding-based memory ranking
 - Memory retrieval is enrichment/degradation, not a write path
 - Phase 2 rendering overhead limitation remains out of scope
-- No production database persistence changes introduced (in-memory only)
+- Retrieval is not wired into `pac` — the grounded slice exists and is tested, but nothing
+  has decided when a durable deployment re-ingests its corpus (ADR-010 R4)
+- No Neon, no pgvector, no server database and no migrations. The durable store is one
+  SQLite file and `sqlite3` is stdlib, so the project still has no runtime dependencies
 
 ## Current state
 
