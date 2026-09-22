@@ -161,10 +161,22 @@ def test_a_forged_attribution_cannot_escape_a_memory():
 
 def test_the_token_changes_when_the_attackers_own_text_changes():
     """What makes forgery a fixed-point search: the token depends on the text
-    that would have to contain it."""
-    one = render_evidence([passage("some text")])
-    two = render_evidence([passage("some text.")])
-    assert OPENING.findall(one)[0][0] != OPENING.findall(two)[0][0]
+    that would have to contain it.
+
+    The two texts are the SAME LENGTH, so the label -- source and character
+    range -- is identical and only the text differs. An earlier version used
+    "some text" and "some text.", which differ in length; the label moved, the
+    token moved with it, and the test passed against a token computed from
+    labels alone. That token is forgeable: an author knows their own URI and
+    length, so they could compute it offline. A mutation found this.
+    """
+    one = passage("some text")
+    two = passage("same text")
+    assert one.provenance.end == two.provenance.end  # identical labels
+
+    token_one = OPENING.findall(render_evidence([one]))[0][0]
+    token_two = OPENING.findall(render_evidence([two]))[0][0]
+    assert token_one != token_two
 
 
 def test_the_token_depends_on_the_other_passages_retrieved_with_it():
