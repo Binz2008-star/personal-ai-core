@@ -18,6 +18,64 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 
+# ADR-010's prerequisite for any durable backend, settled here rather than in
+# an adapter, because it is a property of the event and not of where it is
+# stored.
+#
+# `Event.payload` was `Mapping[str, Any]` with nothing checking the values:
+#
+#     Event(payload={"obj": object(), "fn": len})   -> constructed happily
+#     json.dumps(dict(event.payload))               -> TypeError
+#
+# A caller could record an event that cannot be written down, and nothing said
+# so until the write failed -- at which point the event is the thing being
+# lost. An event that cannot be stored is not evidence.
+#
+# The check is STRUCTURAL, not `json.dumps`. json.dumps accepts a tuple and
+# returns a list, so a round trip gives back something other than what was
+# written; it also accepts NaN and Infinity, which are not JSON at all. A
+# store that quietly changes your data is worse than one that refuses it, so
+# both are rejected here, where the caller that built them is still on the
+# stack.
+def _check_json_value(value: Any, path: str) -> None:
+    if isinstance(value, bool) or value is None or isinstance(value, (str, int)):
+        return
+    if isinstance(value, float):
+        # NaN and the infinities have no JSON representation. `json.dumps`
+        # emits them anyway, producing output no other parser accepts.
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ValueError(
+                f"event payload at {path} is {value!r}, which has no JSON "
+                "representation. Record a string or omit the key."
+            )
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(
+                    f"event payload at {path} has a non-string key {key!r}. "
+                    "JSON object keys are strings, and converting silently "
+                    "would change what is read back."
+                )
+            _check_json_value(item, f"{path}[{key!r}]")
+        return
+    if isinstance(value, tuple):
+        raise ValueError(
+            f"event payload at {path} is a tuple. It would be read back as a "
+            "list, so the event would not survive a round trip unchanged. "
+            "Use a list."
+        )
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _check_json_value(item, f"{path}[{index}]")
+        return
+    raise ValueError(
+        f"event payload at {path} is {type(value).__name__}, which cannot be "
+        "written to a durable store. Payload values must be strings, numbers, "
+        "booleans, None, lists or string-keyed mappings of those."
+    )
+
+
 def new_id() -> str:
     return str(uuid.uuid4())
 
@@ -119,6 +177,17 @@ class Event:
     occurred_at: datetime = field(default_factory=utcnow)
 
     def __post_init__(self) -> None:
+        # Checked before freezing, and at construction rather than at write
+        # time: the caller that built an unstorable payload is on the stack
+        # here, and is not when a store later fails to serialise it.
+        for key, value in self.payload.items():
+            if not isinstance(key, str):
+                raise ValueError(
+                    f"event payload has a non-string key {key!r}. JSON object "
+                    "keys are strings, and converting silently would change "
+                    "what is read back."
+                )
+            _check_json_value(value, f"payload[{key!r}]")
         # Freeze the payload so a caller holding a reference cannot mutate a
         # recorded event after the fact.
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
