@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 from ..core.contracts import (
+    ContextBudgetPolicy,
     EventRepository,
     ModelSpecLike,
     MessageRepository,
@@ -36,7 +37,7 @@ from ..core.domain import (
 )
 from ..core.errors import ProviderError
 from .events import EventRecorder
-from .grounding import ContextBuilder, summarize
+from .grounding import ContextBuilder, Grounding, summarize
 
 
 class ConversationService:
@@ -49,6 +50,7 @@ class ConversationService:
         events: EventRepository,
         provider: ModelProvider,
         registry: ModelRegistry,
+        budget_policy: ContextBudgetPolicy,
         context_builder: ContextBuilder | None = None,
     ) -> None:
         self._users = users
@@ -56,6 +58,7 @@ class ConversationService:
         self._messages = messages
         self._provider = provider
         self._registry = registry
+        self._budget_policy = budget_policy
         self._context_builder = context_builder
         self._recorder = EventRecorder(events)
 
@@ -146,13 +149,22 @@ class ConversationService:
                 "message_count": len(prompt),
                 "grounded": grounding is not None and grounding.message is not None,
                 "evidence_chunks": grounding.used if grounding is not None else 0,
+                "generation_limit": self._generation_limit(spec=spec, grounding=grounding),
             },
             message_id=user_message.id,
         )
 
+        # ADR-011 prerequisite B. The reserve was accounting-only: computed,
+        # recorded on the allocation, and never sent. A number the provider
+        # never sees does not reserve anything. `_generation_options` turns it
+        # into the provider's output limit.
+        generation_options = self._generation_options(
+            spec=spec, grounding=grounding, options=options
+        )
+
         try:
             response = self._provider.generate(
-                model=spec.name, messages=prompt, options=options
+                model=spec.name, messages=prompt, options=generation_options
             )
         except ProviderError as exc:
             self._recorder.record(
@@ -182,6 +194,47 @@ class ConversationService:
             message_id=reply.id,
         )
         return reply
+
+    def _generation_limit(
+        self, *, spec: ModelSpecLike, grounding: Grounding | None
+    ) -> int:
+        """Tokens the model may generate this turn.
+
+        Taken from the turn's own allocation when there is one. Without
+        grounding there is no allocation, so the policy is asked directly:
+        `history_tokens=0` because only `evidence` depends on history -- the
+        reserve does not, and it is the reserve this reads. Both paths run the
+        same policy, so both produce the same limit for the same model; that
+        equivalence is asserted rather than assumed.
+
+        Enforcement must not depend on whether retrieval happens to be wired.
+        A limit that applies only to grounded turns is not a limit.
+        """
+        if grounding is not None:
+            return grounding.allocation.generation_reserve
+        return self._budget_policy.allocate(
+            model=spec, history_tokens=0
+        ).generation_reserve
+
+    def _generation_options(
+        self,
+        *,
+        spec: ModelSpecLike,
+        grounding: Grounding | None,
+        options: Mapping[str, Any] | None,
+    ) -> Mapping[str, Any]:
+        """Caller options plus the budget's output limit.
+
+        An explicit caller value wins: a caller that names `num_predict` has
+        said something more specific than the default policy, and silently
+        overriding it would make the parameter a lie. The limit is recorded on
+        `GENERATION_REQUESTED` either way, so what was sent is recoverable.
+        """
+        merged = dict(options or {})
+        merged.setdefault(
+            "num_predict", self._generation_limit(spec=spec, grounding=grounding)
+        )
+        return merged
 
     def _ground(
         self,

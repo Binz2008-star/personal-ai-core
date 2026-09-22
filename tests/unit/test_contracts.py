@@ -1,5 +1,6 @@
 """Contract tests: adapters satisfy the Core protocols."""
 from personal_ai_core.core.contracts import (
+    ContextAllocation,
     ContextBudgetPolicy,
     EventRepository,
     MemoryRetriever,
@@ -141,11 +142,28 @@ def test_a_foreign_protocol_compatible_registry_satisfies_the_contract():
     assert isinstance(StubRegistry().active, ModelSpecLike)
 
 
-def test_the_service_accepts_any_protocol_compatible_registry():
-    """The service must not require the concrete registry.
+class StubBudgetPolicy:
+    """A foreign ContextBudgetPolicy, to keep the test about protocols.
 
-    If this passes with StubRegistry, the application layer genuinely depends
-    on the abstraction rather than on runtime.model_registry.
+    Passing the concrete ReserveBasedBudgetPolicy here would make the service
+    look abstraction-dependent while actually exercising the real class.
+    """
+
+    def allocate(self, *, model, history_tokens):
+        return ContextAllocation(
+            context_window=model.context_window,
+            generation_reserve=64,
+            overhead=0,
+            history=history_tokens,
+        )
+
+
+def test_the_service_accepts_any_protocol_compatible_registry():
+    """The service must not require the concrete registry or budget policy.
+
+    If this passes with StubRegistry and StubBudgetPolicy, the application
+    layer genuinely depends on the abstractions rather than on
+    runtime.model_registry and context.budget.
     """
     from personal_ai_core.conversation.service import ConversationService
     from personal_ai_core.persistence.in_memory import (
@@ -167,6 +185,7 @@ def test_the_service_accepts_any_protocol_compatible_registry():
             transport=lambda u, p, t: {"model": p["model"], "message": {"content": "ok"}},
         ),
         registry=StubRegistry(),
+        budget_policy=StubBudgetPolicy(),
     )
 
     session = service.start_session(service.create_user().id)
