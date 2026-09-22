@@ -373,7 +373,11 @@ Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
 Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 → bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
 Phase 5: NOT AUTHORIZED / DESIGN NOT STARTED — UNAUTHORIZED / FUTURE DESIGN
-Post-Phase-4: PRs #3-#28, merged, no new phase (head 5136e84) — see POST-PHASE-4 MERGES
+Post-Phase-4: merged, no new phase — see POST-PHASE-4 MERGES for the
+  row-by-row record. The range and the head are deliberately not repeated
+  here: they were, as "#3-#28 (head 5136e84)", and went four merges stale
+  because nothing checks a summary line. A phase gate is a durable fact;
+  a head is not.
 Persistence: ADR-010 PROPOSED, no option selected (PR #15)
 Identity: ADR-011 PROPOSED, not accepted — contract design only, nothing built
   Prerequisite A: DONE — ContextAllocation carries identity, funded at zero
