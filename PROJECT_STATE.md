@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: fcea13b78583155df69e814f96c8bb2a87e89d1b (short: fcea13b — Merge pull request #34)
-  The accepted PHASE is still Phase 4. PRs #3-#34 are correction, hardening
+Main branch head: 156c17bdb4c5a0843a947f140b9a3a6a66b3cc90 (short: 156c17b — Merge pull request #36)
+  The accepted PHASE is still Phase 4. PRs #3-#37 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
 Phase 2 accepted commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511
 Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
@@ -15,13 +15,16 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (fcea13b): 561 passed / 14 skipped
-  (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard. 541
-   remains the last figure confirmed on Linux CI and Windows; 561 is Linux CI
-   only and is not claimed otherwise. CI runs ubuntu-latest alone)
+- Current main (156c17b): 561 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
+  (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard.
+   The long-standing caveat -- 541 the last two-platform figure, 561 Linux
+   only -- is closed by PR #36: `suite-windows` runs the whole suite on
+   windows-latest and reported 561 passed / 14 skipped there. The figure is
+   no longer a single-platform claim, and the gate that confirms it is in CI
+   rather than in someone remembering to run it)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at fcea13b (Phase 4 merged, plus PRs #3-#34)
+Synchronization: origin/main is at 156c17b (Phase 4 merged, plus PRs #3-#37)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -38,16 +41,16 @@ Phase 1 — PARTIAL / NOT COMPLETE
           until PR #23; the memory foundation was built in Phase 3 and the
           reconciliation had gone on saying otherwise. Phase 1 is therefore
           still NOT complete, and must not be summarised as completed.
-          Re-verified at fcea13b: src/personal_ai_core/identity/ does not
+          Re-verified at 156c17b: src/personal_ai_core/identity/ does not
           exist, and ResponsePolicy / BehavioralContract have 0 occurrences in
           src/.
-          Contract design: ADR-011 — PROPOSED, not accepted. It fixes the shape
-          of the contract (questions 1-4) and how its text is governed
-          (questions 5-8: where the text lives, what yields on conflict, how a
-          rule may change, which layer holds it). It authorises no
-          implementation, so Phase 1 is not advanced by it. What the rules SAY
-          is still unwritten, and that -- not a missing decision -- is what
-          Phase 1 now waits on.
+          Contract design: ADR-011 — PROPOSED. Shape (questions 1-4) and how
+          the text is governed (5-8). Contract text: ADR-012 — PROPOSED,
+          five numbered rules and the response policy's wording, each rule
+          naming the behavioural failure it answers.
+          Neither ADR authorises implementation, so neither advances Phase 1.
+          What Phase 1 now waits on is the BUILD, not a further decision: the
+          design is complete and unaccepted, which are different states.
   Evidence: docs/PHASE_1_VERTICAL_SLICE.md, docs/PHASE_1_RECONCILIATION.md
 
 Phase 2 — ACCEPTED
@@ -198,6 +201,24 @@ claim written in one place with nothing that notices it going stale.
                may change (only against a stated behavioural failure), which
                layer holds it (protocol in core, text outside it). Marked
                DECIDED, not reviewed
+  #35 a9132e5  docs: record #33 and #34, and re-verify the lines they made
+               stale. The Phase 1 verification was re-measured rather than
+               carried over, and the two-platform caveat was stated in the
+               file instead of being carried in someone's head
+  #36 156c17b  ci: run the suite on Windows as a separate job. The first
+               attempt used a matrix and sat BLOCKED with every leg green:
+               a matrix renames `suite` to `suite (ubuntu-latest)`, and main
+               requires a check named `suite`. Merging it would have left main
+               requiring a check no run can produce -- blocking every later PR.
+               So `suite` keeps its name and windows arrives beside it as
+               `suite-windows`. 561 is a two-platform figure from here
+  #37 78db2e7  docs(adr): ADR-012 -- the identity TEXT. Rules 1-3 transfer from
+               the source; rules 4 and 5 close an omission: ADR-011 carried
+               three of the five ADAPT assets, and EVIDENCE_CONTRACT and
+               UNTRUSTED_METADATA_RULE appeared in it zero times. Rule 5 answers
+               a live surface -- grounding.py puts retrieved user documents in
+               the SAME Role.SYSTEM message as the contract, and nothing said
+               which wins
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -404,9 +425,16 @@ Identity: ADR-011 PROPOSED, not accepted — contract design only, nothing built
   not permission. identity/ does not exist and must not be created without a
   separate decision.
   Contract questions 5-8 (PR #34): DECIDED, not reviewed — they govern the
-  text (where it lives, what yields on conflict, how a rule may change, which
-  layer holds it). What the rules SAY is still unwritten, and that is the one
-  thing left before implementation could be judged at all.
+  text: where it lives, what yields on conflict, how a rule may change, which
+  layer holds it.
+  Contract text (ADR-012, PR #37): PROPOSED, not accepted — ResponsePolicy's
+  wording and five numbered rules, each naming the failure it answers. Rules 4
+  and 5 close an omission rather than extending scope: ADR-011 carried three
+  of the five ADAPT assets, and rule 5 answers a surface that exists in built
+  code today.
+  Nothing about identity is BUILT. The design is now complete and the
+  implementation is a separate decision -- design-complete and authorised are
+  different states, and this file will not blur them.
 
 BOSS MODEL
 ==========
