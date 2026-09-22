@@ -271,6 +271,7 @@ def test_a_retrieval_failure_is_recorded_and_fails_the_turn(transport):
             raise RetrievalError("index unavailable")
 
     estimator = ScriptAwareTokenEstimator()
+    budget_policy = ReserveBasedBudgetPolicy()
     events = InMemoryEventRepository()
     service = ConversationService(
         users=InMemoryUserRepository(),
@@ -279,10 +280,11 @@ def test_a_retrieval_failure_is_recorded_and_fails_the_turn(transport):
         events=events,
         provider=OllamaProvider("http://unused", transport=transport),
         registry=ModelRegistry.from_settings(Settings()),
+        budget_policy=budget_policy,
         context_builder=ContextBuilder(
             retriever=BrokenRetriever(),
             assembler=HybridContextAssembler(estimator),
-            budget_policy=ReserveBasedBudgetPolicy(),
+            budget_policy=budget_policy,
             estimator=estimator,
         ),
     )

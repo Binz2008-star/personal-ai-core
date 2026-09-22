@@ -63,6 +63,10 @@ def build_in_memory_service(
         transport=transport,
     )
     events = InMemoryEventRepository()
+    # ADR-011 prerequisite B: this slice retrieves nothing, so it has no
+    # allocation to read the reserve from. It still gets the policy, because
+    # an output limit that applies only where retrieval is wired is not a
+    # limit -- and this is the slice the live smoke test exercises.
     service = ConversationService(
         users=InMemoryUserRepository(),
         sessions=InMemorySessionRepository(),
@@ -70,6 +74,7 @@ def build_in_memory_service(
         events=events,
         provider=provider,
         registry=registry,
+        budget_policy=ReserveBasedBudgetPolicy(),
     )
     return service, events
 
@@ -123,6 +128,11 @@ def build_grounded_in_memory_service(
         transport=transport,
     )
 
+    # One policy instance, handed to both the context builder and the service.
+    # Two instances would be two sources for the same number: identical today,
+    # divergent the moment either is configured.
+    budget_policy = ReserveBasedBudgetPolicy()
+
     embedder = HashingEmbeddingProvider()
     vector_index = InMemoryVectorIndex(
         model_id=embedder.model_id, dimensions=embedder.dimensions
@@ -161,7 +171,7 @@ def build_grounded_in_memory_service(
             catalog=catalog,
         ),
         assembler=HybridContextAssembler(estimator),
-        budget_policy=ReserveBasedBudgetPolicy(),
+        budget_policy=budget_policy,
         estimator=estimator,
         memory_retriever=memory_retriever,
         limit=evidence_limit,
@@ -175,6 +185,7 @@ def build_grounded_in_memory_service(
         events=events,
         provider=provider,
         registry=registry,
+        budget_policy=budget_policy,
         context_builder=context_builder,
     )
     return GroundedSlice(
