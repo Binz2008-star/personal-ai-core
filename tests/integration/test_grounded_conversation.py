@@ -383,9 +383,21 @@ def test_nothing_in_the_prompt_claims_the_evidence_was_understood(slice_, transp
     session = slice_.service.start_session(slice_.service.create_user().id)
     slice_.service.send(session_id=session.id, content="what does fusion combine?")
 
-    system = transport.last_messages[0]["content"].lower()
+    # The EVIDENCE message, found by its preamble -- not `last_messages[0]`.
+    # This read index 0 when the evidence was the only system message. Since
+    # the identity layer (#39) index 0 is the identity text, so this test went
+    # on passing while checking the wrong message: putting "understood" into
+    # GROUNDING_PREAMBLE left it green. Found while fixing F-1, which changes
+    # that preamble -- the one moment a guard on it has to work.
+    #
+    # Every message is checked as well as the evidence one, because the claim
+    # is about the prompt, and a word forbidden in one place is forbidden in
+    # all of them.
+    evidence = evidence_message(transport)["content"].lower()
+    whole_prompt = " ".join(m["content"] for m in transport.last_messages).lower()
     for word in ("semantic", "semantically", "meaning-based", "understood"):
-        assert word not in system, f"the prompt claims {word!r}"
+        assert word not in evidence, f"the evidence preamble claims {word!r}"
+        assert word not in whole_prompt, f"the prompt claims {word!r}"
 
 
 # --- Event != Memory still holds ------------------------------------------
