@@ -68,13 +68,17 @@ class FakeRetriever:
         return self.results
 
 
-def builder(retriever, *, limit=5, generation_reserve=1024, overhead=256):
+def builder(
+    retriever, *, limit=5, generation_reserve=1024, overhead=256, identity_reserve=0
+):
     estimator = ScriptAwareTokenEstimator()
     return ContextBuilder(
         retriever=retriever,
         assembler=HybridContextAssembler(estimator),
         budget_policy=ReserveBasedBudgetPolicy(
-            generation_reserve=generation_reserve, overhead=overhead
+            generation_reserve=generation_reserve,
+            overhead=overhead,
+            identity_reserve=identity_reserve,
         ),
         estimator=estimator,
         limit=limit,
@@ -266,12 +270,27 @@ def test_the_summary_records_the_whole_allocation(make_chunk):
         "history_tokens",
         "generation_reserve",
         "overhead",
+        "identity_reserve",
         "budget_tokens",
         "budget_source",
         "overcommitted",
     ):
         assert key in payload, f"{key} missing from the audit payload"
     assert payload["context_window"] == 8192
+
+
+def test_the_summary_records_a_funded_identity_share(make_chunk):
+    """ADR-011 prerequisite A: the share must be recoverable from the record.
+
+    A budget line that spends tokens without appearing in the audit payload is
+    the untraceable share ADR-005 exists to prevent.
+    """
+    grounding = builder(FakeRetriever([]), identity_reserve=300).build(
+        session_id="s1", query="q", language="en", model=Spec(), history=[user("hi")]
+    )
+    payload = summarize(grounding)
+    assert payload["identity_reserve"] == 300
+    assert "identity=300" in payload["budget_source"]
 
 
 def test_the_summary_reports_every_embedder_not_just_the_first(make_chunk):

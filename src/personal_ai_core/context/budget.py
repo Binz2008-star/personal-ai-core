@@ -28,6 +28,13 @@ DEFAULT_GENERATION_RESERVE = 1024
 # zero is how a budget that looks safe overflows by a little on every turn.
 DEFAULT_OVERHEAD = 256
 
+# ADR-011 prerequisite A. Zero because `identity/` is not built: a reserve
+# invented for a component that does not exist would shrink `evidence` today
+# for no benefit, and the number would be fabricated. The parameter exists so
+# the share can be funded the moment something supplies a real figure -- a
+# field nothing can set is decoration, not a budget line.
+DEFAULT_IDENTITY_RESERVE = 0
+
 
 class ReserveBasedBudgetPolicy:
     """Window minus reserves minus measured history, floored at zero.
@@ -42,13 +49,17 @@ class ReserveBasedBudgetPolicy:
         *,
         generation_reserve: int = DEFAULT_GENERATION_RESERVE,
         overhead: int = DEFAULT_OVERHEAD,
+        identity_reserve: int = DEFAULT_IDENTITY_RESERVE,
     ) -> None:
         if generation_reserve < 0:
             raise ValueError("generation_reserve must be non-negative")
         if overhead < 0:
             raise ValueError("overhead must be non-negative")
+        if identity_reserve < 0:
+            raise ValueError("identity_reserve must be non-negative")
         self._generation_reserve = generation_reserve
         self._overhead = overhead
+        self._identity_reserve = identity_reserve
 
     @property
     def source(self) -> str:
@@ -59,7 +70,8 @@ class ReserveBasedBudgetPolicy:
         """
         return (
             f"reserve-based(generation={self._generation_reserve},"
-            f"overhead={self._overhead})"
+            f"overhead={self._overhead},"
+            f"identity={self._identity_reserve})"
         )
 
     def allocate(
@@ -72,4 +84,5 @@ class ReserveBasedBudgetPolicy:
             generation_reserve=self._generation_reserve,
             overhead=self._overhead,
             history=history_tokens,
+            identity=self._identity_reserve,
         )
