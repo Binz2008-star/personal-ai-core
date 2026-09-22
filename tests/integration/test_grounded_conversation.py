@@ -118,7 +118,7 @@ def test_the_ungrounded_factory_is_unchanged(transport):
     assert GROUNDING_PREAMBLE not in transport.last_messages[0]["content"]
 
 
-def evidence_message(transport):
+def find_evidence_message(transport):
     """The system message carrying retrieved evidence, or None.
 
     Since ADR-011's identity layer, a prompt carries TWO system messages:
@@ -134,6 +134,19 @@ def evidence_message(transport):
         ),
         None,
     )
+
+
+def evidence_message(transport):
+    """The evidence message, asserting it is there.
+
+    Separate from `find_evidence_message` because most callers index into the
+    result: a helper that may return None makes every one of them a possible
+    `None` subscript, which is what pyright said about the first version of
+    this file.
+    """
+    message = find_evidence_message(transport)
+    assert message is not None, "the prompt carries no evidence block"
+    return message
 
 
 def identity_message(transport):
@@ -158,7 +171,6 @@ def test_retrieved_evidence_reaches_the_prompt(slice_, transport):
 
     identity_message(transport)
     system, user = evidence_message(transport), transport.last_messages[-1]
-    assert system is not None
     assert "rank" in system["content"].lower()
     assert user["role"] == "user"
 
@@ -190,7 +202,6 @@ def test_an_arabic_turn_is_grounded_in_arabic_evidence(slice_, transport):
     )
 
     system = evidence_message(transport)
-    assert system is not None
     assert "الرتب" in system["content"]
 
 
@@ -247,7 +258,7 @@ def test_an_empty_index_sends_no_evidence_message(slice_, transport):
     reply = slice_.service.send(session_id=session.id, content="anything at all")
 
     assert reply.role is Role.ASSISTANT
-    assert evidence_message(transport) is None
+    assert find_evidence_message(transport) is None
     assert [m["role"] for m in transport.last_messages] == ["system", "user"]
 
 
