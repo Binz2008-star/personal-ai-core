@@ -12,6 +12,11 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
 
+# The entry point. `python -m personal_ai_core.app` does the same thing
+# without installing anything; this is the form most people will use.
+[project.scripts]
+pac = "personal_ai_core.app.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

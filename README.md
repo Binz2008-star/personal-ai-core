@@ -3,15 +3,53 @@
 An AI operating layer for a local model. Memory, knowledge, experience, learning, tools and
 projects are separate layers with their own contracts; the model is a replaceable backend.
 
+## Run it
+
+You need a model server. The Boss model is `huihui_ai/qwen2.5-abliterate:7b` on Ollama at
+`http://127.0.0.1:11434` unless you say otherwise.
+
+```console
+$ pip install -e .
+$ pac
+model:   huihui_ai/qwen2.5-abliterate:7b
+storage: /home/you/.personal-ai-core/core.db
+session: 4f3a…
+         continue this later with --session 4f3a…
+
+you> what did we decide about the budget?
+core> …
+```
+
+`python -m personal_ai_core.app` does the same without installing.
+
+**The conversation is still there tomorrow.** It is kept in one SQLite file — no server, no
+daemon and no new dependency, because `sqlite3` ships with Python. Pass `--session` from an
+earlier run to continue it.
+
+| | |
+|---|---|
+| `--database PATH` | where the file lives. Also `$PAC_DATABASE`; the flag wins |
+| `--ephemeral` | keep nothing — the conversation ends with the process |
+| `--session ID` | continue an earlier conversation |
+| `--language ar` | tag the turn. Left undetermined when not given, because guessing it would record a claim nothing measured |
+
+Configuration is environment variables, all optional: `PAC_BOSS_MODEL`,
+`PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`.
+
+**What this command does not do: retrieval.** The grounded slice exists and is tested, but
+`pac` does not use it. Knowledge is derived data, rebuilt by re-ingestion (ADR-010 R4), and
+nothing has decided yet when a durable deployment re-ingests its corpus — inventing an
+answer would put a guess in the composition root.
+
 **Status: Phase 4 — Memory-Aware Context Recall ACCEPTED / MERGED (PR #2 — MERGED, main `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`, implementation `e8062ff2fa8b6eb5a4471ac8475f29bed76fd369`).**
 
 Phases:
 - **Phase 0** — HISTORICAL / COMPLETED — core source audit, evidence freeze, extraction matrix (no separate gate; see [`docs/COMPONENT_EXTRACTION_MATRIX.md`](docs/COMPONENT_EXTRACTION_MATRIX.md))
-- **Phase 1** — PARTIAL / NOT COMPLETE — core foundation vertical slice
+- **Phase 1** — COMPONENTS COMPLETE / NOT ACCEPTED — core foundation vertical slice
   (User → Session → Message → ModelProvider → Response → Event).
-  [`docs/PHASE_1_RECONCILIATION.md`](docs/PHASE_1_RECONCILIATION.md) records that two of its five
-  playbook components are unbuilt. Later phases proceeded on the parts that exist; Phase 1 itself
-  was never closed.
+  All five playbook components are built; identity was the last and arrived in PR #39.
+  The phase is still not **accepted** — that gate ends with the owner, and the two are
+  different states. See [`PROJECT_STATE.md`](PROJECT_STATE.md).
 - **Phase 2** — ACCEPTED (`0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511`)
   Knowledge & context foundations. In-memory contracts, retrieval, budgeting.
   Tests: 389 passed / 14 skipped.
@@ -117,7 +155,10 @@ Explicit distinction:
 - No semantic embedding-based memory ranking
 - Memory retrieval is enrichment/degradation, not a write path
 - Phase 2 rendering overhead limitation remains out of scope
-- No production database persistence changes introduced (in-memory only)
+- Retrieval is not wired into `pac` — the grounded slice exists and is tested, but nothing
+  has decided when a durable deployment re-ingests its corpus (ADR-010 R4)
+- No Neon, no pgvector, no server database and no migrations. The durable store is one
+  SQLite file and `sqlite3` is stdlib, so the project still has no runtime dependencies
 
 ## Current state
 
