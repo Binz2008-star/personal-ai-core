@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: 4980e09857a42ec30ed96cc32d96911f726395af (short: 4980e09 — Merge pull request #32)
-  The accepted PHASE is still Phase 4. PRs #3-#32 are correction, hardening
+Main branch head: fcea13b78583155df69e814f96c8bb2a87e89d1b (short: fcea13b — Merge pull request #34)
+  The accepted PHASE is still Phase 4. PRs #3-#34 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
 Phase 2 accepted commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511
 Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
@@ -15,12 +15,13 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (4980e09): 560 passed / 14 skipped
-  (+9 prerequisite B, +10 prerequisite A. 541 remains the last figure confirmed
-   on Linux CI and Windows; 560 is Linux CI only and is not claimed otherwise)
+- Current main (fcea13b): 561 passed / 14 skipped
+  (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard. 541
+   remains the last figure confirmed on Linux CI and Windows; 561 is Linux CI
+   only and is not claimed otherwise. CI runs ubuntu-latest alone)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at 4980e09 (Phase 4 merged, plus PRs #3-#32)
+Synchronization: origin/main is at fcea13b (Phase 4 merged, plus PRs #3-#34)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -37,11 +38,16 @@ Phase 1 — PARTIAL / NOT COMPLETE
           until PR #23; the memory foundation was built in Phase 3 and the
           reconciliation had gone on saying otherwise. Phase 1 is therefore
           still NOT complete, and must not be summarised as completed.
-          Verified at 4980e09: src/personal_ai_core/identity/ does not exist,
-          and ResponsePolicy / BehavioralContract have 0 occurrences in src/.
+          Re-verified at fcea13b: src/personal_ai_core/identity/ does not
+          exist, and ResponsePolicy / BehavioralContract have 0 occurrences in
+          src/.
           Contract design: ADR-011 — PROPOSED, not accepted. It fixes the shape
-          of the contract and authorises no implementation, so Phase 1 is not
-          advanced by it.
+          of the contract (questions 1-4) and how its text is governed
+          (questions 5-8: where the text lives, what yields on conflict, how a
+          rule may change, which layer holds it). It authorises no
+          implementation, so Phase 1 is not advanced by it. What the rules SAY
+          is still unwritten, and that -- not a missing decision -- is what
+          Phase 1 now waits on.
   Evidence: docs/PHASE_1_VERTICAL_SLICE.md, docs/PHASE_1_RECONCILIATION.md
 
 Phase 2 — ACCEPTED
@@ -180,6 +186,18 @@ claim written in one place with nothing that notices it going stale.
                because identity/ is not built; fundable, so a budget line
                rather than decoration. spoken_for now sums SHARES, guarded
                against a future field being added and left uncounted
+  #33 421a46b  docs: record prerequisite A as done, and guard the ledger's row
+               order. The order guard exists because the same edit mistake
+               happened twice and the exact-SHA check does not look at order.
+               Also dropped the Post-Phase-4 summary line's head and range
+               rather than refreshing them: refreshing fixes today and goes
+               stale next merge
+  #34 fcea13b  docs(adr): settle how the identity text is governed before its
+               classes -- where it lives (in code, for the diff), what yields
+               on conflict (the policy does, the contract does not), how a rule
+               may change (only against a stated behavioural failure), which
+               layer holds it (protocol in core, text outside it). Marked
+               DECIDED, not reviewed
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -384,8 +402,11 @@ Identity: ADR-011 PROPOSED, not accepted — contract design only, nothing built
   Prerequisite B: DONE — generation_reserve is an enforced provider limit
   BOTH DONE does NOT authorise identity implementation. They were obstacles,
   not permission. identity/ does not exist and must not be created without a
-  separate decision — one that should settle the contract's TEXT, not only its
-  shape, or it produces empty containers
+  separate decision.
+  Contract questions 5-8 (PR #34): DECIDED, not reviewed — they govern the
+  text (where it lives, what yields on conflict, how a rule may change, which
+  layer holds it). What the rules SAY is still unwritten, and that is the one
+  thing left before implementation could be judged at all.
 
 BOSS MODEL
 ==========
