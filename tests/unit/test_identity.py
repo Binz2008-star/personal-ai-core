@@ -20,12 +20,15 @@ from typing import Any, Mapping
 
 import pytest
 
+from personal_ai_core.context.budget import ReserveBasedBudgetPolicy
 from personal_ai_core.context.token_estimator import ScriptAwareTokenEstimator
 from personal_ai_core.conversation.factory import (
     build_grounded_in_memory_service,
     build_in_memory_service,
 )
 from personal_ai_core.conversation.grounding import GROUNDING_PREAMBLE
+from personal_ai_core.conversation.service import ConversationService
+from personal_ai_core.core.config import Settings
 from personal_ai_core.core.contracts import IdentityComposer
 from personal_ai_core.core.domain import Role
 from personal_ai_core.core.identity import BehavioralContract, ResponsePolicy
@@ -36,6 +39,14 @@ from personal_ai_core.identity import (
     RULES,
     DefaultIdentityComposer,
 )
+from personal_ai_core.persistence.in_memory import (
+    InMemoryEventRepository,
+    InMemoryMessageRepository,
+    InMemorySessionRepository,
+    InMemoryUserRepository,
+)
+from personal_ai_core.runtime.model_registry import ModelRegistry
+from personal_ai_core.runtime.ollama.provider import OllamaProvider
 
 
 class RecordingTransport:
@@ -221,12 +232,25 @@ def test_identity_is_never_persisted():
     memory. Persisting it would also charge the budget for the same text on
     every later turn -- the defect the grounding message avoids the same way."""
     transport = RecordingTransport()
-    service, _ = build_in_memory_service(transport=transport)
+    messages = InMemoryMessageRepository()
+    # Wired by hand so the repository is the test's own object: reaching into
+    # `service._messages` would make this test depend on a private attribute
+    # and stop checking the wiring the moment the wiring changed shape.
+    service = ConversationService(
+        users=InMemoryUserRepository(),
+        sessions=InMemorySessionRepository(),
+        messages=messages,
+        events=InMemoryEventRepository(),
+        provider=OllamaProvider("http://unused", transport=transport),
+        registry=ModelRegistry.from_settings(Settings()),
+        budget_policy=ReserveBasedBudgetPolicy(),
+        identity=DefaultIdentityComposer(),
+    )
     session = service.start_session(service.create_user().id)
     service.send(session_id=session.id, content="one")
     service.send(session_id=session.id, content="two")
 
-    stored = service._messages.list_for_session(session.id)  # noqa: SLF001
+    stored = messages.list_for_session(session.id)
     assert [m.role for m in stored] == [
         Role.USER,
         Role.ASSISTANT,
