@@ -44,6 +44,11 @@ LAYER_MAY_IMPORT = {
     "knowledge": {"core"},                          # Phase 2 retrieval stack
     "context": {"core"},                            # Phase 2 budgeting
     "memory": {"core"},                             # Phase 3 promotion pipeline
+    # ADR-011 question 8: the contract TYPES are in core and the TEXT is here,
+    # so this layer needs core and nothing else. `conversation` must not
+    # import it -- the composer reaches ConversationService through
+    # factory.py, exactly as the budget policy does.
+    "identity": {"core"},                           # ADR-011/ADR-012 identity
 }
 COMPOSITION_ROOTS = {"conversation/factory.py"}
 
