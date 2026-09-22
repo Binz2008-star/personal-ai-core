@@ -179,6 +179,47 @@ separate prerequisite because it does not currently exist.
 
 ---
 
+## The contract — three Core-owned concepts
+
+Composed into exactly one `Role.SYSTEM` message per turn. The `Role.SYSTEM` role already
+exists in `core/domain.py`; `conversation/grounding.py` is currently its only producer,
+and what it emits is retrieved evidence, not identity.
+
+### `ResponsePolicy` — how to answer
+
+Derived from the turn's `language` and the active `ModelSpec`. Governs:
+
+- **language and register** — Modern Standard Arabic for `ar`, no regional dialect unless
+  the user asks for one, and no switching language mid-reply;
+- **answer discipline** — concision; no decorative filler.
+
+Adapted from `get_language_rule` in **substance only**; per design question 2 the text is
+constant across models, and per design question 3 the Core owns that text rather than
+inheriting Rico's wording.
+
+### `BehavioralContract` — what is non-negotiable
+
+Numbered rules present in every model call, independent of conversation length. The
+*mechanism* is what transfers from the source — rules that a long conversation cannot
+push out of the window; the rule set is the Core's own. Three rules transfer in substance
+per `PHASE_1_RECONCILIATION.md` §1:
+
+1. never fabricate credentials,
+2. never act without explicit confirmation,
+3. never disclose secrets.
+
+### `IdentityComposer` — assembly
+
+Produces one `Message(role=Role.SYSTEM, ...)` from the policy and the contract. A
+protocol with a default implementation, so the composition is replaceable without
+modifying `ConversationService`.
+
+Naming these three concepts fixes the shape of the contract. It authorises no module, no
+class and no file: see **Scope guardrails**, which forbids creating
+`src/personal_ai_core/identity/`.
+
+---
+
 ## Prerequisites before identity implementation
 
 The four design questions are now resolved, but identity implementation remains
@@ -191,7 +232,7 @@ ADR-011 identity implementation
         |
         +-- prerequisite A
         |   ContextAllocation gains an explicit identity share
-        |   (Rule 4)
+        |   (Implementation boundary: "explicit context-budget share")
         |
         +-- prerequisite B
             generation_reserve becomes an enforced provider limit
@@ -203,7 +244,14 @@ ADR-011 identity implementation
 
 ### Prerequisite A — explicit identity budget share
 
-ADR-011 Rule 4 requires identity to have a named share in `ContextAllocation`.
+The **Implementation boundary** below requires identity to have an *explicit
+context-budget share*. That means a named `identity` field on `ContextAllocation`, funded
+explicitly and counted in `spoken_for`, so the share is traceable and `evidence` shrinks
+by a stated amount rather than an unexplained one.
+
+(An earlier draft cited this as "Rule 4", from a numbered list the clean rewrite replaced.
+The reference is to the boundary item by its wording, not its position: an index breaks
+silently when a list is renumbered.)
 
 The current `ContextAllocation` does not contain an identity field.
 
