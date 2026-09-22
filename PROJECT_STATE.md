@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: a9c3b6147cf78f5e4fcb694998c50c18129aaa18 (short: a9c3b61 — Merge pull request #39)
-  The accepted PHASE is still Phase 4. PRs #3-#39 are correction, hardening
+Main branch head: b2bcd834b9852bc27d53a78a8f7fd06e08da13f8 (short: b2bcd83 — Merge pull request #42)
+  The accepted PHASE is still Phase 4. PRs #3-#42 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
   One exception is worth naming: PR #39 BUILT Phase 1's last component
   rather than correcting Phase 4. It completes a phase's components; it does
@@ -21,10 +21,13 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (a9c3b61): 585 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
+- Current main (b2bcd83): 626 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
   (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard,
    +24 the identity layer -- 19 of them new, the rest from the layering
-   check, which is parametrised over src/ and so grew with the package.
+   check, which is parametrised over src/ and so grew with the package;
+   +14 the Event.payload contract, +27 the SQLite backend, of which the
+   conformance cases run TWICE because they are parametrised over both the
+   in-memory and the SQLite implementation.
    The long-standing caveat -- 541 the last two-platform figure, 561 Linux
    only -- was closed by PR #36: `suite-windows` runs the whole suite on
    windows-latest. The figure is no longer a single-platform claim, and the
@@ -32,7 +35,7 @@ Test verification (remote):
    it on a laptop)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at a9c3b61 (Phase 4 merged, plus PRs #3-#39)
+Synchronization: origin/main is at b2bcd83 (Phase 4 merged, plus PRs #3-#42)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -49,7 +52,7 @@ Phase 1 — COMPONENTS COMPLETE / NOT ACCEPTED
           two were missing until PR #23 established that the memory
           foundation had in fact been built in Phase 3, and identity remained
           until PR #39.
-          Measured at a9c3b61, not asserted: src/personal_ai_core/identity/
+          Re-measured at b2bcd83, not carried over: src/personal_ai_core/identity/
           exists (__init__.py, composer.py, text.py), ResponsePolicy and
           BehavioralContract occur in src/ -- core/identity.py defines them,
           identity/text.py supplies their content -- and the identity message
@@ -117,14 +120,24 @@ Phase 5 — NOT AUTHORIZED / DESIGN NOT STARTED
          before merge. See also CURRENT LIMITATIONS and BLOCKED WORK, which
          state the same thing from the feature side and remain accurate.
 
-PERSISTENCE — DESIGN PROPOSED, NOT SELECTED
+PERSISTENCE — ADR PROPOSED; THE RECOMMENDED OPTION IS BUILT AND UNWIRED
   ADR-010 (docs/ADR/ADR-010-persistence-model.md, PR #15) compares four
-  options and recommends a hybrid with SQLite, recording why an append-only
-  log remains defensible. NOTHING IS SELECTED. No schema, no migration, no
-  dependency, no Neon, no pgvector. Choosing an option authorizes nothing
-  about Phase 5, and authorizing Phase 5 would not select an option.
-  Prerequisite for a durable backend only: Event.payload is Mapping[str, Any]
-  with no serialisation contract.
+  options and recommends D+B -- a durable store for what cannot be rebuilt,
+  knowledge left in memory -- recording why an append-only log remains
+  defensible. The ADR is still PROPOSED: building an option is not accepting
+  the document, and this file will not read one as the other.
+  Prerequisite: CLOSED by PR #41. Event.payload now has a serialisation
+  contract, checked at construction. The second, smaller one is still open:
+  `add` and `append` return None, so a caller cannot distinguish a completed
+  write from an accepted one.
+  Built (PR #42): persistence/sqlite.py -- users, sessions, messages, events
+  and memory records. A schema, no migration yet, NO new dependency (sqlite3
+  is stdlib), no Neon, no pgvector. Knowledge is deliberately not stored: it
+  is derived and rebuildable by re-ingestion (R4).
+  NOT WIRED. The default composition still uses the in-memory repositories.
+  Which store a built system uses is its own decision and has not been taken.
+  Choosing an option authorizes nothing about Phase 5, and authorizing
+  Phase 5 would not select an option.
 
 POST-PHASE-4 MERGES
 -------------------
@@ -246,6 +259,25 @@ claim written in one place with nothing that notices it going stale.
                precise failure. The layering guard failed on the new package
                until LAYER_MAY_IMPORT gained it -- which is what that check
                was rewritten to do instead of skipping
+  #40 b4e56b7  docs: Phase 1 COMPONENTS COMPLETE / NOT ACCEPTED. Both halves
+               deliberate -- the gate ends at owner acceptance, which has not
+               been given. Caught by the ledger guard while being written: a
+               paragraph beginning "  #39 is the exception..." was read as a
+               row whose SHA was the word "is"
+  #41 d6cd124  feat(core): Event.payload gets a serialisation contract --
+               ADR-010's prerequisite. STRUCTURAL, not json.dumps: json.dumps
+               turns a tuple into a list and emits bare NaN, so it accepts
+               payloads that come back changed or that no other parser reads.
+               An event that cannot be written down is not evidence
+  #42 b2bcd83  feat(persistence): SQLite for the stores that must not be lost
+               -- ADR-010 option D+B. Knowledge is deliberately NOT stored:
+               chunks and vectors are derived and rebuildable, and binding
+               them to the same store is what makes a server database look
+               necessary. supersede is one transaction (R2); `seq` makes
+               order a stored fact rather than an artefact of a list (R3).
+               No new dependency -- sqlite3 is stdlib. NOT wired into the
+               factory: which store the default composition uses is its own
+               decision
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
