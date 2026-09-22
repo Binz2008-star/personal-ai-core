@@ -7,7 +7,15 @@ on:
 
 jobs:
   suite:
-    runs-on: ubuntu-latest
+    # Windows is here because Linux CI could not see it: two path-separator
+    # defects reached main because every check ran on ubuntu-latest alone.
+    # fail-fast: false so a red Windows leg does not cancel the Linux one --
+    # "it broke somewhere" is not the same finding as which platform broke.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       # Full history, not the default shallow clone.
       # `tests/unit/test_merge_ledger.py` checks PROJECT_STATE.md's merge
