@@ -4,13 +4,15 @@
 
 - Design questions: **RESOLVED** (four, below; reviewed and accepted)
 - Identity contract: **PROPOSED**, not accepted
-- Identity implementation: **NOT AUTHORIZED**, gated on prerequisite A
-- Prerequisite B: **DONE** — the generation reserve is an enforced provider limit
+- Prerequisites A and B: **BOTH DONE**
+- Identity implementation: **NOT AUTHORIZED** — and no longer blocked by anything
+  but that decision
 
 This ADR defines a contract. It authorises no implementation, creates no package, and
 does not complete Phase 1. Answering its design questions does not authorise building it:
-design-complete and implementable are different states, and the prerequisites below are
-the distance between them. One of the two is now closed.
+design-complete and implementable are different states, and the prerequisites below were
+the distance between them. Both are now closed, which removes the obstacles and supplies
+no authorisation: those were never the same thing.
 
 ## Context
 
@@ -231,13 +233,13 @@ class and no file: see **Scope guardrails**, which forbids creating
 The four design questions are now resolved, but identity implementation remains
 unauthorised.
 
-Each prerequisite is a separate change, separately authorised. One remains.
+Each prerequisite was a separate change, separately authorised. Both are closed.
 
 ```text
 ADR-011 identity implementation
         |
-        +-- prerequisite A   OPEN
-        |   ContextAllocation gains an explicit identity share
+        +-- prerequisite A   DONE
+        |   ContextAllocation has an explicit identity share, funded at zero
         |   (Implementation boundary: "explicit context-budget share")
         |
         +-- prerequisite B   DONE
@@ -245,11 +247,17 @@ ADR-011 identity implementation
             (Q4 finding)
         |
         v
-    Identity layer implementation
+    Identity layer implementation   NOT AUTHORIZED
 ```
 
-Prerequisite A being the only one left does **not** authorise identity implementation.
-Closing A is its own decision, and building identity after it is another.
+**Both prerequisites being done does not authorise identity implementation.** They were
+obstacles, not permission. What remains is a decision, and it is the owner's.
+
+One thing worth deciding before the shape: the contract's **text**. This ADR fixes what
+`ResponsePolicy` and `BehavioralContract` are and what governs them; it does not author
+the rules themselves. Building the classes before the words exist would produce empty
+containers -- the failure this ADR already suffered once, when a rewrite left a
+"behavioural contract" with no rules in it.
 
 ### Prerequisite A — explicit identity budget share
 
@@ -262,12 +270,19 @@ by a stated amount rather than an unexplained one.
 The reference is to the boundary item by its wording, not its position: an index breaks
 silently when a list is renumbered.)
 
-The current `ContextAllocation` does not contain an identity field.
+**Now:** `ContextAllocation` carries `identity: int = 0`, validated non-negative and
+counted in `spoken_for`. `ReserveBasedBudgetPolicy` takes `identity_reserve`, the share
+appears in `source`, and `summarize()` records it.
 
-Adding that field is therefore a change to a built contract and must be reviewed and
-authorised independently.
+The substantive decision was the default, not the field. `identity/` is not built, so a
+reserve invented for it would shrink `evidence` today for no benefit and the number would
+be fabricated -- ADR-005's hard-coded 24000 in a smaller costume. Zero is the honest
+value until something supplies a real one. The share is *fundable* now and *funded at
+zero*, which is why it is a budget line rather than decoration.
 
-This ADR does **not** implement that change.
+`spoken_for` now sums `ContextAllocation.SHARES`, and a test walks the dataclass fields to
+assert every non-window field is counted. That guard is for the next share, not this one:
+a field added and left out would exist, be recorded, and cost nothing.
 
 ### Prerequisite B — enforce generation reserve — **DONE**
 
