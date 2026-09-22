@@ -61,24 +61,41 @@ class ContextAllocation:
     check it against.
 
     The arithmetic is deliberately visible and deliberately conservative --
-    `evidence` is whatever survives after the other three shares are taken,
-    floored at zero. A budget is never allowed to go negative and silently
-    wrap into "plenty of room".
+    `evidence` is whatever survives after the other shares are taken, floored
+    at zero. A budget is never allowed to go negative and silently wrap into
+    "plenty of room".
+
+    `identity` is ADR-011 prerequisite A. ADR-005's Decision apportions the
+    window "across identity, conversation, memory, knowledge, tool
+    observations and generation", and this module's own docstring says the
+    same -- while the field did not exist. The share was promised in two
+    places and implemented in neither, so identity tokens would have come out
+    of `overhead` or silently shrunk `evidence`: a budget nobody could trace,
+    which is the failure ADR-005 exists to prevent.
+
+    It defaults to zero because `identity/` is not built. A default invented
+    for a component that does not exist would shrink `evidence` today for no
+    benefit, and the number would be fabricated. Zero is the honest value
+    until something supplies a real one -- but the share is settable now, so
+    it is a real field rather than a placeholder.
     """
 
     context_window: int
     generation_reserve: int
     overhead: int
     history: int
+    identity: int = 0
+
+    SHARES = ("generation_reserve", "overhead", "history", "identity")
 
     def __post_init__(self) -> None:
-        for name in ("context_window", "generation_reserve", "overhead", "history"):
+        for name in ("context_window", *self.SHARES):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be non-negative")
 
     @property
     def spoken_for(self) -> int:
-        return self.generation_reserve + self.overhead + self.history
+        return sum(getattr(self, name) for name in self.SHARES)
 
     @property
     def evidence(self) -> int:

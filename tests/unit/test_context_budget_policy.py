@@ -12,6 +12,7 @@ from personal_ai_core.context import (
     DEFAULT_OVERHEAD,
     ReserveBasedBudgetPolicy,
 )
+from personal_ai_core.context.budget import DEFAULT_IDENTITY_RESERVE
 from personal_ai_core.core.context import ContextAllocation
 
 
@@ -123,7 +124,8 @@ def test_defaults_are_named_constants_not_literals():
 
 
 @pytest.mark.parametrize(
-    "kwargs", [{"generation_reserve": -1}, {"overhead": -1}]
+    "kwargs",
+    [{"generation_reserve": -1}, {"overhead": -1}, {"identity_reserve": -1}],
 )
 def test_negative_reserves_are_rejected(kwargs):
     with pytest.raises(ValueError):
@@ -136,10 +138,88 @@ def test_negative_history_is_rejected(policy):
 
 
 @pytest.mark.parametrize(
-    "field", ["context_window", "generation_reserve", "overhead", "history"]
+    "field",
+    ["context_window", "generation_reserve", "overhead", "history", "identity"],
 )
 def test_a_negative_allocation_field_is_rejected(field):
-    kwargs = dict(context_window=100, generation_reserve=0, overhead=0, history=0)
+    kwargs = dict(
+        context_window=100, generation_reserve=0, overhead=0, history=0, identity=0
+    )
     kwargs[field] = -1
     with pytest.raises(ValueError):
         ContextAllocation(**kwargs)
+
+
+# --- ADR-011 prerequisite A: the identity share ----------------------------
+
+
+def test_identity_defaults_to_zero_because_identity_is_not_built():
+    """The honest default.
+
+    A reserve invented for a component that does not exist would shrink
+    `evidence` today for no benefit, and the number would be fabricated.
+    """
+    policy = ReserveBasedBudgetPolicy()
+    allocation = policy.allocate(model=Spec(BOSS_WINDOW), history_tokens=0)
+    assert allocation.identity == DEFAULT_IDENTITY_RESERVE == 0
+
+
+def test_a_funded_identity_share_reaches_the_allocation():
+    """The field must be settable, or it is decoration rather than a budget line."""
+    policy = ReserveBasedBudgetPolicy(identity_reserve=300)
+    allocation = policy.allocate(model=Spec(BOSS_WINDOW), history_tokens=0)
+    assert allocation.identity == 300
+
+
+def test_identity_is_counted_in_spoken_for():
+    funded = ContextAllocation(
+        context_window=1000, generation_reserve=10, overhead=5, history=20, identity=300
+    )
+    assert funded.spoken_for == 10 + 5 + 20 + 300
+
+
+def test_evidence_shrinks_by_exactly_the_identity_share():
+    """ADR-011 Rule 4's whole point: a stated amount, not an unexplained one."""
+    unfunded = ReserveBasedBudgetPolicy(identity_reserve=0).allocate(
+        model=Spec(BOSS_WINDOW), history_tokens=500
+    )
+    funded = ReserveBasedBudgetPolicy(identity_reserve=300).allocate(
+        model=Spec(BOSS_WINDOW), history_tokens=500
+    )
+    assert unfunded.evidence - funded.evidence == 300
+
+
+def test_identity_can_overcommit_the_window_visibly():
+    """Identity is a real share: enough of it exhausts the turn like any other."""
+    allocation = ContextAllocation(
+        context_window=100, generation_reserve=0, overhead=0, history=0, identity=101
+    )
+    assert allocation.overcommitted
+    assert allocation.evidence == 0
+
+
+def test_the_source_string_names_the_identity_share():
+    """ADR-005: a budget must be traceable to what produced it.
+
+    An identity share absent from `source` would be a share nobody could see
+    in the record -- the untraceable-budget failure in miniature.
+    """
+    source = ReserveBasedBudgetPolicy(identity_reserve=300).source
+    assert "identity=300" in source
+
+
+def test_every_allocation_share_is_counted_in_spoken_for():
+    """A field added and left out of SHARES is silently free.
+
+    That is the ADR-005 failure exactly: a share that exists, is recorded, and
+    does not affect the arithmetic. This walks the dataclass rather than a
+    hand-written list, so a future `tool_observations` cannot slip past.
+    """
+    import dataclasses
+
+    fields = {f.name for f in dataclasses.fields(ContextAllocation)}
+    uncounted = fields - {"context_window"} - set(ContextAllocation.SHARES)
+    assert uncounted == set(), (
+        f"{uncounted} are allocation fields that spoken_for ignores; add them "
+        "to ContextAllocation.SHARES or they cost nothing"
+    )
