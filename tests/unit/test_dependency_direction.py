@@ -49,6 +49,10 @@ LAYER_MAY_IMPORT = {
     # import it -- the composer reaches ConversationService through
     # factory.py, exactly as the budget policy does.
     "identity": {"core"},                           # ADR-011/ADR-012 identity
+    # AGENT_ARCHITECTURE.md / ADR-004. Policy, sandbox and tools depend on
+    # the contracts and nothing else; the loop reaches a model through
+    # core.contracts.ModelProvider, never through runtime/.
+    "agent": {"core"},                              # the agent layer
     # The entry point. WIDER than every other layer, and the reason is the
     # one thing it does: it calls the composition root. `conversation` is on
     # the list so it can reach factory.py; no adapter is, because knowing
