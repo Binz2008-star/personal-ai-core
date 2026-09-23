@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: b7fcb0a4cea8a26871c24cb30a6c35a432ba3ae0 (short: b7fcb0a — Merge pull request #49)
-  The accepted PHASE is still Phase 4. PRs #3-#49 are correction, hardening
+Main branch head: c43f3f96b0b8be397db273745aff42e17cf939f1 (short: c43f3f9 — Merge pull request #52)
+  The accepted PHASE is still Phase 4. PRs #3-#53 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
   Three exceptions are worth naming, because "correction and hardening" no
   longer covers them: PR #39 BUILT Phase 1's last component; PR #44 wired a
@@ -22,11 +22,11 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (b7fcb0a): 659 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
+- Current main (c43f3f9): 673 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
   (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard,
    +24 the identity layer -- 19 of them new, the rest from the layering
    check, which is parametrised over src/ and so grew with the package;
-   +14 the Event.payload contract, +11 the F-1 evidence boundary, +27 the SQLite backend, of which the
+   +14 the Event.payload contract, +11 the F-1 evidence boundary, +14 the F-4 rendered cost, +27 the SQLite backend, of which the
    conformance cases run TWICE because they are parametrised over both the
    in-memory and the SQLite implementation.
    The long-standing caveat -- 541 the last two-platform figure, 561 Linux
@@ -36,7 +36,7 @@ Test verification (remote):
    it on a laptop)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at b7fcb0a (Phase 4 merged, plus PRs #3-#49)
+Synchronization: origin/main is at c43f3f9 (Phase 4 merged, plus PRs #3-#53)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -315,6 +315,19 @@ claim written in one place with nothing that notices it going stale.
                random, because rendering is deterministic on purpose. Closes
                F-1. Also repaired a guard #39 had made vacuous: it read
                last_messages[0], which had been identity since #39
+  #50 85dea05  docs: record #47-#49 and mark F-1 closed
+  #51 157a314  docs: the owner-requested review of #49. "Unforgeable" was
+               withdrawn: the token is not secret, and what holds is
+               self-reference resistance. Opened F-3, F-4 and F-5, and added
+               the NEXT SESSION HANDOFF
+  #52 c43f3f9  fix(context): charge evidence as rendered, not as bare text
+               (F-4). A RenderedCost contract in core; the implementation
+               renders each item for real, so a format change is charged
+               automatically. Measured through the factory: 650 estimated
+               tokens against a 398 budget before, 362 after
+  #53 111fad1  docs(grounding): state what the boundary token gives and
+               withdraw "cannot be forged" (F-3). Comments and docstrings
+               only; the code is AST-identical
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -670,13 +683,13 @@ F-2  ADR-013 ASSUMED A PRODUCTION RETRIEVAL PATH THAT DOES NOT EXIST      DOCUME
      Role.SYSTEM message as the contract. It is the same ROLE, in a separate,
      adjacent message: [identity, evidence, *history]. Both corrected in place.
 
-F-3  #49's WORDING OVERSTATES ITS PROPERTY                               OPEN
+F-3  #49's WORDING OVERSTATES ITS PROPERTY                      CLOSED BY #53
      grounding.py (comment above BOUNDARY_TOKEN_LENGTH), the #49 commit message, and
      test_evidence_boundary.py's docstrings say "cannot be forged" / "2**64". Replace
      that with the restated property under F-1 and name the 2**64/k bound. The fix
      is comments and docstrings only; there is no behaviour change.
 
-F-4  #49 PUSHED UNBUDGETED SCAFFOLDING PAST THE OVERHEAD RESERVE          OPEN
+F-4  #49 PUSHED UNBUDGETED SCAFFOLDING PAST THE OVERHEAD RESERVE CLOSED BY #52
      The assembler charges only chunk text and memory content. Preambles and
      markers must fit inside DEFAULT_OVERHEAD = 256 (context/budget.py). Measured
      with ScriptAwareTokenEstimator:
@@ -689,6 +702,9 @@ F-4  #49 PUSHED UNBUDGETED SCAFFOLDING PAST THE OVERHEAD RESERVE          OPEN
      by the provider. MUST be fixed before F-2 wires retrieval into `pac`. Direction:
      charge the wrapper per selected item in the assembler, and the preambles in
      overhead, with a test that fails on today's numbers.
+     CLOSED by #52, which went further than that direction: the preambles are
+     charged per section by the assembler, not left in the overhead reserve.
+     tests/integration/test_rendered_budget.py pins it through the factory.
 
 F-5  SOURCE URI IS RENDERED UNESCAPED INSIDE THE OPENING LINE              OPEN
      label = f"[{n}] {source} (characters a-b)", with source = provenance.source_uri,
