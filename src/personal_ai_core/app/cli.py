@@ -21,12 +21,24 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import Callable, Iterable, Sequence, TextIO
 
-from ..conversation.factory import build_in_memory_service, build_persistent_service
+from ..conversation.factory import (
+    build_grounded_in_memory_service,
+    build_in_memory_service,
+    build_persistent_service,
+)
 from ..core.config import Settings
 from ..core.errors import ProviderError
+from ..core.knowledge import Document
+
+# What a DIRECTORY given to --documents contributes. A file named explicitly
+# is read whatever its suffix: the user chose it. A directory is walked, and
+# walking one without a filter would feed the index lock files, images and
+# whatever else happens to live there.
+DOCUMENT_SUFFIXES = (".md", ".txt")
 
 DEFAULT_DATABASE_ENV = "PAC_DATABASE"
 
@@ -79,7 +91,93 @@ def _parser() -> argparse.ArgumentParser:
             "nothing measured."
         ),
     )
+    parser.add_argument(
+        "--documents",
+        type=Path,
+        action="append",
+        default=None,
+        metavar="PATH",
+        help=(
+            "a file, or a directory of .md and .txt files, to answer from. "
+            "Repeatable. Documents are read on every run and held in memory "
+            "only: the conversation is stored, the corpus is not. Retrieval "
+            "is lexical plus a hashing embedder -- surface overlap, not "
+            "meaning."
+        ),
+    )
     return parser
+
+
+def _document_files(paths: Sequence[Path]) -> tuple[list[Path], list[Path]]:
+    """The files to read, and the paths that do not exist.
+
+    Sorted, so two runs over the same tree ingest in the same order and
+    produce the same index. A missing path is returned rather than skipped:
+    a typo in a path should stop the command, not quietly shrink the corpus.
+    """
+    files: list[Path] = []
+    missing: list[Path] = []
+    for path in paths:
+        if path.is_dir():
+            files.extend(
+                sorted(
+                    p
+                    for p in path.rglob("*")
+                    if p.is_file() and p.suffix.lower() in DOCUMENT_SUFFIXES
+                )
+            )
+        elif path.is_file():
+            files.append(path)
+        else:
+            missing.append(path)
+    return files, missing
+
+
+def _document_id(uri: str) -> str:
+    """The same file is the same document, however often it is named.
+
+    `Document.id` defaults to a random id. Then a file named twice -- directly
+    and again through its directory -- would be two documents, indexed twice,
+    and its passage could fill two of the few evidence slots. With an id
+    derived from the URI, the second ingestion hits the content-hash check
+    and does nothing.
+
+    Not claimed: stability of anything recorded. Events record chunk ids, not
+    document ids, and chunk ids are minted per run (see
+    `build_persistent_service`).
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, uri))
+
+
+def _ingest(ingestion, files: Sequence[Path], out: TextIO) -> None:
+    ingested = 0
+    chunks = 0
+    for path in files:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            print(f"skipped: {path} -- not UTF-8 text", file=out)
+            continue
+        except OSError as exc:
+            print(f"skipped: {path} -- {exc.strerror or exc}", file=out)
+            continue
+        # `as_uri` percent-encodes, so the citation is a well-formed URI and
+        # resolves back to this file.
+        uri = path.resolve().as_uri()
+        report = ingestion.ingest(
+            Document(source_uri=uri, id=_document_id(uri)), content
+        )
+        if report.unchanged:
+            # Named twice; already in the index. Counting it again would
+            # report a corpus larger than the one being searched.
+            continue
+        ingested += 1
+        chunks += report.chunk_count
+    print(
+        f"documents: {ingested} file(s), {chunks} chunk(s) -- held in memory, "
+        "read again on every run",
+        file=out,
+    )
 
 
 def _database_path(argument: Path | None, env: dict[str, str]) -> Path:
@@ -109,20 +207,44 @@ def main(
     settings = Settings.from_env(environment)
     lines = stdin if stdin is not None else sys.stdin
 
+    # Resolved before anything is built or opened: a path that does not exist
+    # is a mistake in the command, and it should cost nothing but a message.
+    grounded = args.documents is not None
+    files: list[Path] = []
+    if grounded:
+        files, missing = _document_files(args.documents)
+        if missing:
+            for path in missing:
+                print(f"no such file or directory: {path}", file=out)
+            return 2
+
     slice_ = None
+    ingestion = None
     if args.ephemeral:
-        service, _ = build_in_memory_service(settings, transport=transport)  # type: ignore[arg-type]
+        if grounded:
+            grounded_slice = build_grounded_in_memory_service(
+                settings, transport=transport  # type: ignore[arg-type]
+            )
+            service, ingestion = grounded_slice.service, grounded_slice.ingestion
+        else:
+            service, _ = build_in_memory_service(settings, transport=transport)  # type: ignore[arg-type]
         where = "nowhere -- --ephemeral was given"
     else:
         database = _database_path(args.database, environment)
         database.parent.mkdir(parents=True, exist_ok=True)
         slice_ = build_persistent_service(
-            settings, database=database, transport=transport  # type: ignore[arg-type]
+            settings,
+            database=database,
+            transport=transport,  # type: ignore[arg-type]
+            grounded=grounded,
         )
-        service = slice_.service
+        service, ingestion = slice_.service, slice_.ingestion
         where = str(database)
 
     try:
+        if ingestion is not None:
+            _ingest(ingestion, files, out)
+
         if args.session:
             # Not verified here. `send` raises KeyError for an unknown
             # session and that is the contract; asking the service whether a
