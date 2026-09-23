@@ -9,7 +9,7 @@ Built through Phase 4 and the post-Phase-4 PRs: `core/`, `runtime/`, `conversati
 `memory/`, `knowledge/`, `context/`, `persistence/` (in-memory and SQLite), `identity/`
 (#39) and `app/`, which provides the `pac` entry point (#45). Not built: `agent/`, `learning/`,
 `evaluation/`, `projects/`, `api/`, `ui/`. Sections below are labelled accordingly.
-Aligned with the code at `88e37b3`; where it disagrees with `PROJECT_STATE.md`, that file
+Aligned with the code at `74a2ae2`; where it disagrees with `PROJECT_STATE.md`, that file
 wins.
 
 Evidence for every source claim is in [`COMPONENT_EXTRACTION_MATRIX.md`](COMPONENT_EXTRACTION_MATRIX.md).
@@ -217,9 +217,9 @@ into one shared token budget. There is no separate compression stage. Evidence i
 between boundary lines (#49, with its limits stated in #53) and charged at its rendered
 cost, not its bare text (#52).
 
-**BUILT is not the same as reachable.** `pac` does not wire `CONTEXT BUILD` yet (Finding
-F-2): its two factories compose identity and conversation only. `build_grounded_in_memory_service`
-composes the grounded path, and today only tests call it.
+**Reachable from `pac` with `--documents`** (#58, closing Finding F-2). The corpus is re-read
+from the named paths on every run and held in memory; the conversation is stored. Memory
+recall is built but not wired into `pac`: nothing on that path promotes memories yet.
 
 The prompt the provider receives is `[identity, evidence?, *history]`: separate messages,
 the first two both `Role.SYSTEM`.

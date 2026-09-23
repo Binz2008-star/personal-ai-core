@@ -4,13 +4,14 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: 86e3f0b0b42d4cf0ab64ad3745df48252c438b29 (short: 86e3f0b — Merge pull request #54)
-  The accepted PHASE is still Phase 4. PRs #3-#55 are correction, hardening
+Main branch head: 74a2ae28b8e031f84cd93e3aa12cbfb7735fa269 (short: 74a2ae2 — Merge pull request #58)
+  The accepted PHASE is still Phase 4. PRs #3-#58 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
   Three exceptions are worth naming, because "correction and hardening" no
   longer covers them: PR #39 BUILT Phase 1's last component; PR #44 wired a
   durable store; PR #45 added an entry point, so the system can be RUN rather
-  than only imported. None of the three accepts a phase or starts one.
+  than only imported. PR #58 then made retrieval reachable from that entry
+  point. None of them accepts a phase or starts one.
   (Phrased so the line does not begin with a "#<number> " token: the ledger
   parser reads any such line as a row, and the first draft of this paragraph
   was picked up as a row whose SHA was the word "is". The guard caught it.)
@@ -22,11 +23,11 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (86e3f0b): 679 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
+- Current main (74a2ae2): 691 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
   (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard,
    +24 the identity layer -- 19 of them new, the rest from the layering
    check, which is parametrised over src/ and so grew with the package;
-   +14 the Event.payload contract, +11 the F-1 evidence boundary, +14 the F-4 rendered cost, +6 the F-5 label encoding, +27 the SQLite backend, of which the
+   +14 the Event.payload contract, +11 the F-1 evidence boundary, +14 the F-4 rendered cost, +6 the F-5 label encoding, +12 pac --documents (F-2), +27 the SQLite backend, of which the
    conformance cases run TWICE because they are parametrised over both the
    in-memory and the SQLite implementation.
    The long-standing caveat -- 541 the last two-platform figure, 561 Linux
@@ -36,7 +37,7 @@ Test verification (remote):
    it on a laptop)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at 86e3f0b (Phase 4 merged, plus PRs #3-#55)
+Synchronization: origin/main is at 74a2ae2 (Phase 4 merged, plus PRs #3-#58)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -337,6 +338,20 @@ claim written in one place with nothing that notices it going stale.
   #55 fb023f9  docs: record #50-#53. The ledger had fallen four merges behind,
                #50 never having been recorded, and the guard failed on main
                at c43f3f9 until this merged. The guard caught the miscount
+  #56 88e37b3  docs: record #54 and #55, close F-5, refresh the handoff
+  #57 c5842c0  docs: align ARCHITECTURE.md and the playbook with what is built.
+               identity/ and app/ exist, and SQLite persistence exists. The
+               personality was left out (ADR-012). Playbook section 8 now
+               records the phase reordering as a decision: the executed phases
+               are authoritative, and the unstarted planned phases lose their
+               numbers until authorised
+  #58 74a2ae2  feat(app): pac --documents -- retrieval reaches the entry point
+               (F-2). The corpus is re-read from the named paths on every run
+               and held in memory; the conversation is durable. One shared
+               _knowledge_stack for both stores, so F-4's wiring cannot drift
+               between them. A missing path exits 2 before anything is opened.
+               Memory recall is deliberately not wired: nothing on that path
+               promotes memories
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -489,8 +504,11 @@ CURRENT LIMITATIONS (ACCEPTED)
   nothing about a capability existing. None does.
 - No semantic embedding-based memory ranking (Phase 2 HashingEmbeddingProvider is not semantic)
 - Memory retrieval is enrichment/degradation, not a write path
-- Phase 2 rendering overhead limitation remains out of scope
-- No production database persistence changes introduced (in-memory only)
+- Rendering overhead: evidence is now charged at its rendered cost (#52). Only the
+  provider's chat-template tokens remain an estimate inside DEFAULT_OVERHEAD
+- Persistence is one local SQLite file (#42, #44); there is no server database and no
+  migrations framework. Knowledge is not persisted: `pac --documents` re-reads the
+  corpus on every run (#58)
 - Cross-session conflict handling not implemented (deferred with ADR-009)
 
 AGENT BOOT PROTOCOL
@@ -681,7 +699,7 @@ F-1  CITATION SPOOFING FROM INSIDE A DOCUMENT   CLOSED BY #49, PROPERTY RESTATED
      SealedMemoryStore, persistence or migrations.
      Review verdict: FOLLOW-UP REVIEW REQUIRED, not a revert. See F-3 to F-5.
 
-F-2  ADR-013 ASSUMED A PRODUCTION RETRIEVAL PATH THAT DOES NOT EXIST      DOCUMENTED
+F-2  ADR-013 ASSUMED A PRODUCTION RETRIEVAL PATH THAT DOES NOT EXIST CLOSED BY #58
      `pac` calls only build_in_memory_service and build_persistent_service; neither
      wires a ContextBuilder. Captured through `pac`, the prompt is [system, user] with
      no evidence message. No caller of build_grounded_in_memory_service exists in src/.
@@ -691,6 +709,11 @@ F-2  ADR-013 ASSUMED A PRODUCTION RETRIEVAL PATH THAT DOES NOT EXIST      DOCUME
      Also: ADR-013 and ledger row #37 said retrieved text goes in the SAME
      Role.SYSTEM message as the contract. It is the same ROLE, in a separate,
      adjacent message: [identity, evidence, *history]. Both corrected in place.
+     CLOSED by #58: `pac --documents PATH` builds the grounded slice on either
+     store. The corpus is re-read on every run, which answers the question
+     build_persistent_service had left open. ADR-013's harness can now call the
+     composition root `pac` calls AND reach retrieval, which its first case needs.
+     Still true: the harness itself is unbuilt, and must be built where a model runs.
 
 F-3  #49's WORDING OVERSTATES ITS PROPERTY                      CLOSED BY #53
      grounding.py (comment above BOUNDARY_TOKEN_LENGTH), the #49 commit message, and
@@ -732,14 +755,15 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-09-23, main at 86e3f0b)
+NEXT SESSION HANDOFF (updated 2026-09-23, main at 74a2ae2)
 ==========================================================
 
-State: everything through #55 is merged, and this records PR is the only one
-open. 679 passed / 14 skipped on Linux and Windows; ruff and pyright are clean.
+State: everything through #58 is merged, and this records PR is the only one
+open. 691 passed / 14 skipped on Linux and Windows; ruff and pyright are clean.
+All findings F-1 to F-5 are closed. F-1's model-side question remains open, and
+only ADR-013's injection case can answer it.
 
 Owner's standing constraints:
-  - DO NOT start F-2 (retrieval -> `pac`) until the owner says so. Fix F-4 first.
   - The ledger duplicate-row weakness stays in BACKLOG, with no implementation
     until authorized.
   - The owner reviews before any merge that changes behaviour. Do not say READY
@@ -747,14 +771,18 @@ Owner's standing constraints:
   - ADR-010..013 and Phase 1 are PROPOSED / NOT ACCEPTED; accepting them is the
     owner's call.
 
-Done, owner-approved and merged: F-3 (#53), F-4 (#52), F-5 (#54). F-1's
-model-side question is still open and belongs to ADR-013's injection case.
+Done, owner-approved and merged: F-3 (#53), F-4 (#52), F-5 (#54), the docs
+alignment (#57), and F-2 (#58).
 
-Recommended order from here (each one a small PR with a single purpose):
-  1. docs alignment: ARCHITECTURE.md is stale (identity "not built", persistence
-          "in-memory only", no app/); ENGINEERING_PLAYBOOK section 8 phase
-          numbering contradicts the executed phases -- proposed, not yet approved
-  2. only then, with the owner's go: F-2 (its prerequisite, F-4, is merged)
+What is next is not an agent's call to start. These are candidates, not a queue:
+  - ADR-013's harness, where a live model runs. Its injection case is now
+    reachable through `pac --documents`, and it is the only thing that can answer
+    F-1's model-side question.
+  - A semantic embedding provider behind EmbeddingProvider. The hashing embedder
+    returns neighbours whatever the meaning, so an English query also retrieved
+    an Arabic passage in the #58 smoke run.
+  - Memory recall in `pac`. It needs a promotion path on the pac side first, or it
+    reports a capability that returns nothing.
 
 Owner-only actions: make `suite-windows` a required check on main (no agent tool
 can change branch protection); accept the ADRs and Phase 1; build the ADR-013
