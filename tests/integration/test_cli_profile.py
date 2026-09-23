@@ -166,3 +166,33 @@ def test_the_profile_is_paid_for_in_the_identity_budget():
     assert profiled.tokens(estimator) > bare.tokens(estimator)
     assert profiled.profile == PROFILE.strip()
     assert DefaultIdentityComposer(profile="  \n ").text == bare.text
+
+
+# --- projects.md, beside the profile -------------------------------------------------
+
+
+def test_projects_beside_the_profile_are_read_with_it(tmp_path):
+    path = write_profile(tmp_path)
+    projects = path.parent / "projects.md"
+    projects.write_text("# My projects\n- LVYY: a WhatsApp sales agent\n", encoding="utf-8")
+    _, output, transport = run(tmp_path)
+    text = system(transport)
+    assert "I build Rico Hunt" in text and "LVYY: a WhatsApp sales agent" in text
+    assert text.index("I build Rico Hunt") < text.index("LVYY")
+    assert f"profile: {path} + {projects} (" in output
+
+
+def test_projects_alone_are_enough(tmp_path):
+    projects = tmp_path / "data" / "projects.md"
+    projects.parent.mkdir(parents=True)
+    projects.write_text("- only projects\n", encoding="utf-8")
+    _, _, transport = run(tmp_path)
+    assert "only projects" in system(transport)
+
+
+def test_the_limit_is_on_profile_and_projects_together(tmp_path):
+    half = MAX_PROFILE_CHARS // 2 + 1
+    path = write_profile(tmp_path, "p" * half)
+    (path.parent / "projects.md").write_text("q" * half, encoding="utf-8")
+    code, output, _ = run(tmp_path)
+    assert code == 2 and "projects.md" in output

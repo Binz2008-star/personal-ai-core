@@ -41,8 +41,9 @@ earlier run to continue it.
 (`~/.personal-ai-core/profile.md` by default): your work, your projects, your goals, how you
 like answers. It is read into every conversation and every agent task, in every session.
 It stays a file you can open and edit. `pac --remember "I prefer answers in Arabic"` adds a
-line without opening it. The profile is capped at 8000 characters, because it is sent with
-every turn.
+line without opening it. A `projects.md` beside it -- one paragraph per project -- is read
+with it, so the Core knows what you mean by a project's name. Together they are capped at
+12000 characters, because they are sent with every turn.
 
 Configuration is environment variables, all optional: `PAC_BOSS_MODEL`,
 `PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`.
