@@ -584,7 +584,7 @@ independent sources that agreed on every point: the prompt the transport actuall
 received, captured at runtime, and a static read by an agent given the questions but
 not the reviewer's conclusions -- because the reviewer had written ADR-013.
 
-F-1  CITATION SPOOFING FROM INSIDE A DOCUMENT                  CLOSED BY #49
+F-1  CITATION SPOOFING FROM INSIDE A DOCUMENT   CLOSED BY #49, PROPERTY RESTATED
      conversation/grounding.py `render_evidence` (:115-116) renders each passage as
      `[n] <source> (characters a-b)` followed by the passage text RAW -- no fence, no
      escaping, no closing boundary. A document can therefore write a line that is
@@ -611,6 +611,54 @@ F-1  CITATION SPOOFING FROM INSIDE A DOCUMENT                  CLOSED BY #49
      NOT claim: that a model reading the fenced block will obey rule 5. That is a
      behavioural property and belongs to ADR-013's injection case, still unbuilt.
 
+     OWNER-REQUESTED REVIEW OF #49 (at 85dea05, read-only, no code changed). The PR
+     and the code comment in grounding.py call the token "unforgeable". THAT WORD
+     IS NOT JUSTIFIED and is withdrawn here; the comment still says it (see F-3).
+     Construction, exactly:
+       item_i  = label_i + "\n" + text_i
+       token   = SHA-256( for each item: len(item) as 8-byte big-endian || item )
+                 -> first 16 hex characters (64 bits)
+       passage = "<<<passage T [n] <source> (characters a-b)>>>" / text /
+                 "<<<end passage T [n]>>>"
+       memory  = "<<<memory T [n] recorded by <promoted_by> at <promoted_at>>>>" /
+                 content / "<<<end memory T [n]>>>"
+     What the review measured:
+       - NO SECRET. For a single-result retrieval every input is known to the
+         document's author ([1], its own URI, its chunk's offsets, its own text).
+         The token was computed offline, byte-equal to the rendered one.
+       - What holds is SELF-REFERENCE RESISTANCE: a text cannot contain the token of
+         the block it is rendered in, because inserting it changes the hash. Cost is
+         a search of about 2**64 / k renders, where k is the number of candidate
+         marker slots the text carries. The 1/k scaling was confirmed at reduced
+         token lengths. With 1000-character chunks, k is about 25, so about 2**59.
+         That is computational hardness. It is not cryptographic authenticity: there
+         is no key and no MAC.
+       - "The hash also covers the other passages retrieved alongside it" is true
+         only when more than one passage is retrieved. It is not a guarantee.
+       - A forged marker with the WRONG token still reaches the model verbatim. The
+         line is in the prompt, and it differs only in 16 hex characters.
+     Properties, separated:
+       accidental delimiter collision ...... PREVENTED (2**-64 per occurrence)
+       text reproducing a GENUINE marker ... computationally infeasible (above)
+       spoofing, for a reader keyed on T ... PREVENTED
+       spoofing, as the MODEL reads it ..... NOT PROVEN (ADR-013 injection case)
+       cryptographic authenticity .......... NO
+       accurate name ....................... deterministic structural delimiting,
+                                             self-reference resistant
+     The fence is prompt representation only. Nothing parses it; the one consumer is
+     ContextBuilder.build, which puts it into a Message. It is not a trusted
+     execution boundary.
+     Memories: the label is built from provenance alone (promoted_by is a rule
+     constant, promoted_at is the system clock), so memory text cannot change the
+     genuine attribution. The provenance fields are unchanged; only the format
+     moved, from "- text (recorded by X at T)" to the fenced form with [n].
+     Regression surface, checked: chunk_ids in CONTEXT_ASSEMBLED are computed from
+     context.selected and are untouched. Source and range are still rendered. No
+     consumer parsed the old format. The src diff is grounding.py only (plus the
+     stdlib hashlib), so there is no change to Event != Memory, the layering,
+     SealedMemoryStore, persistence or migrations.
+     Review verdict: FOLLOW-UP REVIEW REQUIRED, not a revert. See F-3 to F-5.
+
 F-2  ADR-013 ASSUMED A PRODUCTION RETRIEVAL PATH THAT DOES NOT EXIST      DOCUMENTED
      `pac` calls only build_in_memory_service and build_persistent_service; neither
      wires a ContextBuilder. Captured through `pac`, the prompt is [system, user] with
@@ -622,11 +670,87 @@ F-2  ADR-013 ASSUMED A PRODUCTION RETRIEVAL PATH THAT DOES NOT EXIST      DOCUME
      Role.SYSTEM message as the contract. It is the same ROLE, in a separate,
      adjacent message: [identity, evidence, *history]. Both corrected in place.
 
+F-3  #49's WORDING OVERSTATES ITS PROPERTY                               OPEN
+     grounding.py (comment above BOUNDARY_TOKEN_LENGTH), the #49 commit message, and
+     test_evidence_boundary.py's docstrings say "cannot be forged" / "2**64". Replace
+     that with the restated property under F-1 and name the 2**64/k bound. The fix
+     is comments and docstrings only; there is no behaviour change.
+
+F-4  #49 PUSHED UNBUDGETED SCAFFOLDING PAST THE OVERHEAD RESERVE          OPEN
+     The assembler charges only chunk text and memory content. Preambles and
+     markers must fit inside DEFAULT_OVERHEAD = 256 (context/budget.py). Measured
+     with ScriptAwareTokenEstimator:
+       grounding preamble   86 -> 177      memory preamble   69 -> 111
+       per-passage wrapper  13 -> 39
+     Five passages plus both preambles: about 220 before #49, about 483 after. That
+     exceeds the 256 reserve that the Phase 2 "rendering overhead" limitation
+     silently relied on. Effect: near a full window, the prompt overruns its
+     budget by about 230 tokens, which eats the generation reserve or is truncated
+     by the provider. MUST be fixed before F-2 wires retrieval into `pac`. Direction:
+     charge the wrapper per selected item in the assembler, and the preambles in
+     overhead, with a test that fails on today's numbers.
+
+F-5  SOURCE URI IS RENDERED UNESCAPED INSIDE THE OPENING LINE              OPEN
+     label = f"[{n}] {source} (characters a-b)", with source = provenance.source_uri,
+     which has no validation. A URI containing "\n" or ">>>" would end the opening
+     line early and put lines outside any fence. The URI is part of the hash, so
+     this still cannot reproduce the genuine token, but it is an injection surface
+     #49 left unfenced. This comes from reading the code; it has not been
+     demonstrated. Direction: reject or escape control characters and ">>>" in
+     the label, and add a test.
+
 How the two relate: F-2 decides WHEN F-1 has real consequence -- the moment retrieval
 is wired into a production entry point. F-1 should therefore be closed before that
 wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
+
+NEXT SESSION HANDOFF (written 2026-09-23, main at 85dea05)
+==========================================================
+
+State: #48, #49 and #50 are merged, and no PR is open. 659 passed / 14 skipped
+on Linux and Windows; ruff and pyright are clean.
+
+Owner's standing constraints:
+  - DO NOT start F-2 (retrieval -> `pac`) until the owner says so. Fix F-4 first.
+  - The ledger duplicate-row weakness stays in BACKLOG, with no implementation
+    until authorized.
+  - The owner reviews before any merge that changes behaviour. Do not say READY
+    or ACCEPTED; give evidence.
+  - ADR-010..013 and Phase 1 are PROPOSED / NOT ACCEPTED; accepting them is the
+    owner's call.
+
+Recommended order (each one a small PR with a single purpose):
+  1. F-4  budget the #49 scaffolding -- OPEN as PR #52 (behaviour change,
+          owner review before merge). 250-token overrun measured, now fits.
+  2. F-3  correct the "unforgeable" wording -- OPEN as PR #53 (comments and
+          docstrings only; AST-identical code)
+  3. F-5  percent-encode label fields -- OPEN as PR #54 (behaviour change,
+          owner review). Now DEMONSTRATED, not only read from the code.
+     #51-#54 were trial-merged together onto 85dea05: clean, 679 passed.
+     After they merge, record #51-#54 in the ledger (lag limit is 3).
+  4. docs alignment: ARCHITECTURE.md is stale (identity "not built", persistence
+          "in-memory only", no app/); ENGINEERING_PLAYBOOK section 8 phase
+          numbering contradicts the executed phases -- proposed, not yet approved
+  5. only then, with the owner's go: F-2
+
+Owner-only actions: make `suite-windows` a required check on main (no agent tool
+can change branch protection); accept the ADRs and Phase 1; build the ADR-013
+harness where a live model exists.
+
+Mechanics that cost time last session:
+  - Branch protection requires a check named exactly `suite` and an up-to-date
+    branch. Merge main into the branch; never rebase or force-push.
+  - Before every push run: python3 -m pytest -q; python3 -m ruff check .;
+    python3 -m pyright. CI runs all three.
+  - The merge ledger fails CI once more than 3 merges are unrecorded. A line
+    that starts with two spaces and "#<number> " is parsed as a ledger row.
+  - Commit before running mutation tests, and restore with git checkout -- <file>.
+  - CLEAR __pycache__ BEFORE EVERY MUTANT RUN (and set PYTHONDONTWRITEBYTECODE=1).
+    Two same-size mutants applied within one second reused stale bytecode
+    and reported a wrong count. This was caught while doing F-5.
+  - Write commit messages to a file and use git commit -F; the harness blocks a
+    heredoc combined with commit and push.
 
 DOCUMENTATION DISCIPLINE
 ========================
