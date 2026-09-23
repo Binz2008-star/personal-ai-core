@@ -110,9 +110,80 @@ class PersistentSlice:
     service: ConversationService
     events: SqliteEventRepository
     connection: sqlite3.Connection
+    # Present only when built with `grounded=True`: the way in for documents.
+    # The indexes behind it live in process memory and are gone at exit --
+    # see `build_persistent_service`.
+    ingestion: IngestionService | None = None
 
     def close(self) -> None:
         self.connection.close()
+
+
+@dataclass(frozen=True, slots=True)
+class _KnowledgeStack:
+    ingestion: IngestionService
+    catalog: InMemoryChunkCatalog
+    vector_index: InMemoryVectorIndex
+    lexical_index: InMemoryLexicalIndex
+    context_builder: ContextBuilder
+
+
+def _knowledge_stack(
+    budget_policy: ReserveBasedBudgetPolicy,
+    *,
+    evidence_limit: int,
+    memory_retriever: SimpleMemoryRetriever | None = None,
+) -> _KnowledgeStack:
+    """The retrieval half of a grounded slice, built once for every store.
+
+    One function rather than two copies, because the grounded slice now exists
+    on two stores and the retrieval half must be the same on both: a copy is
+    where the F-4 wiring would have been fixed on one path and missed on the
+    other.
+
+    Everything here is in-memory and offline. The embedding provider is
+    `HashingEmbeddingProvider`, which is a development and test implementation
+    and not a semantic model -- see `docs/PHASE_2_IMPLEMENTATION.md`. Swapping
+    in a real one is a change to this function and to nothing above it.
+    """
+    embedder = HashingEmbeddingProvider()
+    vector_index = InMemoryVectorIndex(
+        model_id=embedder.model_id, dimensions=embedder.dimensions
+    )
+    lexical_index = InMemoryLexicalIndex()
+    catalog = InMemoryChunkCatalog()
+    ingestion = IngestionService(
+        chunker=FixedSizeChunker(),
+        embedder=embedder,
+        vector_index=vector_index,
+        lexical_index=lexical_index,
+        catalog=catalog,
+    )
+    estimator = ScriptAwareTokenEstimator()
+    context_builder = ContextBuilder(
+        retriever=HybridRetriever(
+            embedder=embedder,
+            vector_index=vector_index,
+            lexical_index=lexical_index,
+            catalog=catalog,
+        ),
+        # F-4: charge evidence as rendered, not as bare text. Without this
+        # the grounding message overruns the budget it was assembled against.
+        assembler=HybridContextAssembler(
+            estimator, rendered_cost=RenderedEvidenceCost(estimator)
+        ),
+        budget_policy=budget_policy,
+        estimator=estimator,
+        memory_retriever=memory_retriever,
+        limit=evidence_limit,
+    )
+    return _KnowledgeStack(
+        ingestion=ingestion,
+        catalog=catalog,
+        vector_index=vector_index,
+        lexical_index=lexical_index,
+        context_builder=context_builder,
+    )
 
 
 def build_persistent_service(
@@ -120,6 +191,8 @@ def build_persistent_service(
     *,
     database: str | Path,
     transport: Transport | None = None,
+    grounded: bool = False,
+    evidence_limit: int = 5,
 ) -> PersistentSlice:
     """The same slice as `build_in_memory_service`, on SQLite (ADR-010 D+B).
 
@@ -134,10 +207,21 @@ def build_persistent_service(
     the caller does not look. The entry point decides where the file lives;
     this only decides what goes in it.
 
-    Knowledge is not persisted and this slice does not retrieve, which are the
-    same decision seen from two sides: chunks and vectors are derived (ADR-010
-    R4) and rebuilt by re-ingestion, so a durable grounded slice needs an
-    answer to "when is the corpus re-ingested?" that nothing has given yet.
+    Knowledge is not persisted: chunks and vectors are derived (ADR-010 R4)
+    and rebuilt by re-ingestion. That left one question open -- "when is the
+    corpus re-ingested?" -- and F-2 answers it: **on every run, by the caller,
+    through `ingestion`**. With `grounded=True` the slice retrieves; the
+    conversation is durable and the corpus is not, and the entry point
+    re-reads the documents it was given each time it starts.
+
+    What that costs, stated rather than hidden: a CONTEXT_ASSEMBLED event
+    records `chunk_ids`, and a chunk id names a chunk in the run that produced
+    it. The durable citation is the one in the prompt -- source URI and
+    character range -- which re-ingesting the same file reproduces.
+
+    Memory recall is not wired here. Recall reads promoted memories, and
+    nothing on this path promotes any; wiring a reader to an empty store would
+    report `memory_enabled` for a capability that cannot return anything.
     """
     settings = settings or Settings.from_env()
     registry = ModelRegistry.from_settings(settings)
@@ -152,6 +236,11 @@ def build_persistent_service(
     budget_policy = ReserveBasedBudgetPolicy(
         identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
     )
+    stack = (
+        _knowledge_stack(budget_policy, evidence_limit=evidence_limit)
+        if grounded
+        else None
+    )
     service = ConversationService(
         users=SqliteUserRepository(connection),
         sessions=SqliteSessionRepository(connection),
@@ -161,8 +250,14 @@ def build_persistent_service(
         registry=registry,
         budget_policy=budget_policy,
         identity=identity,
+        context_builder=stack.context_builder if stack is not None else None,
     )
-    return PersistentSlice(service=service, events=events, connection=connection)
+    return PersistentSlice(
+        service=service,
+        events=events,
+        connection=connection,
+        ingestion=stack.ingestion if stack is not None else None,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,10 +296,8 @@ def build_grounded_in_memory_service(
     constant: `ReserveBasedBudgetPolicy` is handed the spec on every turn, so
     changing the Boss model changes the budget with it (ADR-005).
 
-    Everything here is in-memory and offline. The embedding provider is
-    `HashingEmbeddingProvider`, which is a development and test implementation
-    and not a semantic model — see `docs/PHASE_2_IMPLEMENTATION.md`. Swapping
-    in a real one is a change to this function and to nothing above it.
+    Everything here is in-memory and offline; see `_knowledge_stack` for what
+    the retrieval half is and is not.
     """
     settings = settings or Settings.from_env()
     registry = ModelRegistry.from_settings(settings)
@@ -223,21 +316,6 @@ def build_grounded_in_memory_service(
         identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
     )
 
-    embedder = HashingEmbeddingProvider()
-    vector_index = InMemoryVectorIndex(
-        model_id=embedder.model_id, dimensions=embedder.dimensions
-    )
-    lexical_index = InMemoryLexicalIndex()
-    catalog = InMemoryChunkCatalog()
-    ingestion = IngestionService(
-        chunker=FixedSizeChunker(),
-        embedder=embedder,
-        vector_index=vector_index,
-        lexical_index=lexical_index,
-        catalog=catalog,
-    )
-    estimator = ScriptAwareTokenEstimator()
-
     # Recall is opt-in. When it is off, no repository exists and no reader
     # is constructed, so there is nothing for the conversation path to
     # reach even by accident.
@@ -253,22 +331,10 @@ def build_grounded_in_memory_service(
             reader=MemoryReader(source=memories)
         )
 
-    context_builder = ContextBuilder(
-        retriever=HybridRetriever(
-            embedder=embedder,
-            vector_index=vector_index,
-            lexical_index=lexical_index,
-            catalog=catalog,
-        ),
-        # F-4: charge evidence as rendered, not as bare text. Without this
-        # the grounding message overruns the budget it was assembled against.
-        assembler=HybridContextAssembler(
-            estimator, rendered_cost=RenderedEvidenceCost(estimator)
-        ),
-        budget_policy=budget_policy,
-        estimator=estimator,
+    stack = _knowledge_stack(
+        budget_policy,
+        evidence_limit=evidence_limit,
         memory_retriever=memory_retriever,
-        limit=evidence_limit,
     )
 
     events = InMemoryEventRepository()
@@ -281,14 +347,14 @@ def build_grounded_in_memory_service(
         registry=registry,
         budget_policy=budget_policy,
         identity=identity,
-        context_builder=context_builder,
+        context_builder=stack.context_builder,
     )
     return GroundedSlice(
         service=service,
         events=events,
-        ingestion=ingestion,
-        catalog=catalog,
-        vector_index=vector_index,
-        lexical_index=lexical_index,
+        ingestion=stack.ingestion,
+        catalog=stack.catalog,
+        vector_index=stack.vector_index,
+        lexical_index=stack.lexical_index,
         memories=memories,
     )
