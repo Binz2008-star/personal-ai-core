@@ -4,8 +4,8 @@ Built in stages, each a reviewed pull request:
 
   1. contracts, the policy gate, the workspace sandbox and command validation
   2. tools, the executor and the audit trail
-  3. the verifier and bounded recovery (this package so far)
-  4. the loop: plan -> policy -> execute -> verify -> respond, in `pac`
+  3. the verifier and bounded recovery
+  4. the loop: plan -> policy -> execute -> verify -> respond, in `pac --agent`
 
 Depends on `core` only.
 """

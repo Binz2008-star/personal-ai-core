@@ -75,6 +75,14 @@ class Checkpoints:
     def touched(self) -> tuple[str, ...]:
         return tuple(self._workspace.relative(path) for path in self._before)
 
+    def commit(self) -> None:
+        """Accept the changes so far: a later rollback will not undo them.
+
+        Called when a task ends with its changes kept. Without it, rolling back
+        a failed task would also undo every task before it in the session.
+        """
+        self._before.clear()
+
     def rollback(self) -> tuple[str, ...]:
         """Restore every touched file. Returns what was restored, in order."""
         restored = []

@@ -33,6 +33,7 @@ earlier run to continue it.
 | `--session ID` | continue an earlier conversation |
 | `--language ar` | tag the turn. Left undetermined when not given, because guessing it would record a claim nothing measured |
 | `--documents PATH` | answer from a file, or a directory of `.md` and `.txt` files. Repeatable |
+| `--agent --workspace DIR` | each line is a task the agent carries out inside `DIR` |
 
 Configuration is environment variables, all optional: `PAC_BOSS_MODEL`,
 `PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`.
@@ -48,6 +49,31 @@ embedder: it matches surface overlap, not meaning. There is no semantic model ye
 $ pac --documents ~/notes
 documents: 12 file(s), 31 chunk(s) -- held in memory, read again on every run
 ```
+
+**The agent: it acts, inside one directory, and asks before anything risky.** With
+`--agent --workspace DIR`, each line you type is a task. The model proposes one tool call
+at a time; the policy gate, the sandbox and the verifier decide what happens
+(`docs/AGENT_ARCHITECTURE.md`).
+
+| Tool | Risk | What happens |
+|---|---|---|
+| `read_file`, `list_directory`, `search_text` | low | runs; secrets and `.git` are refused |
+| `write_file` | medium | runs; never a secret; can be undone |
+| `run_command` | high | **asks you**, every time; an allowlist of read-only and checking commands, no shell |
+| `delete_file` | critical | **asks you**, every time; can be undone |
+
+```console
+$ pac --agent --workspace ~/projects/notes
+you> summarise notes.md into summary.md
+  · read_file {"path": "notes.md"} -> ok
+  · write_file {"path": "summary.md", ...} -> ok
+core> I wrote the summary to summary.md.
+         changed: summary.md
+```
+
+A task that stops -- too many failed steps, or a model that stops following the protocol --
+offers to undo its file changes. Every step, allowed or not, is recorded in the database.
+Nothing leaves the machine: there is no network tool.
 
 **Status: Phase 4 — Memory-Aware Context Recall ACCEPTED / MERGED (PR #2 — MERGED, main `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`, implementation `e8062ff2fa8b6eb5a4471ac8475f29bed76fd369`).**
 
