@@ -5,9 +5,12 @@ during the Phase 0 audit and still states where the Core is going. Most of what 
 describes does not exist yet.
 
 **For what is actually built and verified, read [`PROJECT_STATE.md`](../PROJECT_STATE.md).**
-Built through Phase 4: `core/`, `runtime/`, `conversation/`, `memory/`, `knowledge/`,
-`context/`, `persistence/`. Not built: `identity/`, `agent/`, `learning/`, `evaluation/`,
-`projects/`, `api/`, `ui/`. Sections below are labelled accordingly.
+Built through Phase 4 and the post-Phase-4 PRs: `core/`, `runtime/`, `conversation/`,
+`memory/`, `knowledge/`, `context/`, `persistence/` (in-memory and SQLite), `identity/`
+(#39) and `app/`, which provides the `pac` entry point (#45). Not built: `agent/`, `learning/`,
+`evaluation/`, `projects/`, `api/`, `ui/`. Sections below are labelled accordingly.
+Aligned with the code at `88e37b3`; where it disagrees with `PROJECT_STATE.md`, that file
+wins.
 
 Evidence for every source claim is in [`COMPONENT_EXTRACTION_MATRIX.md`](COMPONENT_EXTRACTION_MATRIX.md).
 Phase 4 recall is session-scoped (ADR-009).
@@ -48,7 +51,9 @@ What it permits, and what the persistence design may therefore rely on:
   `new_id()` is `uuid4`, which does not sort, and `utcnow()` collides heavily — 2000
   successive calls yielded 499–632 distinct values across repeated runs, so roughly
   three in four share a timestamp with another. Without this constraint the event log
-  would have **no** total order that survives a durable store.
+  would have **no** total order that survives a durable store. The durable store built
+  later (SQLite, #42) records order anyway, in a `seq` column, so order is stored rather
+  than inferred from append order. It is still one process with one writer.
 - **Synchronous contracts.** Every protocol in `core/contracts.py` is sync. Serving the
   Core over a network would make that the wrong choice, and changing it later is a
   breaking change to every contract and every caller.
@@ -61,8 +66,9 @@ Core over a network. Any of the three, and the three bullets above stop holding
 together.
 
 This constraint does **not** by itself select a storage backend. It removes options that
-only concurrency justifies; choosing among what remains is a separate decision, not yet
-taken.
+only concurrency justifies. ADR-010 compares what remains and recommends one option, which
+is now built and wired (#42, #44). The ADR is still **PROPOSED**: building an option does not
+accept it.
 
 ## 2. System boundaries
 
@@ -118,14 +124,15 @@ memory/        rules, gate, pipeline (write path) · retriever (read path)
 knowledge/     catalog, chunking, embedding, fusion, ingestion, language,
                lexical_index, retrieval, text, vector_index
 context/       assembler, budget, token_estimator
-persistence/   in_memory, memory_store          (process memory only)
+identity/      composer, text          (contract and policy types live in core/identity)
+persistence/   in_memory, memory_store, sqlite
+app/           cli, __main__           (the `pac` command)
 tests/
 ```
 
 **DESIGN TO BUILD.** None of these exist. They are the target, not the state:
 
 ```text
-identity/      personality, behavioral contract, response policy
 agent/         planner, executor, tools, policy, verifier, state, recovery
 learning/      events, feedback, experience, analysis, dataset,
                training, evaluation, promotion
@@ -135,12 +142,18 @@ projects/      registry, connectors, adapters, indexes
 api/  ui/  scripts/
 ```
 
-Two corrections worth stating, because both were previously asserted as built and were
-copied out of this file into other documents:
+Corrections worth stating, because each was asserted in this file and copied into other
+documents:
 
-- `persistence/` is **process memory only**. There are no migrations, no repositories
-  layer and no Postgres. Adding any of them requires explicit authorisation — see the
-  hard invariants in `README.md`.
+- `identity/` is **built** (#39): a behavioural contract and a response policy, composed
+  into the first message of every model call. The **personality** this section used to
+  list was deliberately left out. ADR-012 says "No tone or persona": a persona is not a
+  rule and cannot be violated.
+- `persistence/` has two backends: process memory, and SQLite (#42) for users, sessions,
+  messages, events and memories. There is **no migrations framework**. `SCHEMA_VERSION`
+  is 1, and a database written at a different version is refused (`SchemaVersionMismatch`)
+  rather than altered. There is no Postgres. Adding migrations or Postgres requires
+  explicit authorisation; see the hard invariants in `README.md`.
 - `memory/` implements **four** `MemoryType` values — `preferences`, `lessons`,
   `semantic`, `episodic`. The wider taxonomy in `MEMORY_ARCHITECTURE.md` (`working`,
   `decisions`, `patterns`) is design, not code: a member is declared only once a rule
@@ -156,9 +169,15 @@ concrete adapters shown are what exists today:
 
 ```text
              OllamaProvider ──┐
-    InMemoryMemoryRepository ─┼──▶  core/contracts  ◀── memory, knowledge, context
-   HashingEmbeddingProvider ──┘                          conversation
+    InMemoryMemoryRepository ─┤
+         Sqlite*Repository ───┼──▶  core/contracts  ◀── memory, knowledge, context,
+   HashingEmbeddingProvider ──┤                          conversation, identity
+    DefaultIdentityComposer ──┘
 ```
+
+`app/` sits outside this picture on purpose. It may import only `core` and `conversation`,
+and calls the one composition root, `conversation/factory.py`. That is the only module the
+layering rule exempts (`COMPOSITION_ROOTS`), which is how it may name concrete adapters.
 
 `HashingEmbeddingProvider` captures surface overlap, not meaning — it is a development
 stand-in, and `EmbeddingProvider.model_id` is what identifies whichever model actually
@@ -174,12 +193,13 @@ Three consequences, each a direct response to an audited defect:
 
 ## 5. Runtime flow
 
-**DESIGN TO BUILD**, except where marked. Three of these ten steps exist today; the
+**DESIGN TO BUILD**, except where marked. Four of these eleven steps exist today; the
 agent loop, the tool policy gate and the learning path have no code at all.
 
 ```text
 USER
  ↓ UNDERSTAND
+ ↓ IDENTITY           BUILT — the contract is the first message of every call
  ↓ CONTEXT BUILD      BUILT — retrieve → recall → merge → budget
  ↓ PLAN
  ↓ POLICY CHECK       (allow / deny / ask)
@@ -193,7 +213,16 @@ USER
 
 `CONTEXT BUILD` is built but differs from the sketch: `ContextBuilder` retrieves
 documents, recalls session-scoped memories, and `HybridContextAssembler` merges both
-into one shared token budget. There is no separate compression stage.
+into one shared token budget. There is no separate compression stage. Evidence is fenced
+between boundary lines (#49, with its limits stated in #53) and charged at its rendered
+cost, not its bare text (#52).
+
+**BUILT is not the same as reachable.** `pac` does not wire `CONTEXT BUILD` yet (Finding
+F-2): its two factories compose identity and conversation only. `build_grounded_in_memory_service`
+composes the grounded path, and today only tests call it.
+
+The prompt the provider receives is `[identity, evidence?, *history]`: separate messages,
+the first two both `Role.SYSTEM`.
 
 The word "policy" does appear in the source — as `ContextBudgetPolicy` and
 `ReserveBasedBudgetPolicy`, which allocate a token budget. That is not the tool policy
@@ -235,7 +264,8 @@ as equally binding.
 5. Every memory carries provenance, confidence, version and status.
    `MemoryRecord.__post_init__`, `test_memory_record.py`.
 8. Context is budgeted; the knowledge base is never dumped into a prompt.
-   `test_hybrid_assembler.py::test_token_estimate_never_exceeds_the_budget`.
+   `test_hybrid_assembler.py::test_token_estimate_never_exceeds_the_budget`, and, for the
+   rendered message rather than the selection, `test_rendered_budget.py`.
 
 Also enforced, and worth naming because they are not in the original list: dependency
 direction (`test_internal_layering_is_respected`), no dead enum members
