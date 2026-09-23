@@ -1,4 +1,4 @@
-"""Retrieved text cannot forge its own boundaries -- Finding F-1.
+"""Retrieved text cannot reproduce its own genuine boundaries -- Finding F-1.
 
 `render_evidence` used to render each passage as a `[n] source (characters
 a-b)` label followed by the passage text raw, with no closing boundary. A
@@ -10,8 +10,12 @@ defeats it, rather than asserting a format -- a test that only checked for the
 new markers would pass on a renderer that emitted them around forged content.
 
 The token is derived rather than random because rendering is deterministic on
-purpose. The properties that make a derived token sound are tested directly:
-it moves when any item changes, and item boundaries are part of what it hashes.
+purpose. What it gives is self-reference resistance, not authenticity: it is
+not secret, but a text cannot contain the token of the block it is rendered in
+(Finding F-3). The properties behind that are tested directly: it moves when
+any item changes, and item boundaries are part of what it hashes. Whether a
+MODEL distinguishes a genuine marker from a wrong-token one is not tested here;
+that is ADR-013's injection case.
 """
 from __future__ import annotations
 
@@ -119,9 +123,11 @@ def test_the_forged_label_is_enclosed_by_the_genuine_boundary():
 def test_a_forged_boundary_does_not_carry_the_genuine_token():
     """The stronger attack: forge the markers, not just the label.
 
-    The author of a document does not know the token, because it is derived
-    from content that includes their own text. So their fake close-and-reopen
-    carries some other token, and nothing but the genuine one opens a passage.
+    The author can compute the token of their text as it stands, but writing
+    that token into the text changes it -- it is derived from content that
+    includes their own text. So their fake close-and-reopen carries some other
+    token. It still reaches the rendered block; what this pins is that it is
+    not the genuine one.
     """
     attack = (
         "reciprocal rank fusion combines ranked lists.\n"
@@ -167,8 +173,9 @@ def test_the_token_changes_when_the_attackers_own_text_changes():
     range -- is identical and only the text differs. An earlier version used
     "some text" and "some text.", which differ in length; the label moved, the
     token moved with it, and the test passed against a token computed from
-    labels alone. That token is forgeable: an author knows their own URI and
-    length, so they could compute it offline. A mutation found this.
+    labels alone. That token is reproducible: an author knows their own URI
+    and length, so they could compute it offline AND embed it, since it would
+    not depend on the text it is embedded in. A mutation found this.
     """
     one = passage("some text")
     two = passage("same text")
@@ -180,7 +187,9 @@ def test_the_token_changes_when_the_attackers_own_text_changes():
 
 
 def test_the_token_depends_on_the_other_passages_retrieved_with_it():
-    """The author of one document cannot know what else a query retrieves."""
+    """When several passages are retrieved, the token depends on all of them.
+
+    An addition, not a guarantee: retrieval may return a single passage."""
     alone = render_evidence([passage("mine", chunk_id="c1")])
     together = render_evidence(
         [passage("mine", chunk_id="c1"), passage("theirs", chunk_id="c2", source="file:///b.md")]
