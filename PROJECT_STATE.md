@@ -721,10 +721,14 @@ Owner's standing constraints:
     owner's call.
 
 Recommended order (each one a small PR with a single purpose):
-  1. F-4  budget the #49 scaffolding (assembler + overhead) -- behaviour change,
-          owner review before merge
-  2. F-3  correct the "unforgeable" wording (comments/docstrings only)
-  3. F-5  validate or escape source_uri in the rendered label, with a test
+  1. F-4  budget the #49 scaffolding -- OPEN as PR #52 (behaviour change,
+          owner review before merge). 250-token overrun measured, now fits.
+  2. F-3  correct the "unforgeable" wording -- OPEN as PR #53 (comments and
+          docstrings only; AST-identical code)
+  3. F-5  percent-encode label fields -- OPEN as PR #54 (behaviour change,
+          owner review). Now DEMONSTRATED, not only read from the code.
+     #51-#54 were trial-merged together onto 85dea05: clean, 679 passed.
+     After they merge, record #51-#54 in the ledger (lag limit is 3).
   4. docs alignment: ARCHITECTURE.md is stale (identity "not built", persistence
           "in-memory only", no app/); ENGINEERING_PLAYBOOK section 8 phase
           numbering contradicts the executed phases -- proposed, not yet approved
@@ -742,6 +746,9 @@ Mechanics that cost time last session:
   - The merge ledger fails CI once more than 3 merges are unrecorded. A line
     that starts with two spaces and "#<number> " is parsed as a ledger row.
   - Commit before running mutation tests, and restore with git checkout -- <file>.
+  - CLEAR __pycache__ BEFORE EVERY MUTANT RUN (and set PYTHONDONTWRITEBYTECODE=1).
+    Two same-size mutants applied within one second reused stale bytecode
+    and reported a wrong count. This was caught while doing F-5.
   - Write commit messages to a file and use git commit -F; the harness blocks a
     heredoc combined with commit and push.
 
