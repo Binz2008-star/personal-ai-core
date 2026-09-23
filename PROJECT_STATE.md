@@ -356,6 +356,8 @@ claim written in one place with nothing that notices it going stale.
   #64 91796e8  feat(agent): the agent -- policy gate, sandbox, tools, verify and
                recover, the loop and pac --agent -- with the audit fixes F-1..F-5.
                Landed as one merge; #60-#63 were closed as superseded
+  #65 294ceba  feat(profile): the owner's profile.md, read into every turn and task
+  #66 6672d6c  feat(profile): projects.md beside it, read with it
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
