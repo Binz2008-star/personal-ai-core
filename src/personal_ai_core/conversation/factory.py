@@ -17,13 +17,17 @@ from pathlib import Path
 
 from ..agent import (
     Checkpoints,
+    FetchUrl,
     RiskPolicy,
+    Shell,
     ToolExecutor,
+    WebSearch,
     Workspace,
     default_tools,
 )
 from ..agent.executor import Confirm
 from ..agent.loop import AgentLoop
+from ..agent.web import Fetch
 from ..context import (
     HybridContextAssembler,
     ReserveBasedBudgetPolicy,
@@ -394,6 +398,7 @@ def build_agent(
     events: EventRepository | None = None,
     database: str | Path | None = None,
     session_exists: Callable[[str], bool] | None = None,
+    web_fetch: Fetch | None = None,
 ) -> AgentSlice:
     """The agent of AGENT_ARCHITECTURE.md, wired to the Boss model.
 
@@ -430,9 +435,16 @@ def build_agent(
         Path(workspace), reserved=() if database is None else (Path(database),)
     )
     checkpoints = Checkpoints(sandbox)
-    executor = ToolExecutor(
-        default_tools(sandbox, checkpoints), RiskPolicy(), confirm=confirm
-    )
+    # The workspace tools, then the reach beyond it: the owner's shell and the
+    # web. `shell` and `fetch_url` are HIGH -- asked for every time -- and
+    # `web_search` sends only its query, only to the search engine.
+    tools = [
+        *default_tools(sandbox, checkpoints),
+        Shell(sandbox),
+        WebSearch(web_fetch),
+        FetchUrl(web_fetch),
+    ]
+    executor = ToolExecutor(tools, RiskPolicy(), confirm=confirm)
     loop = AgentLoop(
         provider=provider,
         model=registry.active.name,
