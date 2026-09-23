@@ -8,14 +8,17 @@ Each declares its risk level, and the policy gate reads that declaration
     search_text    LOW     find lines containing a string
     write_file     MEDIUM  create or overwrite a text file (never a secret)
     run_command    HIGH    run one allowlisted command -- ASKED every time
+    delete_file    CRITICAL delete one file -- ASKED, and a rollback point first
 
 Every path goes through the `Workspace` sandbox inside the tool, because the
 tool is the last place that knows what the path is for. Every output is
 bounded; a truncated result says it was truncated.
 
-Not here yet, deliberately: delete, rename, and anything that sends outside
-the machine. Those are CRITICAL, and CRITICAL needs "a rollback point first",
-which is stage 3.
+File mutations record a rollback point (recovery.Checkpoints) before they
+change anything. `delete_file` cannot be built without one: the design's
+"CRITICAL: rollback point first" is a constructor argument, not a comment.
+
+Not here, deliberately: anything that sends outside the machine.
 """
 from __future__ import annotations
 
@@ -25,6 +28,7 @@ from typing import Any, Mapping
 
 from ..core.agent import RiskLevel, ToolResult, ToolSpec
 from .commands import validate_command
+from .recovery import Checkpoints
 from .sandbox import SandboxError, Workspace, is_protected
 
 MAX_OUTPUT_CHARS = 20_000
@@ -167,8 +171,9 @@ class SearchText:
 
 
 class WriteFile:
-    def __init__(self, workspace: Workspace) -> None:
+    def __init__(self, workspace: Workspace, checkpoints: Checkpoints | None = None) -> None:
         self._workspace = workspace
+        self._checkpoints = checkpoints
         self.spec = ToolSpec(
             name="write_file",
             description="Create or overwrite a UTF-8 text file in the workspace.",
@@ -188,13 +193,46 @@ class WriteFile:
         if len(content) > MAX_WRITE_CHARS:
             return ToolResult(ok=False, error=f"content over {MAX_WRITE_CHARS} characters")
         path = self._workspace.resolve_for_write(arguments["path"])
+        if path.is_dir():
+            return ToolResult(ok=False, error=f"is a directory: {arguments['path']}")
         existed = path.exists()
+        if self._checkpoints is not None:
+            self._checkpoints.before_mutation(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         verb = "overwrote" if existed else "created"
         return ToolResult(
             ok=True, output=f"{verb} {self._workspace.relative(path)} ({len(content)} characters)"
         )
+
+
+class DeleteFile:
+    def __init__(self, workspace: Workspace, checkpoints: Checkpoints) -> None:
+        if not isinstance(checkpoints, Checkpoints):
+            raise TypeError("delete_file needs a rollback point: pass Checkpoints")
+        self._workspace = workspace
+        self._checkpoints = checkpoints
+        self.spec = ToolSpec(
+            name="delete_file",
+            description="Delete one file in the workspace. Can be rolled back this run.",
+            risk_level=RiskLevel.CRITICAL,
+            input_schema={
+                "type": "object",
+                "properties": {"path": _PATH},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            timeout_seconds=10,
+            idempotent=False,
+        )
+
+    def run(self, arguments: Mapping[str, Any]) -> ToolResult:
+        path = self._workspace.resolve_for_write(arguments["path"])
+        if not path.is_file():
+            return ToolResult(ok=False, error=f"not a file: {arguments['path']}")
+        self._checkpoints.before_mutation(path)
+        path.unlink()
+        return ToolResult(ok=True, output=f"deleted {self._workspace.relative(path)}")
 
 
 class RunCommand:
@@ -259,11 +297,15 @@ class RunCommand:
         return ToolResult(ok=True, output=output, truncated=truncated)
 
 
-def default_tools(workspace: Workspace) -> list:
-    return [
+def default_tools(workspace: Workspace, checkpoints: Checkpoints | None = None) -> list:
+    """The standard set. `delete_file` is included only with a rollback point."""
+    tools: list = [
         ReadFile(workspace),
         ListDirectory(workspace),
         SearchText(workspace),
-        WriteFile(workspace),
+        WriteFile(workspace, checkpoints),
         RunCommand(workspace),
     ]
+    if checkpoints is not None:
+        tools.append(DeleteFile(workspace, checkpoints))
+    return tools

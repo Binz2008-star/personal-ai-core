@@ -3,8 +3,8 @@
 Built in stages, each a reviewed pull request:
 
   1. contracts, the policy gate, the workspace sandbox and command validation
-  2. tools, the executor and the audit trail (this package so far)
-  3. the verifier and bounded recovery
+  2. tools, the executor and the audit trail
+  3. the verifier and bounded recovery (this package so far)
   4. the loop: plan -> policy -> execute -> verify -> respond, in `pac`
 
 Depends on `core` only.
@@ -12,8 +12,10 @@ Depends on `core` only.
 from .commands import CommandRejected, validate_command
 from .executor import AuditLog, ToolExecutor
 from .policy import DEFAULT_DECISIONS, RiskPolicy
+from .recovery import ActionBudget, Checkpoints
 from .sandbox import SandboxError, Workspace, is_protected
 from .tools import (
+    DeleteFile,
     ListDirectory,
     ReadFile,
     RunCommand,
@@ -21,9 +23,16 @@ from .tools import (
     WriteFile,
     default_tools,
 )
+from .verifier import Expectation, Verifier, find_secrets
 
 __all__ = [
+    "ActionBudget",
     "AuditLog",
+    "Checkpoints",
+    "DeleteFile",
+    "Expectation",
+    "Verifier",
+    "find_secrets",
     "CommandRejected",
     "DEFAULT_DECISIONS",
     "RiskPolicy",
