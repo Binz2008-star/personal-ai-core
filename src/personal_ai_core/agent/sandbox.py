@@ -24,6 +24,7 @@ import os
 import re
 import stat
 from pathlib import Path
+from typing import Iterable
 
 
 class SandboxError(PermissionError):
@@ -65,14 +66,54 @@ def is_protected(path: Path) -> bool:
     return name in PROTECTED_BASENAMES or name.endswith(PROTECTED_SUFFIXES)
 
 
-class Workspace:
-    """A directory the agent is confined to."""
+# A live SQLite database is up to four files, and each of them IS the
+# database: overwriting the journal or the WAL corrupts it as surely as
+# overwriting the main file.
+SQLITE_COMPANIONS = ("", "-journal", "-wal", "-shm")
 
-    def __init__(self, root: Path) -> None:
+
+class Workspace:
+    """A directory the agent is confined to.
+
+    `reserved` names files the Core itself owns -- its database -- that the
+    agent must not reach even when they lie inside the workspace (F-1: with
+    the default database under `~/.personal-ai-core/`, `--workspace ~`
+    contains it). Each is reserved together with its SQLite companion files,
+    and a reserved file is refused by `resolve`, so for every tool and every
+    purpose: read, search, write and delete. Listing hides it.
+    """
+
+    def __init__(self, root: Path, *, reserved: Iterable[Path] = ()) -> None:
         resolved = Path(root).resolve()
         if not resolved.is_dir():
             raise ValueError(f"workspace is not a directory: {root}")
         self.root = resolved
+        self._reserved = tuple(
+            Path(str(Path(path).resolve()) + companion)
+            for path in reserved
+            for companion in SQLITE_COMPANIONS
+        )
+
+    def is_reserved(self, path: Path) -> bool:
+        """Whether `path` is, or is the same file as, a reserved one.
+
+        Compared by resolved name (case-folded where the platform folds case)
+        and, for files that exist, by identity: a hard link, or a spelling a
+        case-insensitive filesystem maps to the same file, is the same file.
+        """
+        candidate = Path(path).resolve()
+        folded = os.path.normcase(str(candidate))
+        for reserved in self._reserved:
+            if folded == os.path.normcase(str(reserved)):
+                return True
+            try:
+                if candidate.exists() and reserved.exists() and os.path.samefile(
+                    candidate, reserved
+                ):
+                    return True
+            except OSError:
+                continue
+        return False
 
     def resolve(self, path: str) -> Path:
         """A path inside the workspace, or SandboxError. For reading."""
@@ -95,6 +136,10 @@ class Workspace:
         resolved = (self.root / normalized).resolve()
         if not resolved.is_relative_to(self.root):
             raise SandboxError(f"path escapes the workspace: {path}")
+        if self.is_reserved(resolved):
+            raise SandboxError(
+                f"the Core's own database is not reachable from the workspace: {path}"
+            )
         return resolved
 
     def resolve_for_write(self, path: str) -> Path:

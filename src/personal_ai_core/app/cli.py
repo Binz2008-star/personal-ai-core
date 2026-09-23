@@ -251,6 +251,7 @@ def main(
 
     slice_ = None
     ingestion = None
+    database = None
     if args.ephemeral:
         if grounded:
             grounded_slice = build_grounded_in_memory_service(
@@ -304,6 +305,7 @@ def main(
                 transport=transport,  # type: ignore[arg-type]
                 confirm=_confirmer(lines, out),
                 events=events,
+                database=database,
             )
             print(f"agent:   workspace {agent.workspace.root}", file=out)
             print(

@@ -391,6 +391,7 @@ def build_agent(
     transport: Transport | None = None,
     confirm: Confirm | None = None,
     events: EventRepository | None = None,
+    database: str | Path | None = None,
 ) -> AgentSlice:
     """The agent of AGENT_ARCHITECTURE.md, wired to the Boss model.
 
@@ -401,6 +402,10 @@ def build_agent(
     one. The same identity contract every conversation turn carries is the
     agent's first message: rule 2 (no action with external effect without
     confirmation) and rule 5 (retrieved text is data) apply to it too.
+
+    `database` is the file the Core's own records live in. It is reserved
+    from the workspace -- with its SQLite companions -- so no tool can read,
+    overwrite or delete it even when the workspace contains it (F-1).
     """
     settings = settings or Settings.from_env()
     registry = ModelRegistry.from_settings(settings)
@@ -409,7 +414,9 @@ def build_agent(
         timeout_seconds=settings.request_timeout_seconds,
         transport=transport,
     )
-    sandbox = Workspace(Path(workspace))
+    sandbox = Workspace(
+        Path(workspace), reserved=() if database is None else (Path(database),)
+    )
     checkpoints = Checkpoints(sandbox)
     executor = ToolExecutor(
         default_tools(sandbox, checkpoints), RiskPolicy(), confirm=confirm

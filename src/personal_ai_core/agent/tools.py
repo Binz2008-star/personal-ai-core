@@ -102,7 +102,7 @@ class ListDirectory:
         entries = sorted(
             f"{entry.name}/" if entry.is_dir() else entry.name
             for entry in path.iterdir()
-            if entry.name.lower() != ".git"
+            if entry.name.lower() != ".git" and not self._workspace.is_reserved(entry)
         )
         truncated = len(entries) > MAX_LIST_ENTRIES
         return ToolResult(ok=True, output="\n".join(entries[:MAX_LIST_ENTRIES]), truncated=truncated)

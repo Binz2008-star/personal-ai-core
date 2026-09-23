@@ -168,3 +168,33 @@ def test_an_unreachable_model_is_reported(tmp_path):
 
     code, output, _ = run(tmp_path, down, "anything")
     assert code == 1 and "could not be reached" in output
+
+
+def test_the_agent_cannot_touch_the_database_inside_its_workspace(tmp_path):
+    """F-1 through the entry point: the database pac opened is inside the
+    workspace, as it is with `--workspace ~`. Neither a write nor a confirmed
+    delete reaches it, and its records are intact afterwards."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    database = workspace / "core.db"
+    transport = scripted(
+        '{"tool": "write_file", "arguments": {"path": "core.db", "content": "x"}}',
+        '{"tool": "delete_file", "arguments": {"path": "core.db"}}',
+        '{"answer": "done"}',
+    )
+    out = io.StringIO()
+    code = main(
+        ["--database", str(database), "--agent", "--workspace", str(workspace)],
+        transport=transport,
+        stdin=iter(["wreck it", "y"]),
+        stdout=out,
+        env={},
+    )
+    output = out.getvalue()
+    assert code == 0
+    assert '· write_file {"path": "core.db", "content": "x"} -> failed:' in output
+    assert '· delete_file {"path": "core.db"} -> failed:' in output
+    connection = sqlite3.connect(database)
+    assert connection.execute("pragma integrity_check").fetchone() == ("ok",)
+    types = [row[0] for row in connection.execute("select type from events order by seq")]
+    assert types == ["session.started", "agent.step", "agent.step", "agent.finished"]
