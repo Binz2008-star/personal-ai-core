@@ -32,14 +32,22 @@ earlier run to continue it.
 | `--ephemeral` | keep nothing — the conversation ends with the process |
 | `--session ID` | continue an earlier conversation |
 | `--language ar` | tag the turn. Left undetermined when not given, because guessing it would record a claim nothing measured |
+| `--documents PATH` | answer from a file, or a directory of `.md` and `.txt` files. Repeatable |
 
 Configuration is environment variables, all optional: `PAC_BOSS_MODEL`,
 `PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`.
 
-**What this command does not do: retrieval.** The grounded slice exists and is tested, but
-`pac` does not use it. Knowledge is derived data, rebuilt by re-ingestion (ADR-010 R4), and
-nothing has decided yet when a durable deployment re-ingests its corpus — inventing an
-answer would put a guess in the composition root.
+**Retrieval: the conversation is kept, the corpus is re-read.** With `--documents`, each
+turn is grounded in passages from those files, cited by file URI and character range.
+Knowledge is derived data, rebuilt by re-ingestion (ADR-010 R4), so the documents are read
+again on every run and held in memory only. Continue a session without `--documents` and
+the conversation is there, but nothing is retrieved. Retrieval is lexical plus a hashing
+embedder: it matches surface overlap, not meaning. There is no semantic model yet.
+
+```console
+$ pac --documents ~/notes
+documents: 12 file(s), 31 chunk(s) -- held in memory, read again on every run
+```
 
 **Status: Phase 4 — Memory-Aware Context Recall ACCEPTED / MERGED (PR #2 — MERGED, main `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`, implementation `e8062ff2fa8b6eb5a4471ac8475f29bed76fd369`).**
 
@@ -154,9 +162,12 @@ Explicit distinction:
 - Phase 4 recall is **session-scoped** — no cross-session recall
 - No semantic embedding-based memory ranking
 - Memory retrieval is enrichment/degradation, not a write path
-- Phase 2 rendering overhead limitation remains out of scope
-- Retrieval is not wired into `pac` — the grounded slice exists and is tested, but nothing
-  has decided when a durable deployment re-ingests its corpus (ADR-010 R4)
+- Evidence is charged at its rendered cost (F-4, #52). The provider's own chat-template
+  tokens are still an estimate inside the fixed `DEFAULT_OVERHEAD`
+- `pac` retrieves only from documents named with `--documents` on that run. The corpus is
+  not stored, and chunk ids in recorded events refer to the run that produced them
+- Retrieval uses a hashing embedder and a lexical index, with no semantic model; memory
+  recall is not wired into `pac`
 - No Neon, no pgvector, no server database and no migrations. The durable store is one
   SQLite file and `sqlite3` is stdlib, so the project still has no runtime dependencies
 
