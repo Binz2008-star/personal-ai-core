@@ -24,8 +24,14 @@ from ..core.context import ContextAllocation
 DEFAULT_GENERATION_RESERVE = 1024
 
 # Chat scaffolding the provider adds around the messages -- role markers,
-# template tokens, the grounding preamble. Small, but not zero, and assuming
-# zero is how a budget that looks safe overflows by a little on every turn.
+# template tokens. Small, but not zero, and assuming zero is how a budget that
+# looks safe overflows by a little on every turn.
+#
+# The grounding and memory preambles USED to be counted here, silently. They
+# are now charged by the assembler, through `RenderedCost`, where they are
+# spent (Finding F-4): after #49 the two preambles alone estimate above 256,
+# so this reserve could not have held them. The value is left unchanged; it
+# is now slightly conservative rather than quietly short.
 DEFAULT_OVERHEAD = 256
 
 # ADR-011 prerequisite A. Zero because `identity/` is not built: a reserve

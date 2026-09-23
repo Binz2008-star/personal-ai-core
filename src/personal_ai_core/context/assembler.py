@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from ..core.contracts import TokenEstimator
+from ..core.contracts import RenderedCost, TokenEstimator
 from ..core.context import (
     BudgetedContext,
     ContextBudget,
@@ -126,10 +126,38 @@ class HybridContextAssembler:
     memory with identical text are two different claims -- one is what a
     document says, the other is what the user told us -- and dropping
     either as a duplicate of the other would lose that distinction.
+
+    **What an item costs.** Without `rendered_cost`, an item is charged its
+    text -- the Phase 2 meaning, kept for callers that render nothing. With
+    it, an item is charged what it costs once RENDERED, boundary lines
+    included, and the first item of each kind also pays for its section's
+    preamble (Finding F-4). The production composition root always passes
+    one: the grounding message has to fit the budget it was assembled
+    against, and only the renderer knows what that message contains.
+    `token_estimate`, `memory_token_estimate` and every exclusion's
+    `token_cost` report the same figure that was charged.
     """
 
-    def __init__(self, estimator: TokenEstimator) -> None:
+    def __init__(
+        self,
+        estimator: TokenEstimator,
+        *,
+        rendered_cost: RenderedCost | None = None,
+    ) -> None:
         self._estimator = estimator
+        self._rendered_cost = rendered_cost
+
+    def _document_cost(self, result: RetrievalResult, *, first: bool) -> int:
+        if self._rendered_cost is None:
+            return self._estimator.estimate(result.chunk.text)
+        section = self._rendered_cost.document_section() if first else 0
+        return self._rendered_cost.document(result) + section
+
+    def _memory_cost(self, evidence: MemoryEvidence, *, first: bool) -> int:
+        if self._rendered_cost is None:
+            return self._estimator.estimate(evidence.record.content)
+        section = self._rendered_cost.memory_section() if first else 0
+        return self._rendered_cost.memory(evidence) + section
 
     def assemble(
         self,
@@ -176,7 +204,7 @@ class HybridContextAssembler:
                         ExcludedResult(result=result, reason=ExclusionReason.DUPLICATE)
                     )
                     continue
-                cost = self._estimator.estimate(result.chunk.text)
+                cost = self._document_cost(result, first=not doc_selected)
                 if used + cost > budget.available_tokens:
                     doc_excluded.append(
                         ExcludedResult(
@@ -204,7 +232,7 @@ class HybridContextAssembler:
                         )
                     )
                     continue
-                cost = self._estimator.estimate(evidence.record.content)
+                cost = self._memory_cost(evidence, first=not mem_selected)
                 if used + cost > budget.available_tokens:
                     mem_excluded.append(
                         ExcludedMemory(

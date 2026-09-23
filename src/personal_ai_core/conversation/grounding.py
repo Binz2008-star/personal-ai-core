@@ -74,16 +74,28 @@ MEMORY_PREAMBLE = (
 # could write a line byte-identical to a genuine label: one ingested file
 # produced an evidence block naming two sources.
 #
-# The fix is a boundary a document cannot reproduce. It is DERIVED, not random,
-# because rendering is deterministic on purpose (`test_rendering_is_deterministic`)
-# and a random token would trade that property for this one.
+# The fix is a boundary token derived from the block. It is DERIVED, not
+# random, because rendering is deterministic on purpose
+# (`test_rendering_is_deterministic`) and a random token would trade that
+# property for this one.
 #
-# Why a derived token cannot be forged: it is a hash over every rendered item,
-# INCLUDING the attacker's own text. To write the closing line of their own
-# passage, a document would have to contain the hash of a text that contains
-# it -- a fixed-point search. 16 hex characters make that a 2**64 search, and
-# the hash also covers the other passages retrieved alongside it, which the
-# author of one document cannot know in advance.
+# What the token does and does not give (Finding F-3; the #49 wording said
+# "cannot be forged", which overstated it):
+#   - It is NOT secret and NOT an authenticator. There is no key. For a
+#     single-result retrieval every input is known to the document's author
+#     -- position, URI, offsets, text -- so they can compute the token of any
+#     text that does not contain it.
+#   - It IS self-reference resistant. It hashes the author's own text, so a
+#     text cannot contain the token of the block it is rendered in: putting
+#     the token in changes it. That is a search, about 2**64 / k renders for
+#     a 16-hex token when the text carries k candidate marker slots.
+#   - When several passages are retrieved together, the token also depends on
+#     the others, which one author does not control. That adds to the above;
+#     it is not a guarantee, because retrieval may return one passage.
+#   - A marker written in passage text with the WRONG token still reaches the
+#     model word for word. Whether a model tells the two apart is a
+#     behavioural question for ADR-013's injection case, not something this
+#     code decides.
 BOUNDARY_TOKEN_LENGTH = 16
 
 
@@ -248,6 +260,55 @@ def render_memories(memories: Sequence[MemoryEvidence]) -> str:
         f"<<<end memory {token} [{position}]>>>"
         for position, label, text in labelled
     )
+
+
+# What the single-item measurement below cannot see. Items in one block are
+# joined by a blank line, and a position with more digits than [1] costs more:
+# it appears twice, in the opening and the closing line. Four characters cover
+# every position below 1000.
+_ITEM_SLACK = "\n\n9999"
+# Sections are joined by a blank line (`ContextBuilder.build`).
+_SECTION_SLACK = "\n\n"
+
+
+class RenderedEvidenceCost:
+    """`core.contracts.RenderedCost`, measured against the real renderers.
+
+    Finding F-4: the assembler charged passage text while this module spent
+    boundary lines and preambles around it. Rather than a table of constants
+    that the next format change would make wrong, each cost is taken by
+    rendering the item for real and estimating the result.
+
+    Measuring one item at a time is safe because the estimate is a sum of
+    per-character costs rounded up once: the whole message costs no more
+    than the sum of its pieces, and every piece of it is charged here -- the
+    item, its separator, extra position digits, and each section's preamble.
+    `test_the_grounding_message_fits_the_budget_it_was_assembled_against`
+    pins that.
+    """
+
+    def __init__(self, estimator: TokenEstimator) -> None:
+        self._estimator = estimator
+
+    def document(self, result: RetrievalResult) -> int:
+        return self._estimator.estimate(
+            render_evidence([result])
+        ) + self._estimator.estimate(_ITEM_SLACK)
+
+    def memory(self, evidence: MemoryEvidence) -> int:
+        return self._estimator.estimate(
+            render_memories([evidence])
+        ) + self._estimator.estimate(_ITEM_SLACK)
+
+    def document_section(self) -> int:
+        return self._estimator.estimate(
+            f"{GROUNDING_PREAMBLE}\n\n"
+        ) + self._estimator.estimate(_SECTION_SLACK)
+
+    def memory_section(self) -> int:
+        return self._estimator.estimate(
+            f"{MEMORY_PREAMBLE}\n\n"
+        ) + self._estimator.estimate(_SECTION_SLACK)
 
 
 class ContextBuilder:
