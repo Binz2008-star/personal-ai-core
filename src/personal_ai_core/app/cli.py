@@ -19,6 +19,7 @@ you can walk away from.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import sys
@@ -48,6 +49,16 @@ DEFAULT_DATABASE_ENV = "PAC_DATABASE"
 # written next to wherever the shell happened to be is a file the user finds
 # by accident, in several places, with a different conversation in each.
 DEFAULT_DATABASE = Path.home() / ".personal-ai-core" / "core.db"
+
+# The owner's profile: a Markdown file they write about themselves, composed
+# into every turn. It lives next to the database unless named, so one data
+# directory holds everything that is theirs.
+PROFILE_ENV = "PAC_PROFILE"
+PROFILE_FILENAME = "profile.md"
+# Every character is paid for in every turn's context window. A profile that
+# outgrows this is refused with a message rather than cut: a silently
+# truncated profile is one the model reads differently from the one written.
+MAX_PROFILE_CHARS = 8_000
 
 PROMPT = "you> "
 REPLY = "core> "
@@ -122,6 +133,23 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DIR",
         help="the directory the agent is confined to. Required with --agent.",
+    )
+    parser.add_argument(
+        "--profile",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "a Markdown file about you -- work, projects, goals, preferences -- "
+            f"read into every conversation and agent task. Defaults to ${PROFILE_ENV}, "
+            f"or {PROFILE_FILENAME} next to the database."
+        ),
+    )
+    parser.add_argument(
+        "--remember",
+        default=None,
+        metavar="TEXT",
+        help="add one line to your profile, and exit.",
     )
     return parser
 
@@ -205,6 +233,58 @@ def _database_path(argument: Path | None, env: dict[str, str]) -> Path:
     return Path(from_env) if from_env else DEFAULT_DATABASE
 
 
+def _profile_path(
+    argument: Path | None, env: dict[str, str], database: Path | None
+) -> Path | None:
+    """Where the profile is: named, from the environment, or beside the database.
+
+    With --ephemeral and nothing named there is no data directory, so there
+    is no default profile either.
+    """
+    if argument is not None:
+        return argument
+    from_env = env.get(PROFILE_ENV)
+    if from_env:
+        return Path(from_env)
+    return database.parent / PROFILE_FILENAME if database is not None else None
+
+
+def _remember(path: Path | None, text: str, out: TextIO) -> int:
+    text = " ".join(text.split())
+    if not text:
+        print("--remember needs something to remember", file=out)
+        return 2
+    if path is None:
+        print(f"no profile to add to: pass --profile PATH or set ${PROFILE_ENV}", file=out)
+        return 2
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
+    if not existing.endswith("\n"):
+        existing += "\n"
+    path.write_text(existing + f"- {text}\n", encoding="utf-8")
+    print(f"remembered, in {path}", file=out)
+    return 0
+
+
+def _load_profile(path: Path | None, out: TextIO) -> str | None:
+    """The profile text; "" when there is none; None when it cannot be used."""
+    if path is None or not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except UnicodeDecodeError:
+        print(f"the profile is not UTF-8 text: {path}", file=out)
+        return None
+    if len(text) > MAX_PROFILE_CHARS:
+        print(
+            f"the profile is {len(text)} characters; the limit is {MAX_PROFILE_CHARS}, "
+            f"because it is sent with every turn. Shorten {path}.",
+            file=out,
+        )
+        return None
+    return text
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -226,6 +306,15 @@ def main(
     # One iterator, shared by the conversation and by the agent's
     # confirmation prompts: an answer to "Allow?" is the next line typed.
     lines = iter(stdin if stdin is not None else sys.stdin)
+
+    database = None if args.ephemeral else _database_path(args.database, environment)
+    profile_path = _profile_path(args.profile, environment, database)
+    if args.remember is not None:
+        return _remember(profile_path, args.remember, out)
+    profile = _load_profile(profile_path, out)
+    if profile is None:
+        return 2
+    settings = dataclasses.replace(settings, profile=profile)
 
     if args.agent:
         if args.workspace is None:
@@ -251,8 +340,7 @@ def main(
 
     slice_ = None
     ingestion = None
-    database = None
-    if args.ephemeral:
+    if database is None:
         if grounded:
             grounded_slice = build_grounded_in_memory_service(
                 settings, transport=transport  # type: ignore[arg-type]
@@ -263,7 +351,6 @@ def main(
             service, events = build_in_memory_service(settings, transport=transport)  # type: ignore[arg-type]
         where = "nowhere -- --ephemeral was given"
     else:
-        database = _database_path(args.database, environment)
         database.parent.mkdir(parents=True, exist_ok=True)
         slice_ = build_persistent_service(
             settings,
@@ -293,6 +380,14 @@ def main(
 
         print(f"model:   {settings.boss_model}", file=out)
         print(f"storage: {where}", file=out)
+        if profile:
+            print(f"profile: {profile_path} ({len(profile)} characters)", file=out)
+        elif profile_path is not None:
+            print(
+                f"profile: none yet -- write about yourself in {profile_path}, "
+                'or add a line with --remember "..."',
+                file=out,
+            )
         print(f"session: {session_id}", file=out)
         if not args.ephemeral:
             print(

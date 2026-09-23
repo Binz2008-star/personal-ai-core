@@ -16,6 +16,7 @@ from .text import (
     BEHAVIORAL_CONTRACT,
     CONTRACT_HEADING,
     POLICY_HEADING,
+    PROFILE_HEADING,
     RESPONSE_POLICY,
 )
 
@@ -33,17 +34,23 @@ class DefaultIdentityComposer:
         *,
         policy: ResponsePolicy = RESPONSE_POLICY,
         contract: BehavioralContract = BEHAVIORAL_CONTRACT,
+        profile: str | None = None,
     ) -> None:
         self._policy = policy
         self._contract = contract
-        self._text = "\n\n".join(
-            (
-                POLICY_HEADING,
-                policy.render(),
-                CONTRACT_HEADING,
-                contract.render(),
-            )
-        )
+        profile = (profile or "").strip()
+        self._profile = profile or None
+        parts = [POLICY_HEADING, policy.render()]
+        if profile:
+            # Before the contract, so the contract stays nearest the turn.
+            parts += [PROFILE_HEADING, profile]
+        parts += [CONTRACT_HEADING, contract.render()]
+        self._text = "\n\n".join(parts)
+
+    @property
+    def profile(self) -> str | None:
+        """The owner's profile as composed, or None when there is none."""
+        return self._profile
 
     @property
     def text(self) -> str:
