@@ -198,3 +198,39 @@ def test_the_agent_cannot_touch_the_database_inside_its_workspace(tmp_path):
     assert connection.execute("pragma integrity_check").fetchone() == ("ok",)
     types = [row[0] for row in connection.execute("select type from events order by seq")]
     assert types == ["session.started", "agent.step", "agent.step", "agent.finished"]
+
+
+def test_an_unknown_session_is_refused_and_nothing_is_recorded(tmp_path):
+    """F-2: the same refusal `send` gives, and no agent.* event for a session
+    nobody started."""
+    transport = scripted('{"tool": "list_directory"}', '{"answer": "ok"}')
+    code, output, _ = run(tmp_path, transport, "look", extra=("--session", "no-such-session"))
+    assert code == 2 and "no such session: no-such-session" in output
+    assert transport.sent == []  # type: ignore[attr-defined]
+    connection = sqlite3.connect(tmp_path / "core.db")
+    assert connection.execute("select count(*) from events").fetchone() == (0,)
+
+
+def test_the_agent_continues_a_session_started_earlier(tmp_path):
+    first = scripted('{"answer": "one"}')
+    _, output, _ = run(tmp_path, first, "task one")
+    session_id = next(
+        line.split()[-1] for line in output.splitlines() if line.startswith("session:")
+    )
+    second = scripted('{"answer": "two"}')
+    code, output, _ = run(tmp_path, second, "task two", extra=("--session", session_id))
+    assert code == 0 and "core> two" in output
+    rows = sqlite3.connect(tmp_path / "core.db").execute(
+        "select type from events where session_id = ? order by seq", (session_id,)
+    ).fetchall()
+    assert [r[0] for r in rows] == [
+        "session.started", "agent.finished", "agent.finished",
+    ]
+
+
+def test_build_agent_will_not_record_events_without_a_session_check(tmp_path):
+    from personal_ai_core.conversation.factory import build_agent
+    from personal_ai_core.persistence.in_memory import InMemoryEventRepository
+
+    with pytest.raises(ValueError, match="session_exists"):
+        build_agent(workspace=tmp_path, events=InMemoryEventRepository())

@@ -169,10 +169,12 @@ class AgentLoop:
         checkpoints: Checkpoints | None = None,
         identity: IdentityComposer | None = None,
         events: EventRepository | None = None,
+        session_exists: Callable[[str], bool] | None = None,
         max_actions: int = 12,
         max_failures: int = 3,
         generation_limit: int = 1024,
     ) -> None:
+        self._session_exists = session_exists
         self._provider = provider
         self._model = model
         self._executor = executor
@@ -196,7 +198,13 @@ class AgentLoop:
 
         `on_step` and `on_protocol_error` let a caller show progress as it
         happens -- including the steps that fail -- rather than after.
+
+        Raises KeyError for a session `session_exists` does not know, before
+        the model is called or anything is recorded: the same refusal, and the
+        same exception, as ConversationService.send (F-2).
         """
+        if self._session_exists is not None and not self._session_exists(session_id):
+            raise KeyError(f"unknown session: {session_id}")
         task = task.strip()[:MAX_TASK_CHARS]
         budget = ActionBudget(max_actions=self._max_actions, max_failures=self._max_failures)
         messages = self._opening(task, session_id)

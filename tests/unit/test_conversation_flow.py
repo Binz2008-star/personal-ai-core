@@ -100,3 +100,14 @@ def test_unknown_session_is_rejected():
     service, _ = build_in_memory_service(transport=fake_transport())
     with pytest.raises(KeyError):
         service.send(session_id="nope", content="hi")
+
+
+def test_has_session_agrees_with_send():
+    """F-2: the agent asks this before recording; it must refuse exactly
+    the sessions `send` refuses."""
+    service, _ = build_in_memory_service(transport=fake_transport())
+    session = service.start_session(service.create_user().id)
+    assert service.has_session(session.id)
+    assert not service.has_session("nope")
+    with pytest.raises(KeyError):
+        service.send(session_id="nope", content="hi")

@@ -281,12 +281,12 @@ def main(
 
         if args.session:
             # Not verified here. `send` raises KeyError for an unknown
-            # session and that is the contract; asking the service whether a
-            # session exists would mean either reaching into `_sessions` or
-            # widening ConversationService for this command's convenience.
-            # The cost is that the user learns on their first message rather
-            # than before typing it -- said plainly rather than hidden, and
-            # the message they get is a sentence, not a traceback.
+            # session and that is the contract; the agent loop raises the same
+            # KeyError, asking the service through `has_session` (F-2), so
+            # both paths refuse the same sessions at the same moment. The
+            # cost is that the user learns on their first message or task
+            # rather than before typing it -- said plainly rather than
+            # hidden, and the message they get is a sentence, not a traceback.
             session_id = args.session
         else:
             session_id = service.start_session(service.create_user().id).id
@@ -306,6 +306,7 @@ def main(
                 confirm=_confirmer(lines, out),
                 events=events,
                 database=database,
+                session_exists=service.has_session,
             )
             print(f"agent:   workspace {agent.workspace.root}", file=out)
             print(
@@ -414,6 +415,9 @@ def _agent_session(*, agent, session_id, lines, out) -> int:
                     f"  · (the model's reply was not a valid step: {reason})", file=out, flush=True
                 ),
             )
+        except KeyError:
+            print(f"no such session: {session_id}", file=out)
+            return 2
         except ProviderError as exc:
             print(f"the model could not be reached: {exc}", file=out)
             print(

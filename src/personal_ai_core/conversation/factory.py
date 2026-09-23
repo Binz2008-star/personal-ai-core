@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from typing import Callable
 from pathlib import Path
 
 from ..agent import (
@@ -392,6 +393,7 @@ def build_agent(
     confirm: Confirm | None = None,
     events: EventRepository | None = None,
     database: str | Path | None = None,
+    session_exists: Callable[[str], bool] | None = None,
 ) -> AgentSlice:
     """The agent of AGENT_ARCHITECTURE.md, wired to the Boss model.
 
@@ -406,7 +408,17 @@ def build_agent(
     `database` is the file the Core's own records live in. It is reserved
     from the workspace -- with its SQLite companions -- so no tool can read,
     overwrite or delete it even when the workspace contains it (F-1).
+
+    `session_exists` is REQUIRED whenever `events` is given -- pass the
+    conversation service's `has_session`. Events recorded against a session
+    nobody started are evidence about nothing (F-2); with it, the agent
+    refuses an unknown session exactly as `send` does.
     """
+    if events is not None and session_exists is None:
+        raise ValueError(
+            "an agent that records events must be able to check the session: "
+            "pass session_exists"
+        )
     settings = settings or Settings.from_env()
     registry = ModelRegistry.from_settings(settings)
     provider = OllamaProvider(
@@ -428,5 +440,6 @@ def build_agent(
         checkpoints=checkpoints,
         identity=DefaultIdentityComposer(),
         events=events,
+        session_exists=session_exists,
     )
     return AgentSlice(loop=loop, executor=executor, checkpoints=checkpoints, workspace=sandbox)

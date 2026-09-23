@@ -255,3 +255,25 @@ def test_a_step_refused_for_its_arguments_is_recorded_as_not_run(ws):
     assert refused.payload["decision"] == "allow"
     assert refused.payload["ran"] is False and refused.payload["ok"] is False
     assert allowed.payload["ran"] is True and allowed.payload["ok"] is True
+
+
+# --- an unknown session (F-2) ------------------------------------------------------
+
+
+def test_an_unknown_session_is_refused_before_anything_happens(ws):
+    events = InMemoryEventRepository()
+    script = Script('{"tool": "list_directory"}', '{"answer": "ok"}')
+    agent = AgentLoop(
+        provider=script,
+        model="boss",
+        executor=ToolExecutor(default_tools(ws), RiskPolicy()),
+        events=events,
+        session_exists=lambda session_id: session_id == "known",
+    )
+    with pytest.raises(KeyError, match="unknown session: nope"):
+        agent.run("x", session_id="nope")
+    assert script.calls == []
+    assert not events.list_for_session("nope")
+
+    agent.run("x", session_id="known")
+    assert [e.type for e in events.list_for_session("known")][-1] is EventType.AGENT_FINISHED
