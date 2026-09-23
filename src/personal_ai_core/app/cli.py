@@ -55,10 +55,16 @@ DEFAULT_DATABASE = Path.home() / ".personal-ai-core" / "core.db"
 # directory holds everything that is theirs.
 PROFILE_ENV = "PAC_PROFILE"
 PROFILE_FILENAME = "profile.md"
-# Every character is paid for in every turn's context window. A profile that
-# outgrows this is refused with a message rather than cut: a silently
-# truncated profile is one the model reads differently from the one written.
-MAX_PROFILE_CHARS = 8_000
+# The owner's projects, beside the profile and read with it: a separate file
+# so it can be rewritten as projects change without touching what the owner
+# wrote about themselves.
+PROJECTS_FILENAME = "projects.md"
+# Every character is paid for in every turn's context window. A profile
+# (with its projects) that outgrows this is refused with a message rather
+# than cut: a silently truncated profile is one the model reads differently
+# from the one written. 12000 characters of mixed Arabic and English is
+# roughly 3000 tokens of an 8192-token window.
+MAX_PROFILE_CHARS = 12_000
 
 PROMPT = "you> "
 REPLY = "core> "
@@ -266,19 +272,30 @@ def _remember(path: Path | None, text: str, out: TextIO) -> int:
     return 0
 
 
+def _profile_files(path: Path | None) -> list[Path]:
+    """The profile, then the projects file beside it -- those that exist."""
+    if path is None:
+        return []
+    return [p for p in (path, path.parent / PROJECTS_FILENAME) if p.is_file()]
+
+
 def _load_profile(path: Path | None, out: TextIO) -> str | None:
     """The profile text; "" when there is none; None when it cannot be used."""
-    if path is None or not path.is_file():
-        return ""
-    try:
-        text = path.read_text(encoding="utf-8").strip()
-    except UnicodeDecodeError:
-        print(f"the profile is not UTF-8 text: {path}", file=out)
-        return None
+    parts = []
+    for file in _profile_files(path):
+        try:
+            text = file.read_text(encoding="utf-8").strip()
+        except UnicodeDecodeError:
+            print(f"the profile is not UTF-8 text: {file}", file=out)
+            return None
+        if text:
+            parts.append(text)
+    text = "\n\n".join(parts)
     if len(text) > MAX_PROFILE_CHARS:
         print(
             f"the profile is {len(text)} characters; the limit is {MAX_PROFILE_CHARS}, "
-            f"because it is sent with every turn. Shorten {path}.",
+            f"because it is sent with every turn. Shorten "
+            f"{' or '.join(str(f) for f in _profile_files(path))}.",
             file=out,
         )
         return None
@@ -381,7 +398,11 @@ def main(
         print(f"model:   {settings.boss_model}", file=out)
         print(f"storage: {where}", file=out)
         if profile:
-            print(f"profile: {profile_path} ({len(profile)} characters)", file=out)
+            print(
+                f"profile: {' + '.join(str(f) for f in _profile_files(profile_path))} "
+                f"({len(profile)} characters)",
+                file=out,
+            )
         elif profile_path is not None:
             print(
                 f"profile: none yet -- write about yourself in {profile_path}, "
