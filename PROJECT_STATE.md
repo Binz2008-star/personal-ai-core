@@ -353,6 +353,9 @@ claim written in one place with nothing that notices it going stale.
                Memory recall is deliberately not wired: nothing on that path
                promotes memories
   #59 57c953f  docs: record #56-#58, close F-2, and retire what F-2 made stale
+  #64 91796e8  feat(agent): the agent -- policy gate, sandbox, tools, verify and
+               recover, the loop and pac --agent -- with the audit fixes F-1..F-5.
+               Landed as one merge; #60-#63 were closed as superseded
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
