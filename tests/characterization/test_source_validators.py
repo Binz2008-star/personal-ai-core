@@ -11,6 +11,7 @@ was tested. These found where it was not.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -37,29 +38,42 @@ def allowed(command: str, workspace: Path) -> bool:
 # --- the snapshot is the source -------------------------------------------
 
 
-def _source_lines(path: str, start: int, end: int) -> list[str]:
-    shown = subprocess.run(
-        ["git", "-C", str(SOURCE_CHECKOUT), "show", f"{PINNED}:{path}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.splitlines()
-    return shown[start - 1 : end]
-
-
-@pytest.mark.skipif(
-    not (SOURCE_CHECKOUT / ".git").exists(), reason="source checkout not present"
+# Each block of the snapshot: where it came from, its first line, its length,
+# and the SHA-256 of those lines at 21a36b0 -- computed from `git show` of the
+# pinned commit when the snapshot was taken.
+BLOCKS = (
+    ("tool_security.py", 39, 136, "# ── Allowlist",
+     "c87ef54a9ad0883e8963df73fbbfadd3346876b7133b18b209743519f0465188"),
+    ("tool_security.py", 190, 274, "def validate_command(",
+     "5fc933f640944da001eec7464d06a67b153a2a00744b7c861b31908e12137141"),
+    ("path_security.py", 24, 196, "class PathSecurityError(",
+     "bcde60df7d0064f418e6da0fcd5ec812b678778c467bdd3333eb6317135e93fb"),
 )
-def test_the_snapshot_matches_the_source():
-    snapshot = (Path(__file__).parent / "source_21a36b0.py").read_text().splitlines()
-    for path, start, end in (
-        ("tool_security.py", 39, 136),
-        ("tool_security.py", 190, 274),
-        ("path_security.py", 24, 196),
-    ):
-        block = _source_lines(path, start, end)
-        joined = "\n".join(snapshot)
-        assert "\n".join(block) in joined, f"{path} {start}-{end} drifted from {PINNED}"
+
+
+def _digest(lines: list[str]) -> str:
+    return hashlib.sha256("".join(line + "\n" for line in lines).encode("utf-8")).hexdigest()
+
+
+def _snapshot_block(first_line: str, length: int) -> list[str]:
+    snapshot = (Path(__file__).parent / "source_21a36b0.py").read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(snapshot) if line.startswith(first_line))
+    return snapshot[start : start + length]
+
+
+def test_the_snapshot_is_the_pinned_source():
+    """Runs everywhere, no skip. The hashes pin the snapshot to what 21a36b0
+    held; where the source checkout exists (a developer's machine), the source
+    itself is read as well, so the hashes are re-proven rather than trusted."""
+    for path, start, end, first_line, expected in BLOCKS:
+        block = _snapshot_block(first_line, end - start + 1)
+        assert _digest(block) == expected, f"snapshot of {path} {start}-{end} was edited"
+        if (SOURCE_CHECKOUT / ".git").exists():
+            shown = subprocess.run(
+                ["git", "-C", str(SOURCE_CHECKOUT), "show", f"{PINNED}:{path}"],
+                capture_output=True, text=True, encoding="utf-8", check=True,
+            ).stdout.splitlines()
+            assert _digest(shown[start - 1 : end]) == expected, f"{path} at {PINNED} differs"
 
 
 # --- what the source gets right, and the Core keeps ------------------------
