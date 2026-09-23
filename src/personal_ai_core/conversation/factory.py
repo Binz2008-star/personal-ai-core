@@ -48,7 +48,7 @@ from ..persistence.sqlite import (
 )
 from ..runtime.model_registry import ModelRegistry
 from ..runtime.ollama.provider import OllamaProvider, Transport
-from .grounding import ContextBuilder
+from .grounding import ContextBuilder, RenderedEvidenceCost
 from .service import ConversationService
 
 
@@ -260,7 +260,11 @@ def build_grounded_in_memory_service(
             lexical_index=lexical_index,
             catalog=catalog,
         ),
-        assembler=HybridContextAssembler(estimator),
+        # F-4: charge evidence as rendered, not as bare text. Without this
+        # the grounding message overruns the budget it was assembled against.
+        assembler=HybridContextAssembler(
+            estimator, rendered_cost=RenderedEvidenceCost(estimator)
+        ),
         budget_policy=budget_policy,
         estimator=estimator,
         memory_retriever=memory_retriever,

@@ -345,6 +345,34 @@ class TokenEstimator(Protocol):
 
 
 @runtime_checkable
+class RenderedCost(Protocol):
+    """What selected evidence costs once it is rendered into the prompt.
+
+    Finding F-4. The assembler charged each passage its TEXT, while the
+    renderer wraps every passage in boundary lines and puts a preamble in
+    front of each section. Those tokens were spent and never charged, and
+    #49 made them large enough to overrun the budget.
+
+    A contract, not a constant, because the renderer lives in the
+    conversation layer and the assembler may not import it. The composition
+    root hands the assembler an implementation measured against the real
+    renderer, so a change to the format is charged the moment it is made.
+
+    `document` and `memory` return the WHOLE rendered cost of one item, text
+    included. A section cost is charged once, with the first item of its
+    kind that is selected.
+    """
+
+    def document(self, result: RetrievalResult) -> int: ...
+
+    def memory(self, evidence: MemoryEvidence) -> int: ...
+
+    def document_section(self) -> int: ...
+
+    def memory_section(self) -> int: ...
+
+
+@runtime_checkable
 class IdentityComposer(Protocol):
     """Produces the one `Role.SYSTEM` message that carries identity.
 
