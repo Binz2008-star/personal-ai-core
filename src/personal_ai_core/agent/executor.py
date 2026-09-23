@@ -144,4 +144,5 @@ class ToolExecutor:
             decision=decision,
             result=result,
             confirmed_by_user=confirmed,
+            executed=True,
         )

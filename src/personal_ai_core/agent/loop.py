@@ -315,9 +315,9 @@ class AgentLoop:
                     "risk": record.risk_level.value if record.risk_level else None,
                     "decision": record.decision.decision.value,
                     "confirmed_by_user": record.confirmed_by_user,
-                    "ran": result is not None and not (
-                        record.decision.decision is Decision.ASK and not record.confirmed_by_user
-                    ),
+                    # Set by the executor where the tool is called, never
+                    # inferred here from the presence of a result.
+                    "ran": record.executed,
                     "ok": result.ok if result is not None else False,
                     "verified": step.verified,
                     "duration_ms": result.duration_ms if result is not None else 0,

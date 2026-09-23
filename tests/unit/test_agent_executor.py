@@ -203,3 +203,31 @@ def test_the_real_tools_through_the_executor(tmp_path):
     assert command.result is not None and "not confirmed" in (command.result.error or "")
     assert escape.result is not None and "traversal" in (escape.result.error or "")
     assert len(ex.audit.records()) == 4
+
+
+# --- executed: set where the tool is called, and nowhere else (F-3) ----------------
+
+
+@pytest.mark.parametrize(
+    "request_, risk, confirm, executed",
+    [
+        (ToolRequest("spy", {"n": 1}), RiskLevel.LOW, None, True),
+        (ToolRequest("spy", {"n": "one"}), RiskLevel.LOW, None, False),   # invalid arguments
+        (ToolRequest("spy", {}), RiskLevel.LOW, None, False),             # missing argument
+        (ToolRequest("nothing", {"n": 1}), RiskLevel.LOW, None, False),   # unknown tool: DENY
+        (ToolRequest("spy", {"n": 1}), RiskLevel.HIGH, None, False),      # ASK, no confirmer
+        (ToolRequest("spy", {"n": 1}), RiskLevel.HIGH, lambda r, s: False, False),
+        (ToolRequest("spy", {"n": 1}), RiskLevel.HIGH, lambda r, s: True, True),
+    ],
+)
+def test_executed_is_true_only_when_the_tool_was_called(request_, risk, confirm, executed):
+    spy = Spy(risk=risk)
+    record = executor(spy, confirm=confirm).execute(request_)
+    assert record.executed is executed
+    assert bool(spy.calls) is executed
+
+
+def test_a_tool_that_raises_still_executed():
+    """It started; that it failed is `result.ok`, not `executed`."""
+    record = executor(Spy(raises=RuntimeError("boom"))).execute(ToolRequest("spy", {"n": 1}))
+    assert record.executed and record.result is not None and not record.result.ok

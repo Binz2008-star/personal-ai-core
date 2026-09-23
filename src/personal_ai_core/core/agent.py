@@ -117,6 +117,12 @@ class AuditRecord:
 
     RECORD EVENT is "always, success or failure" (section 1). A denied request
     that leaves no record is indistinguishable from one never made.
+
+    `executed` is True only when the tool's `run` was called. The executor sets
+    it at that one place; it is not derived from `result`, because a request
+    refused for invalid arguments, or an ASK the user declined, carries a
+    result that explains the refusal -- and deriving "ran" from the presence
+    of a result reported those as executed.
     """
 
     request: ToolRequest
@@ -124,7 +130,18 @@ class AuditRecord:
     decision: PolicyDecision
     result: ToolResult | None = None
     confirmed_by_user: bool = False
+    executed: bool = False
     at: Any = field(default_factory=utcnow)
+
+    def __post_init__(self) -> None:
+        if not self.executed:
+            return
+        if self.result is None:
+            raise ValueError("an executed request must carry its result")
+        if self.decision.decision is Decision.DENY:
+            raise ValueError("a denied request cannot have executed")
+        if self.decision.decision is Decision.ASK and not self.confirmed_by_user:
+            raise ValueError("an ASK the user did not confirm cannot have executed")
 
 
 @dataclass(frozen=True, slots=True)

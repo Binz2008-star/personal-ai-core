@@ -240,3 +240,18 @@ def test_a_stopped_run_is_recorded_as_not_finished(ws):
 
 def test_the_fence_token_depends_on_the_content():
     assert fence("read_file -> ok", "a") != fence("read_file -> ok", "b")
+
+
+def test_a_step_refused_for_its_arguments_is_recorded_as_not_run(ws):
+    """F-3: the tool never started, so the event must not say it ran."""
+    events = InMemoryEventRepository()
+    script = Script(
+        '{"tool": "read_file", "arguments": {"path": 3}}',
+        '{"tool": "read_file", "arguments": {"path": "notes.md"}}',
+        '{"answer": "ok"}',
+    )
+    loop(ws, script, events=events).run("x", session_id="s1")
+    refused, allowed = events.list_for_session("s1")[:2]
+    assert refused.payload["decision"] == "allow"
+    assert refused.payload["ran"] is False and refused.payload["ok"] is False
+    assert allowed.payload["ran"] is True and allowed.payload["ok"] is True

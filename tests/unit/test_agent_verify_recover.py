@@ -34,13 +34,22 @@ def record(
     decision: Decision = Decision.ALLOW,
     result: ToolResult | None = DONE,
     confirmed: bool = False,
+    executed: bool | None = None,
 ) -> AuditRecord:
+    if executed is None:
+        # What the executor would have recorded for this combination.
+        executed = (
+            result is not None
+            and decision is not Decision.DENY
+            and not (decision is Decision.ASK and not confirmed)
+        )
     return AuditRecord(
         request=ToolRequest("t", {}),
         risk_level=RiskLevel.LOW,
         decision=PolicyDecision(decision, "reason"),
         result=result,
         confirmed_by_user=confirmed,
+        executed=executed,
     )
 
 
@@ -75,6 +84,28 @@ def test_an_unconfirmed_ask_did_not_run_even_if_the_result_says_ok():
 def test_an_allowed_step_with_no_result_did_not_run():
     check = ran(Verifier().verify(record(Decision.ALLOW, result=None)))
     assert not check.passed and check.reason == "no result was recorded"
+
+
+def test_a_step_refused_before_the_tool_started_did_not_run():
+    """F-3. An allowed request refused for its arguments carries a result
+    explaining the refusal; the tool never started, and `ran` must say so."""
+    refused = record(result=ToolResult(ok=False, error="invalid arguments: x"), executed=False)
+    check = ran(Verifier().verify(refused))
+    assert not check.passed
+    assert check.reason == "refused before the tool started: invalid arguments: x"
+
+
+@pytest.mark.parametrize(
+    "decision, result, confirmed, problem",
+    [
+        (Decision.ALLOW, None, False, "must carry its result"),
+        (Decision.DENY, DONE, False, "denied request cannot have executed"),
+        (Decision.ASK, DONE, False, "did not confirm cannot have executed"),
+    ],
+)
+def test_an_audit_record_cannot_claim_an_impossible_execution(decision, result, confirmed, problem):
+    with pytest.raises(ValueError, match=problem):
+        record(decision, result, confirmed=confirmed, executed=True)
 
 
 def test_a_confirmed_ask_that_succeeded_passes():

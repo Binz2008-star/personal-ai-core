@@ -97,6 +97,10 @@ class Verifier:
             return VerificationCheck("ran", False, "no result was recorded")
         if record.decision.decision is Decision.ASK and not record.confirmed_by_user:
             return VerificationCheck("ran", False, "not confirmed by the user")
+        if not record.executed:
+            return VerificationCheck(
+                "ran", False, f"refused before the tool started: {record.result.error}"
+            )
         return VerificationCheck("ran", True, "executed")
 
     @staticmethod
