@@ -57,7 +57,7 @@ at a time; the policy gate, the sandbox and the verifier decide what happens
 
 | Tool | Risk | What happens |
 |---|---|---|
-| `read_file`, `list_directory`, `search_text` | low | runs; secrets and `.git` are refused |
+| `read_file`, `list_directory`, `search_text` | low | runs; secrets, `.git` and pac's own database are refused |
 | `write_file` | medium | runs; never a secret; can be undone |
 | `run_command` | high | **asks you**, every time; an allowlist of read-only and checking commands, no shell |
 | `delete_file` | critical | **asks you**, every time; can be undone |
@@ -72,8 +72,14 @@ core> I wrote the summary to summary.md.
 ```
 
 A task that stops -- too many failed steps, or a model that stops following the protocol --
-offers to undo its file changes. Every step, allowed or not, is recorded in the database.
-Nothing leaves the machine: there is no network tool.
+offers to undo its file changes. Every step, allowed or not, is recorded in the database,
+and the database itself is out of the agent's reach even when the workspace contains it.
+A `--session` that does not exist is refused, as it is for a conversation.
+
+The agent has no network tool: none of its tools sends anything anywhere. The model does
+see what the agent reads -- file contents and command output go into the conversation
+with the model at `PAC_OLLAMA_HOST`. That host is `127.0.0.1` by default; point it at
+another machine and what the agent reads travels there.
 
 **Status: Phase 4 — Memory-Aware Context Recall ACCEPTED / MERGED (PR #2 — MERGED, main `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`, implementation `e8062ff2fa8b6eb5a4471ac8475f29bed76fd369`).**
 
