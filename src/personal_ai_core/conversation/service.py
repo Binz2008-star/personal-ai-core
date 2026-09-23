@@ -295,6 +295,15 @@ class ConversationService:
         )
         return grounding
 
+    def has_session(self, session_id: str) -> bool:
+        """Whether `send` would accept this session id.
+
+        The same lookup `send` and `close_session` make, exposed read-only so
+        a caller that records against a session -- the agent -- refuses the
+        sessions this service refuses, rather than keeping its own list.
+        """
+        return self._sessions.get(session_id) is not None
+
     def close_session(self, session_id: str) -> Session:
         session = self._sessions.get(session_id)
         if session is None:

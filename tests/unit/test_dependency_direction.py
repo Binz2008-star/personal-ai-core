@@ -49,6 +49,10 @@ LAYER_MAY_IMPORT = {
     # import it -- the composer reaches ConversationService through
     # factory.py, exactly as the budget policy does.
     "identity": {"core"},                           # ADR-011/ADR-012 identity
+    # AGENT_ARCHITECTURE.md / ADR-004. Policy, sandbox and tools depend on
+    # the contracts and nothing else; the loop reaches a model through
+    # core.contracts.ModelProvider, never through runtime/.
+    "agent": {"core"},                              # the agent layer
     # The entry point. WIDER than every other layer, and the reason is the
     # one thing it does: it calls the composition root. `conversation` is on
     # the list so it can reach factory.py; no adapter is, because knowing
@@ -143,9 +147,21 @@ def test_no_model_name_literal_in_business_logic():
     assert not offenders, f"model name hard-coded outside config: {offenders}"
 
 
+def layered_modules() -> list[Path]:
+    """Every module that belongs to a layer.
+
+    Package `__init__.py` files included: they re-export, and an import
+    written there crosses layers exactly as one in any other module would.
+    Excluding them left `agent/__init__.py` -- and every package's -- able to
+    import anything unchecked. Only the top-level package file is outside
+    every layer.
+    """
+    return [p for p in SRC.rglob("*.py") if p != SRC / "__init__.py"]
+
+
 @pytest.mark.parametrize(
     "path",
-    [p for p in SRC.rglob("*.py") if p.name != "__init__.py"],
+    layered_modules(),
     ids=lambda p: str(p.relative_to(SRC)),
 )
 def test_internal_layering_is_respected(path):
@@ -219,6 +235,38 @@ def test_the_layering_check_actually_detects_a_violation():
     assert "persistence" not in LAYER_MAY_IMPORT["conversation"], (
         "conversation must not be permitted to import persistence"
     )
+
+
+def test_package_init_files_are_checked():
+    """The guard scans every package's `__init__.py` (F-4)."""
+    scanned = {p.relative_to(SRC).as_posix() for p in layered_modules()}
+    packages = {p.relative_to(SRC).as_posix() for p in SRC.glob("*/__init__.py")}
+    assert packages and packages <= scanned
+    assert "__init__.py" not in scanned
+
+
+def test_the_layering_check_sees_a_violation_in_a_package_init():
+    """Adversarial: a crossing import in `agent/__init__.py` is detected and
+    is outside what `agent` may import."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_pkg = Path(tmp) / "agent"
+        fake_pkg.mkdir()
+        module = fake_pkg / "__init__.py"
+        module.write_text(
+            "from .tools import ReadFile\nfrom ..memory.pipeline import ExperiencePipeline\n",
+            encoding="utf-8",
+        )
+        global SRC
+        real_src, SRC = SRC, Path(tmp)
+        try:
+            found = internal_imports(module)
+        finally:
+            SRC = real_src
+
+    assert found == {"agent", "memory"}
+    assert "memory" not in LAYER_MAY_IMPORT["agent"]
 
 
 def test_core_does_not_import_application_or_infrastructure_packages():

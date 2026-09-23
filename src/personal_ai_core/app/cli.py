@@ -19,6 +19,7 @@ you can walk away from.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import uuid
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Sequence, TextIO
 
 from ..conversation.factory import (
+    build_agent,
     build_grounded_in_memory_service,
     build_in_memory_service,
     build_persistent_service,
@@ -104,6 +106,22 @@ def _parser() -> argparse.ArgumentParser:
             "is lexical plus a hashing embedder -- surface overlap, not "
             "meaning."
         ),
+    )
+    parser.add_argument(
+        "--agent",
+        action="store_true",
+        help=(
+            "each line is a task for the agent, which may read, search and "
+            "write files and run allowlisted commands inside --workspace. "
+            "Running a command or deleting a file asks you first, every time."
+        ),
+    )
+    parser.add_argument(
+        "--workspace",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="the directory the agent is confined to. Required with --agent.",
     )
     return parser
 
@@ -205,7 +223,20 @@ def main(
     out = stdout if stdout is not None else sys.stdout
     environment = os.environ.copy() if env is None else env
     settings = Settings.from_env(environment)
-    lines = stdin if stdin is not None else sys.stdin
+    # One iterator, shared by the conversation and by the agent's
+    # confirmation prompts: an answer to "Allow?" is the next line typed.
+    lines = iter(stdin if stdin is not None else sys.stdin)
+
+    if args.agent:
+        if args.workspace is None:
+            print("--agent needs --workspace DIR: the directory it may work in", file=out)
+            return 2
+        if not args.workspace.is_dir():
+            print(f"no such directory: {args.workspace}", file=out)
+            return 2
+        if args.documents is not None:
+            print("choose --agent or --documents, not both", file=out)
+            return 2
 
     # Resolved before anything is built or opened: a path that does not exist
     # is a mistake in the command, and it should cost nothing but a message.
@@ -220,14 +251,16 @@ def main(
 
     slice_ = None
     ingestion = None
+    database = None
     if args.ephemeral:
         if grounded:
             grounded_slice = build_grounded_in_memory_service(
                 settings, transport=transport  # type: ignore[arg-type]
             )
             service, ingestion = grounded_slice.service, grounded_slice.ingestion
+            events = grounded_slice.events
         else:
-            service, _ = build_in_memory_service(settings, transport=transport)  # type: ignore[arg-type]
+            service, events = build_in_memory_service(settings, transport=transport)  # type: ignore[arg-type]
         where = "nowhere -- --ephemeral was given"
     else:
         database = _database_path(args.database, environment)
@@ -239,6 +272,7 @@ def main(
             grounded=grounded,
         )
         service, ingestion = slice_.service, slice_.ingestion
+        events = slice_.events
         where = str(database)
 
     try:
@@ -247,12 +281,12 @@ def main(
 
         if args.session:
             # Not verified here. `send` raises KeyError for an unknown
-            # session and that is the contract; asking the service whether a
-            # session exists would mean either reaching into `_sessions` or
-            # widening ConversationService for this command's convenience.
-            # The cost is that the user learns on their first message rather
-            # than before typing it -- said plainly rather than hidden, and
-            # the message they get is a sentence, not a traceback.
+            # session and that is the contract; the agent loop raises the same
+            # KeyError, asking the service through `has_session` (F-2), so
+            # both paths refuse the same sessions at the same moment. The
+            # cost is that the user learns on their first message or task
+            # rather than before typing it -- said plainly rather than
+            # hidden, and the message they get is a sentence, not a traceback.
             session_id = args.session
         else:
             session_id = service.start_session(service.create_user().id).id
@@ -264,6 +298,25 @@ def main(
             print(
                 f"         continue this later with --session {session_id}", file=out
             )
+        if args.agent:
+            agent = build_agent(
+                settings,
+                workspace=args.workspace,
+                transport=transport,  # type: ignore[arg-type]
+                confirm=_confirmer(lines, out),
+                events=events,
+                database=database,
+                session_exists=service.has_session,
+            )
+            print(f"agent:   workspace {agent.workspace.root}", file=out)
+            print(
+                "         reads, searches and writes freely inside it; asks before "
+                "running a command or deleting a file",
+                file=out,
+            )
+            print(file=out)
+            return _agent_session(agent=agent, session_id=session_id, lines=lines, out=out)
+
         print(file=out)
 
         return _converse(
@@ -303,4 +356,90 @@ def _converse(*, service, session_id, language, lines, out) -> int:
             )
             return 1
         print(f"{REPLY}{reply.content}", file=out)
+    return 0
+
+
+YES = frozenset({"y", "yes", "نعم", "ن"})
+
+
+def _ask(question: str, lines, out) -> bool:
+    """A yes/no from the next line typed. End of input is a no."""
+    print(question, end="", file=out, flush=True)
+    answer = next(lines, "")
+    print(file=out)
+    return answer.strip().lower() in YES
+
+
+def _confirmer(lines, out):
+    def confirm(request, spec) -> bool:
+        arguments = json.dumps(dict(request.arguments), ensure_ascii=False)
+        return _ask(
+            f"  ? {spec.name} {arguments} -- {spec.risk_level.value} risk. Allow? [y/N] ",
+            lines,
+            out,
+        )
+
+    return confirm
+
+
+def _describe_step(step) -> str:
+    record = step.record
+    arguments = json.dumps(dict(record.request.arguments), ensure_ascii=False)
+    if len(arguments) > 80:
+        arguments = arguments[:77] + "..."
+    result = record.result
+    if record.decision.decision.value == "deny":
+        status = f"denied: {record.decision.reason}"
+    elif result is None:
+        status = "no result"
+    elif record.decision.decision.value == "ask" and not record.confirmed_by_user:
+        status = "not allowed by you"
+    elif result.ok:
+        status = "ok"
+    else:
+        status = f"failed: {result.error}"
+    return f"  · {record.request.tool} {arguments} -> {status}"
+
+
+def _agent_session(*, agent, session_id, lines, out) -> int:
+    for line in lines:
+        task = line.strip()
+        if not task:
+            continue
+        try:
+            outcome = agent.loop.run(
+                task,
+                session_id=session_id,
+                on_step=lambda step: print(_describe_step(step), file=out, flush=True),
+                on_protocol_error=lambda reason: print(
+                    f"  · (the model's reply was not a valid step: {reason})", file=out, flush=True
+                ),
+            )
+        except KeyError:
+            print(f"no such session: {session_id}", file=out)
+            return 2
+        except ProviderError as exc:
+            print(f"the model could not be reached: {exc}", file=out)
+            print(
+                "check that the model server is running, or set PAC_OLLAMA_HOST.",
+                file=out,
+            )
+            return 1
+        if outcome.finished:
+            print(f"{REPLY}{outcome.answer}", file=out)
+            if outcome.touched_files:
+                print(f"         changed: {', '.join(outcome.touched_files)}", file=out)
+            agent.checkpoints.commit()
+            continue
+        print(f"{outcome.stopped_reason}", file=out)
+        if outcome.touched_files and _ask(
+            f"  ? undo {len(outcome.touched_files)} file change(s) from this task "
+            f"({', '.join(outcome.touched_files)})? [y/N] ",
+            lines,
+            out,
+        ):
+            restored = agent.checkpoints.rollback()
+            print(f"         restored: {', '.join(restored)}", file=out)
+        else:
+            agent.checkpoints.commit()
     return 0

@@ -352,6 +352,7 @@ claim written in one place with nothing that notices it going stale.
                between them. A missing path exits 2 before anything is opened.
                Memory recall is deliberately not wired: nothing on that path
                promotes memories
+  #59 57c953f  docs: record #56-#58, close F-2, and retire what F-2 made stale
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped

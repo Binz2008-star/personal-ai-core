@@ -120,6 +120,11 @@ class EventType(str, Enum):
     MEMORY_PROMOTED = "memory.promoted"
     MEMORY_REJECTED = "memory.rejected"
     MEMORY_CONFLICT_DETECTED = "memory.conflict.detected"
+    # AGENT_ARCHITECTURE.md section 1, RECORD EVENT: "always, success or
+    # failure". One per tool request, whatever the policy decided, and one
+    # when a run ends. Emitted only by agent/loop.py.
+    AGENT_STEP = "agent.step"
+    AGENT_FINISHED = "agent.finished"
 
 
 # Language is a Phase 1 field by decision, not a Phase 2 feature: messages are

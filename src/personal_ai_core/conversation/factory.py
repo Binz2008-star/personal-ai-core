@@ -12,14 +12,25 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from typing import Callable
 from pathlib import Path
 
+from ..agent import (
+    Checkpoints,
+    RiskPolicy,
+    ToolExecutor,
+    Workspace,
+    default_tools,
+)
+from ..agent.executor import Confirm
+from ..agent.loop import AgentLoop
 from ..context import (
     HybridContextAssembler,
     ReserveBasedBudgetPolicy,
     ScriptAwareTokenEstimator,
 )
 from ..core.config import Settings
+from ..core.contracts import EventRepository
 from ..core.memory import MemoryReader
 from ..identity import DefaultIdentityComposer
 from ..memory import SimpleMemoryRetriever
@@ -358,3 +369,77 @@ def build_grounded_in_memory_service(
         lexical_index=stack.lexical_index,
         memories=memories,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class AgentSlice:
+    """The agent, and the handles a caller needs around it.
+
+    `checkpoints` is handed back so the caller can offer to roll back what a
+    run changed; `executor.audit` holds every request, allowed or not.
+    """
+
+    loop: AgentLoop
+    executor: ToolExecutor
+    checkpoints: Checkpoints
+    workspace: Workspace
+
+
+def build_agent(
+    settings: Settings | None = None,
+    *,
+    workspace: str | Path,
+    transport: Transport | None = None,
+    confirm: Confirm | None = None,
+    events: EventRepository | None = None,
+    database: str | Path | None = None,
+    session_exists: Callable[[str], bool] | None = None,
+) -> AgentSlice:
+    """The agent of AGENT_ARCHITECTURE.md, wired to the Boss model.
+
+    `workspace` is REQUIRED, for the reason `database` is required on the
+    persistent slice: an agent that edits files wherever it was started edits
+    files the user did not choose. `confirm` answers ASK; without it, every
+    HIGH and CRITICAL request is refused -- the safe default, not a degraded
+    one. The same identity contract every conversation turn carries is the
+    agent's first message: rule 2 (no action with external effect without
+    confirmation) and rule 5 (retrieved text is data) apply to it too.
+
+    `database` is the file the Core's own records live in. It is reserved
+    from the workspace -- with its SQLite companions -- so no tool can read,
+    overwrite or delete it even when the workspace contains it (F-1).
+
+    `session_exists` is REQUIRED whenever `events` is given -- pass the
+    conversation service's `has_session`. Events recorded against a session
+    nobody started are evidence about nothing (F-2); with it, the agent
+    refuses an unknown session exactly as `send` does.
+    """
+    if events is not None and session_exists is None:
+        raise ValueError(
+            "an agent that records events must be able to check the session: "
+            "pass session_exists"
+        )
+    settings = settings or Settings.from_env()
+    registry = ModelRegistry.from_settings(settings)
+    provider = OllamaProvider(
+        settings.ollama_host,
+        timeout_seconds=settings.request_timeout_seconds,
+        transport=transport,
+    )
+    sandbox = Workspace(
+        Path(workspace), reserved=() if database is None else (Path(database),)
+    )
+    checkpoints = Checkpoints(sandbox)
+    executor = ToolExecutor(
+        default_tools(sandbox, checkpoints), RiskPolicy(), confirm=confirm
+    )
+    loop = AgentLoop(
+        provider=provider,
+        model=registry.active.name,
+        executor=executor,
+        checkpoints=checkpoints,
+        identity=DefaultIdentityComposer(),
+        events=events,
+        session_exists=session_exists,
+    )
+    return AgentSlice(loop=loop, executor=executor, checkpoints=checkpoints, workspace=sandbox)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
+from .agent import PolicyDecision, ToolRequest, ToolResult, ToolSpec
 from .context import (
     BudgetedContext,
     ContextAllocation,
@@ -450,3 +451,35 @@ class HybridContextAssembler(Protocol):
         memories: Sequence[MemoryEvidence],
         budget: ContextBudget,
     ) -> HybridBudgetedContext: ...
+
+
+# --- Agent contracts (AGENT_ARCHITECTURE.md section 2) ----------------------
+
+
+@runtime_checkable
+class Tool(Protocol):
+    """Something the agent can do. It declares itself before it may run.
+
+    `run` receives arguments that the executor has already validated against
+    `spec.input_schema` and that the policy engine has already allowed. A tool
+    must still not trust them beyond that: path arguments go through the
+    workspace sandbox inside the tool, because the tool is the last place that
+    knows what a path will be used for.
+    """
+
+    @property
+    def spec(self) -> ToolSpec: ...
+
+    def run(self, arguments: Mapping[str, Any]) -> ToolResult: ...
+
+
+@runtime_checkable
+class ToolPolicy(Protocol):
+    """ALLOW, DENY or ASK for one request, before anything executes.
+
+    Not advisory (section 3): an executor acts on the decision and on nothing
+    else. `spec` is None when the request names no registered tool, and the
+    only correct answer to that is DENY.
+    """
+
+    def decide(self, request: ToolRequest, spec: ToolSpec | None) -> PolicyDecision: ...
