@@ -34,6 +34,15 @@ earlier run to continue it.
 | `--language ar` | tag the turn. Left undetermined when not given, because guessing it would record a claim nothing measured |
 | `--documents PATH` | answer from a file, or a directory of `.md` and `.txt` files. Repeatable |
 | `--agent --workspace DIR` | each line is a task the agent carries out inside `DIR` |
+| `--profile PATH` | a Markdown file about you. Also `$PAC_PROFILE`; defaults to `profile.md` beside the database |
+| `--remember "..."` | add one line to your profile, and exit |
+
+**It knows who it works for.** Write about yourself in `profile.md`, next to the database
+(`~/.personal-ai-core/profile.md` by default): your work, your projects, your goals, how you
+like answers. It is read into every conversation and every agent task, in every session.
+It stays a file you can open and edit. `pac --remember "I prefer answers in Arabic"` adds a
+line without opening it. The profile is capped at 8000 characters, because it is sent with
+every turn.
 
 Configuration is environment variables, all optional: `PAC_BOSS_MODEL`,
 `PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`.

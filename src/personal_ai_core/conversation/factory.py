@@ -88,7 +88,7 @@ def build_in_memory_service(
     # same estimator the rest of the budget uses. ADR-005: a budget is derived
     # and its inputs recorded. Zero was the honest figure while identity/ did
     # not exist; any constant would be an invented one now that it does.
-    identity = DefaultIdentityComposer()
+    identity = DefaultIdentityComposer(profile=settings.profile)
     budget_policy = ReserveBasedBudgetPolicy(
         identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
     )
@@ -243,7 +243,7 @@ def build_persistent_service(
     )
     connection = connect(database)
     events = SqliteEventRepository(connection)
-    identity = DefaultIdentityComposer()
+    identity = DefaultIdentityComposer(profile=settings.profile)
     budget_policy = ReserveBasedBudgetPolicy(
         identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
     )
@@ -322,7 +322,7 @@ def build_grounded_in_memory_service(
     # needs it. Two policy instances would be two sources for the same number;
     # two composers would be two sources for the text the first was costed
     # from.
-    identity = DefaultIdentityComposer()
+    identity = DefaultIdentityComposer(profile=settings.profile)
     budget_policy = ReserveBasedBudgetPolicy(
         identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
     )
@@ -438,7 +438,7 @@ def build_agent(
         model=registry.active.name,
         executor=executor,
         checkpoints=checkpoints,
-        identity=DefaultIdentityComposer(),
+        identity=DefaultIdentityComposer(profile=settings.profile),
         events=events,
         session_exists=session_exists,
     )

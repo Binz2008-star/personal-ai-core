@@ -30,6 +30,10 @@ class Settings:
     boss_context_window: int = DEFAULT_BOSS_CONTEXT_WINDOW
     ollama_host: str = DEFAULT_OLLAMA_HOST
     request_timeout_seconds: int = DEFAULT_REQUEST_TIMEOUT_SECONDS
+    # The owner's profile TEXT, composed into every turn's identity message.
+    # Not read from the environment here: where the file lives is the entry
+    # point's decision (app/cli.py), as the database path is.
+    profile: str = ""
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
