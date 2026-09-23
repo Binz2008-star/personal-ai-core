@@ -236,6 +236,55 @@ def render_memories(memories: Sequence[MemoryEvidence]) -> str:
     )
 
 
+# What the single-item measurement below cannot see. Items in one block are
+# joined by a blank line, and a position with more digits than [1] costs more:
+# it appears twice, in the opening and the closing line. Four characters cover
+# every position below 1000.
+_ITEM_SLACK = "\n\n9999"
+# Sections are joined by a blank line (`ContextBuilder.build`).
+_SECTION_SLACK = "\n\n"
+
+
+class RenderedEvidenceCost:
+    """`core.contracts.RenderedCost`, measured against the real renderers.
+
+    Finding F-4: the assembler charged passage text while this module spent
+    boundary lines and preambles around it. Rather than a table of constants
+    that the next format change would make wrong, each cost is taken by
+    rendering the item for real and estimating the result.
+
+    Measuring one item at a time is safe because the estimate is a sum of
+    per-character costs rounded up once: the whole message costs no more
+    than the sum of its pieces, and every piece of it is charged here -- the
+    item, its separator, extra position digits, and each section's preamble.
+    `test_the_grounding_message_fits_the_budget_it_was_assembled_against`
+    pins that.
+    """
+
+    def __init__(self, estimator: TokenEstimator) -> None:
+        self._estimator = estimator
+
+    def document(self, result: RetrievalResult) -> int:
+        return self._estimator.estimate(
+            render_evidence([result])
+        ) + self._estimator.estimate(_ITEM_SLACK)
+
+    def memory(self, evidence: MemoryEvidence) -> int:
+        return self._estimator.estimate(
+            render_memories([evidence])
+        ) + self._estimator.estimate(_ITEM_SLACK)
+
+    def document_section(self) -> int:
+        return self._estimator.estimate(
+            f"{GROUNDING_PREAMBLE}\n\n"
+        ) + self._estimator.estimate(_SECTION_SLACK)
+
+    def memory_section(self) -> int:
+        return self._estimator.estimate(
+            f"{MEMORY_PREAMBLE}\n\n"
+        ) + self._estimator.estimate(_SECTION_SLACK)
+
+
 class ContextBuilder:
     """Retrieval, budgeting and assembly for a single turn.
 
