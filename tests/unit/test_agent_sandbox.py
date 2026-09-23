@@ -10,6 +10,14 @@ import pytest
 from personal_ai_core.agent.sandbox import SandboxError, Workspace, is_protected
 
 
+def link(path, target):
+    """Windows grants symlink creation only with a privilege CI may lack."""
+    try:
+        path.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"cannot create a symlink here: {exc}")
+
+
 @pytest.fixture
 def workspace(tmp_path):
     root = tmp_path / "ws"
@@ -41,14 +49,14 @@ def test_a_nested_path_resolves_inside(workspace):
 def test_a_symlink_out_of_the_workspace_is_refused(tmp_path, workspace):
     outside = tmp_path / "outside"
     outside.mkdir()
-    (workspace.root / "link").symlink_to(outside)
+    link(workspace.root / "link", outside)
     with pytest.raises(SandboxError, match="symlink"):
         workspace.resolve("link/secret.txt")
 
 
 def test_a_symlink_inside_the_workspace_is_fine(workspace):
     (workspace.root / "real").mkdir()
-    (workspace.root / "alias").symlink_to(workspace.root / "real")
+    link(workspace.root / "alias", workspace.root / "real")
     assert workspace.resolve("alias/x.txt") == workspace.root / "real" / "x.txt"
 
 

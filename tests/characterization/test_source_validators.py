@@ -99,7 +99,10 @@ def test_source_resolver_catches_a_symlink_escape(tmp_path):
     outside.mkdir()
     root = tmp_path / "root"
     root.mkdir()
-    (root / "link").symlink_to(outside)
+    try:
+        (root / "link").symlink_to(outside)
+    except OSError as exc:  # Windows without the symlink privilege
+        pytest.skip(f"cannot create a symlink here: {exc}")
     with pytest.raises(source.PathSecurityError):
         source.PathResolver(root).resolve("link/secret.txt")
 
