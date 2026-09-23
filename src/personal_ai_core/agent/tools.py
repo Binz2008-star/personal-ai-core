@@ -18,11 +18,13 @@ File mutations record a rollback point (recovery.Checkpoints) before they
 change anything. `delete_file` cannot be built without one: the design's
 "CRITICAL: rollback point first" is a constructor argument, not a comment.
 
-Not here, deliberately: anything that sends outside the machine.
+The web tools (web_search, fetch_url) are in web.py; `shell` below runs any
+command, and only with the owner's yes for each one.
 """
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from typing import Any, Mapping
 
@@ -295,6 +297,76 @@ class RunCommand:
                 truncated=truncated,
             )
         return ToolResult(ok=True, output=output, truncated=truncated)
+
+
+# Environment variables whose NAMES say they hold a secret. The shell runs the
+# owner's own tools, so it inherits their environment -- minus these, so a
+# model that runs `env` or `set` does not read a token into its context.
+_SECRET_NAME = re.compile(
+    r"TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE|CREDENTIAL|AUTH|_KEY$|DSN|DATABASE_URL|COOKIE|SESSION",
+    re.IGNORECASE,
+)
+
+
+def shell_environment() -> dict[str, str]:
+    return {name: value for name, value in os.environ.items() if not _SECRET_NAME.search(name)}
+
+
+class Shell:
+    """Any command, through the platform's shell, in the workspace.
+
+    HIGH: the owner is asked for every command and sees it in full. Unlike
+    `run_command` there is no allowlist -- pipes, installs, builds, git
+    commits -- so it is also not undoable: checkpoints see only the file
+    tools' writes, and the description says so to the model.
+    """
+
+    def __init__(self, workspace: Workspace, *, timeout_seconds: int = 300) -> None:
+        self._workspace = workspace
+        self.spec = ToolSpec(
+            name="shell",
+            description=(
+                "Run any command in the system shell (cmd on Windows, sh elsewhere), "
+                "starting in the workspace. The user is asked to allow each command. "
+                "Its effects cannot be undone."
+            ),
+            risk_level=RiskLevel.HIGH,
+            input_schema={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+            timeout_seconds=timeout_seconds,
+            idempotent=False,
+        )
+
+    def run(self, arguments: Mapping[str, Any]) -> ToolResult:
+        command = arguments["command"].strip()
+        if not command:
+            return ToolResult(ok=False, error="no command")
+        try:
+            completed = subprocess.run(
+                command,
+                shell=True,  # noqa: S602 -- the point of this tool; every command is confirmed
+                cwd=self._workspace.root,
+                env=shell_environment(),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=self.spec.timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return ToolResult(ok=False, error=f"timed out after {self.spec.timeout_seconds}s")
+        combined = completed.stdout + (f"\n[stderr]\n{completed.stderr}" if completed.stderr else "")
+        output, truncated = _bounded(combined)
+        if completed.returncode != 0:
+            return ToolResult(
+                ok=False, output=output, error=f"exit code {completed.returncode}", truncated=truncated
+            )
+        return ToolResult(ok=True, output=output or "(no output)", truncated=truncated)
 
 
 def default_tools(workspace: Workspace, checkpoints: Checkpoints | None = None) -> list:

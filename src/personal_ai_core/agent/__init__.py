@@ -6,6 +6,8 @@ Built in stages, each a reviewed pull request:
   2. tools, the executor and the audit trail
   3. the verifier and bounded recovery
   4. the loop: plan -> policy -> execute -> verify -> respond, in `pac --agent`
+  5. reach: the web (search, read a page) and the owner's shell, each asked for
+     where it could send data out or change things beyond undo
 
 Depends on `core` only.
 """
@@ -20,12 +22,17 @@ from .tools import (
     ReadFile,
     RunCommand,
     SearchText,
+    Shell,
     WriteFile,
     default_tools,
 )
+from .web import FetchUrl, WebSearch
 from .verifier import Expectation, Verifier, find_secrets
 
 __all__ = [
+    "FetchUrl",
+    "Shell",
+    "WebSearch",
     "ActionBudget",
     "AuditLog",
     "Checkpoints",

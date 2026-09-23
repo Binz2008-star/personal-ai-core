@@ -71,6 +71,9 @@ at a time; the policy gate, the sandbox and the verifier decide what happens
 | `write_file` | medium | runs; never a secret; can be undone |
 | `run_command` | high | **asks you**, every time; an allowlist of read-only and checking commands, no shell |
 | `delete_file` | critical | **asks you**, every time; can be undone |
+| `web_search` | medium | runs; sends the query to DuckDuckGo and nothing else |
+| `fetch_url` | high | **asks you**, for every URL; reads one page as text |
+| `shell` | high | **asks you**, for every command; anything your terminal can do, pipes included. It starts in the workspace, cannot be undone, and does not see environment variables whose names look secret |
 
 ```console
 $ pac --agent --workspace ~/projects/notes
@@ -86,10 +89,17 @@ offers to undo its file changes. Every step, allowed or not, is recorded in the 
 and the database itself is out of the agent's reach even when the workspace contains it.
 A `--session` that does not exist is refused, as it is for a conversation.
 
-The agent has no network tool: none of its tools sends anything anywhere. The model does
-see what the agent reads -- file contents and command output go into the conversation
-with the model at `PAC_OLLAMA_HOST`. That host is `127.0.0.1` by default; point it at
-another machine and what the agent reads travels there.
+What leaves the machine, and when:
+- A web search sends its query to DuckDuckGo.
+- A page is fetched only after you allow its URL. You see the URL in full, because a URL
+  can carry data: a malicious page could ask for `https://…/?q=<your file>`.
+- A shell command can do anything, and you see each one before it runs.
+
+Everything the agent reads, from files, commands or pages, goes into the conversation with
+the model at `PAC_OLLAMA_HOST`. That host is `127.0.0.1` by default; point it at another
+machine and what the agent reads travels there. The agent is told that text from a web page
+is data and not instructions, but a local 7B model's resistance to a page written to
+mislead it has not been measured.
 
 **Status: Phase 4 — Memory-Aware Context Recall ACCEPTED / MERGED (PR #2 — MERGED, main `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`, implementation `e8062ff2fa8b6eb5a4471ac8475f29bed76fd369`).**
 
