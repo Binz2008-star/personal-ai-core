@@ -1,6 +1,10 @@
 # Engineering Playbook
 
-**Status: Phase 0 — active.**
+**Status: the method is active. Phase status lives in [`PROJECT_STATE.md`](../PROJECT_STATE.md), not here.**
+
+This header used to read "Phase 0 — active" long after Phase 4 was accepted. A status
+line in a method document goes stale without anything checking it, so this one points
+to the file that is checked.
 
 ---
 
@@ -122,8 +126,16 @@ A component is integrated only when all of:
 
 ## 8. Phases
 
+**ARCHITECTURAL DECISION (recorded 2026-09-23, owner-approved): the executed phases are
+authoritative, and the numbering below the plan is not.** The Phase 0 plan and what was
+built diverged from Phase 3 onward. Two documents kept using "Phase 3" and "Phase 4" for
+different scopes. This section records the reordering as a decision, so that a phase number
+has one meaning.
+
+The plan, as written in Phase 0:
+
 ```text
-Phase 0  audit and freeze evidence                  ← current
+Phase 0  audit and freeze evidence
 Phase 1  core + runtime + identity + conversation + memory foundation
 Phase 2  knowledge / RAG
 Phase 3  events + feedback + learning
@@ -132,9 +144,34 @@ Phase 5  controlled training / adapters
 Phase 6  project connectors
 ```
 
-Phase 6 does not begin before the Core is stable. Phase 5 does not begin before memory,
-knowledge, events, feedback, evaluation and golden sets exist — training without them
-injects noise that cannot be measured.
+What was executed. Status here is copied from `PROJECT_STATE.md`, which is authoritative:
+
+| Phase | Executed scope | Status |
+|---|---|---|
+| 0 | audit, evidence freeze, extraction matrix | completed |
+| 1 | core, runtime, conversation slice; identity added last (#39); memory foundation came from Phase 3 | components complete, **not accepted** |
+| 2 | knowledge and context: retrieval, fusion, budgeting | accepted |
+| 3 | memory domain, promotion gate, write path | accepted |
+| 4 | memory-aware context: session-scoped recall, shared budget | accepted |
+| 5 | cross-session memory | **not authorized**, design not started |
+
+The practical difference: memory was built as Phases 3 and 4, before events, feedback
+and learning. The plan's Phases 3 to 6 are therefore **not started**, and they no longer
+carry numbers:
+
+- events + feedback + learning. Events are recorded; feedback and learning have no code.
+- agent + tools + policy + verifier
+- controlled training / adapters
+- project connectors
+
+Each will get a phase number when it is authorised, not before. The reason memory came
+first was not written down when the order changed. This records that the order changed; it
+does not invent a justification.
+
+Two gates survive the renumbering, stated by content because their numbers no longer
+point anywhere: project connectors do not begin before the Core is stable, and training
+does not begin before memory, knowledge, events, feedback, evaluation and golden sets
+exist. Training without those injects noise that cannot be measured.
 
 ## 9. Rollback
 
