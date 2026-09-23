@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: c43f3f96b0b8be397db273745aff42e17cf939f1 (short: c43f3f9 — Merge pull request #52)
-  The accepted PHASE is still Phase 4. PRs #3-#53 are correction, hardening
+Main branch head: 86e3f0b0b42d4cf0ab64ad3745df48252c438b29 (short: 86e3f0b — Merge pull request #54)
+  The accepted PHASE is still Phase 4. PRs #3-#55 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
   Three exceptions are worth naming, because "correction and hardening" no
   longer covers them: PR #39 BUILT Phase 1's last component; PR #44 wired a
@@ -22,11 +22,11 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (c43f3f9): 673 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
+- Current main (86e3f0b): 679 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
   (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard,
    +24 the identity layer -- 19 of them new, the rest from the layering
    check, which is parametrised over src/ and so grew with the package;
-   +14 the Event.payload contract, +11 the F-1 evidence boundary, +14 the F-4 rendered cost, +27 the SQLite backend, of which the
+   +14 the Event.payload contract, +11 the F-1 evidence boundary, +14 the F-4 rendered cost, +6 the F-5 label encoding, +27 the SQLite backend, of which the
    conformance cases run TWICE because they are parametrised over both the
    in-memory and the SQLite implementation.
    The long-standing caveat -- 541 the last two-platform figure, 561 Linux
@@ -36,7 +36,7 @@ Test verification (remote):
    it on a laptop)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at c43f3f9 (Phase 4 merged, plus PRs #3-#53)
+Synchronization: origin/main is at 86e3f0b (Phase 4 merged, plus PRs #3-#55)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -328,6 +328,15 @@ claim written in one place with nothing that notices it going stale.
   #53 111fad1  docs(grounding): state what the boundary token gives and
                withdraw "cannot be forged" (F-3). Comments and docstrings
                only; the code is AST-identical
+  #54 86e3f0b  fix(grounding): percent-encode label fields (F-5), now
+               demonstrated: a newline in a source URI had detached the range
+               and put URI text where passage text goes. Cc, Cf, Zl, Zp and
+               "<" ">" are encoded, all of which RFC 3986 excludes from a URI,
+               so well-formed URIs, Arabic paths included, render unchanged
+               and unquote() returns the original
+  #55 fb023f9  docs: record #50-#53. The ledger had fallen four merges behind,
+               #50 never having been recorded, and the guard failed on main
+               at c43f3f9 until this merged. The guard caught the miscount
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -706,7 +715,7 @@ F-4  #49 PUSHED UNBUDGETED SCAFFOLDING PAST THE OVERHEAD RESERVE CLOSED BY #52
      charged per section by the assembler, not left in the overhead reserve.
      tests/integration/test_rendered_budget.py pins it through the factory.
 
-F-5  SOURCE URI IS RENDERED UNESCAPED INSIDE THE OPENING LINE              OPEN
+F-5  SOURCE URI IS RENDERED UNESCAPED INSIDE THE OPENING LINE    CLOSED BY #54
      label = f"[{n}] {source} (characters a-b)", with source = provenance.source_uri,
      which has no validation. A URI containing "\n" or ">>>" would end the opening
      line early and put lines outside any fence. The URI is part of the hash, so
@@ -714,6 +723,8 @@ F-5  SOURCE URI IS RENDERED UNESCAPED INSIDE THE OPENING LINE              OPEN
      #49 left unfenced. This comes from reading the code; it has not been
      demonstrated. Direction: reject or escape control characters and ">>>" in
      the label, and add a test.
+     CLOSED by #54, and demonstrated first. The fix encodes rather than rejects,
+     so a citation still resolves: tests/unit/test_label_fields.py.
 
 How the two relate: F-2 decides WHEN F-1 has real consequence -- the moment retrieval
 is wired into a production entry point. F-1 should therefore be closed before that
@@ -721,11 +732,11 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (written 2026-09-23, main at 85dea05)
+NEXT SESSION HANDOFF (updated 2026-09-23, main at 86e3f0b)
 ==========================================================
 
-State: #48, #49 and #50 are merged, and no PR is open. 659 passed / 14 skipped
-on Linux and Windows; ruff and pyright are clean.
+State: everything through #55 is merged, and this records PR is the only one
+open. 679 passed / 14 skipped on Linux and Windows; ruff and pyright are clean.
 
 Owner's standing constraints:
   - DO NOT start F-2 (retrieval -> `pac`) until the owner says so. Fix F-4 first.
@@ -736,19 +747,14 @@ Owner's standing constraints:
   - ADR-010..013 and Phase 1 are PROPOSED / NOT ACCEPTED; accepting them is the
     owner's call.
 
-Recommended order (each one a small PR with a single purpose):
-  1. F-4  budget the #49 scaffolding -- OPEN as PR #52 (behaviour change,
-          owner review before merge). 250-token overrun measured, now fits.
-  2. F-3  correct the "unforgeable" wording -- OPEN as PR #53 (comments and
-          docstrings only; AST-identical code)
-  3. F-5  percent-encode label fields -- OPEN as PR #54 (behaviour change,
-          owner review). Now DEMONSTRATED, not only read from the code.
-     #51-#54 were trial-merged together onto 85dea05: clean, 679 passed.
-     After they merge, record #51-#54 in the ledger (lag limit is 3).
-  4. docs alignment: ARCHITECTURE.md is stale (identity "not built", persistence
+Done, owner-approved and merged: F-3 (#53), F-4 (#52), F-5 (#54). F-1's
+model-side question is still open and belongs to ADR-013's injection case.
+
+Recommended order from here (each one a small PR with a single purpose):
+  1. docs alignment: ARCHITECTURE.md is stale (identity "not built", persistence
           "in-memory only", no app/); ENGINEERING_PLAYBOOK section 8 phase
           numbering contradicts the executed phases -- proposed, not yet approved
-  5. only then, with the owner's go: F-2
+  2. only then, with the owner's go: F-2 (its prerequisite, F-4, is merged)
 
 Owner-only actions: make `suite-windows` a required check on main (no agent tool
 can change branch protection); accept the ADRs and Phase 1; build the ADR-013
