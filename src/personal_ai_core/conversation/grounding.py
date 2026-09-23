@@ -20,6 +20,7 @@ sources it never received.
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -101,6 +102,31 @@ def boundary_token(items: Sequence[str]) -> str:
     return digest.hexdigest()[:BOUNDARY_TOKEN_LENGTH]
 
 
+# Finding F-5. A label field is rendered inside the opening line, and the
+# fields come from outside: `source_uri` is whatever the ingesting caller
+# named the document. A newline or ">>>" in it ended the opening line early,
+# detached the character range, and put URI text where passage text goes.
+#
+# Percent-encoding, not stripping: a citation must still resolve back to its
+# source, and `urllib.parse.unquote` reverses this exactly. Control and
+# invisible format characters (bidi overrides included), line and paragraph
+# separators, and "<" ">" are encoded. RFC 3986 excludes every one of them
+# from a URI, so a well-formed URI renders unchanged. "%" itself is left
+# alone for the same reason: in a well-formed URI it already introduces an
+# escape.
+_ENCODED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+
+
+def _label_field(value: str) -> str:
+    return "".join(
+        "".join(f"%{byte:02X}" for byte in character.encode("utf-8"))
+        if character in "<>"
+        or unicodedata.category(character) in _ENCODED_CATEGORIES
+        else character
+        for character in value
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Grounding:
     """What grounding produced for one turn.
@@ -151,7 +177,7 @@ def render_evidence(results: Sequence[RetrievalResult]) -> str:
     labelled = []
     for position, result in enumerate(results, start=1):
         provenance = result.provenance
-        source = provenance.source_uri or provenance.document_id
+        source = _label_field(provenance.source_uri or provenance.document_id)
         label = f"[{position}] {source} (characters {provenance.start}-{provenance.end})"
         labelled.append((position, label, result.chunk.text))
 
@@ -207,7 +233,7 @@ def render_memories(memories: Sequence[MemoryEvidence]) -> str:
         record = evidence.record
         promoted_at = record.provenance.promoted_at.isoformat()
         label = (
-            f"[{position}] recorded by {record.provenance.promoted_by} "
+            f"[{position}] recorded by {_label_field(record.provenance.promoted_by)} "
             f"at {promoted_at}"
         )
         labelled.append((position, label, record.content))
