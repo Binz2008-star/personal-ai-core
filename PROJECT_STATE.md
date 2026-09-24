@@ -943,7 +943,9 @@ Do NOT commit.
 Do NOT push.
 
 Gaps verified:
-- Boss model test gap: no mechanical CI pin beyond code literal check (tracked)
+- Boss model test gap: no mechanical CI pin beyond code literal check: FIXED --
+  tests/unit/test_config.py#test_boss_model_mechanical_pin pins DEFAULT_BOSS_MODEL
+  to "huihui_ai/qwen2.5-abliterate:7b" exactly (ADR-002).
 - Test-count discrepancy on Windows (path-separator bug in skip accounting): FIXED -- the two
   substring matchers in tests/unit/test_expected_skips.py now normalize the separator, and four
   tests drive them with both platforms' line shapes so Linux-only CI holds the Windows behaviour.
