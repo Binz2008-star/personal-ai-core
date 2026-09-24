@@ -4,8 +4,8 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: 8fe4bc9fd50f021e364ea8da72acc062e02bda97 (short: 8fe4bc9 — Merge pull request #24)
-  The accepted PHASE is still Phase 4. PRs #3-#25 are correction, hardening
+Main branch head: 7aa7b18fa3f4316fea4ab457ce6805b3e0097e12 (short: 7aa7b18 — Merge pull request #27)
+  The accepted PHASE is still Phase 4. PRs #3-#27 are correction, hardening
   and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
 Phase 2 accepted commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511
 Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
@@ -15,10 +15,10 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (8fe4bc9): 541 passed / 14 skipped (Linux CI and Windows)
+- Current main (7aa7b18): 541 passed / 14 skipped (Linux CI and Windows)
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at 8fe4bc9 (Phase 4 merged, plus PRs #3-#25)
+Synchronization: origin/main is at 7aa7b18 (Phase 4 merged, plus PRs #3-#27)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -35,7 +35,7 @@ Phase 1 — PARTIAL / NOT COMPLETE
           until PR #23; the memory foundation was built in Phase 3 and the
           reconciliation had gone on saying otherwise. Phase 1 is therefore
           still NOT complete, and must not be summarised as completed.
-          Verified at 8fe4bc9: src/personal_ai_core/identity/ does not exist,
+          Verified at 7aa7b18: src/personal_ai_core/identity/ does not exist,
           and ResponsePolicy / BehavioralContract have 0 occurrences in src/.
           Contract design: ADR-011 — PROPOSED, not accepted. It fixes the shape
           of the contract and authorises no implementation, so Phase 1 is not
@@ -154,6 +154,10 @@ claim written in one place with nothing that notices it going stale.
   #25 1b42368  docs: PROJECT_STATE current; Phase 1 read COMPLETED in the
                gates list and NOT COMPLETE in the summary -- Phase 0 had no
                row and its description had drifted onto the Phase 1 line
+  #26 761accc  docs: record #24 and #25, and stop asserting merge state
+  #27 7aa7b18  docs(adr): ADR-011 rewritten clean; Q1-Q4 design questions
+               resolved; PHASE_1_RECONCILIATION superseded. Still PROPOSED,
+               authorises no implementation
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -347,9 +351,9 @@ Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
 Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 → bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
 Phase 5: NOT AUTHORIZED / DESIGN NOT STARTED — UNAUTHORIZED / FUTURE DESIGN
-Post-Phase-4: PRs #3-#25, merged, no new phase (head 8fe4bc9) — see POST-PHASE-4 MERGES
+Post-Phase-4: PRs #3-#27, merged, no new phase (head 7aa7b18) — see POST-PHASE-4 MERGES
 Persistence: ADR-010 PROPOSED, no option selected (PR #15)
-Identity: ADR-011 PROPOSED, not accepted — contract design only, nothing built (PR #24)
+Identity: ADR-011 PROPOSED, not accepted — contract design only, nothing built (PRs #24, #27)
 
 BOSS MODEL
 ==========
