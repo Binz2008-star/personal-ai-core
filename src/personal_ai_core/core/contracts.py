@@ -183,10 +183,12 @@ class MemoryRetriever(Protocol):
     contract: recall needs ranking and a query, which a store has no reason
     to know about, and a store needs writes, which recall must never reach.
 
-    An implementation must scope by `MemoryQuery.session_id` as a hard
-    filter, treat `language` as a ranking signal only, and be
-    deterministic -- the same query against the same records produces the
-    same order, or the same turn stops being reproducible.
+    An implementation must scope by the query's `scope` as a hard filter --
+    `MemoryScope.SESSION` by `session_id`, `MemoryScope.USER` by the
+    ownership the reader resolves from it (ADR-014/ADR-015) -- treat
+    `language` as a ranking signal only, and be deterministic: the same
+    query against the same records produces the same order, or the same
+    turn stops being reproducible.
 
     Failure is raised as `MemoryRetrievalFailure`, which carries only a
     `MemoryRetrievalError` classification. Recall is enrichment, so the

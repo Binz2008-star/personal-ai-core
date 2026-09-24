@@ -34,7 +34,7 @@ from ..context import (
     ScriptAwareTokenEstimator,
 )
 from ..core.config import Settings
-from ..core.contracts import EventRepository
+from ..core.contracts import EventRepository, SessionRepository
 from ..core.memory import MemoryReader
 from ..identity import DefaultIdentityComposer
 from ..memory import SimpleMemoryRetriever
@@ -56,6 +56,7 @@ from ..persistence.in_memory import (
 )
 from ..persistence.sqlite import (
     SqliteEventRepository,
+    SqliteMemoryRepository,
     SqliteMessageRepository,
     SqliteSessionRepository,
     SqliteUserRepository,
@@ -129,6 +130,11 @@ class PersistentSlice:
     # The indexes behind it live in process memory and are gone at exit --
     # see `build_persistent_service`.
     ingestion: IngestionService | None = None
+    # Present only when built with `grounded=True`: the durable memory store
+    # the recall reader is composed over. The write side is reachable only by
+    # a caller that also builds an ExperiencePipeline -- the conversation
+    # path never sees it.
+    memories: SqliteMemoryRepository | None = None
 
     def close(self) -> None:
         self.connection.close()
@@ -201,6 +207,22 @@ def _knowledge_stack(
     )
 
 
+def _session_owner_for(sessions: SessionRepository) -> Callable[[str], str | None]:
+    """`session_id -> user_id`, or None when the session is unknown.
+
+    Ownership is derived, never stored (ADR-014): user-scoped recall resolves
+    each session to its owner through the session store the composition root
+    already holds. The same resolver serves both the anchor session and the
+    record's own session, so no caller ever names a user directly.
+    """
+
+    def resolve(session_id: str) -> str | None:
+        session = sessions.get(session_id)
+        return session.user_id if session is not None else None
+
+    return resolve
+
+
 def build_persistent_service(
     settings: Settings | None = None,
     *,
@@ -234,9 +256,13 @@ def build_persistent_service(
     it. The durable citation is the one in the prompt -- source URI and
     character range -- which re-ingesting the same file reproduces.
 
-    Memory recall is not wired here. Recall reads promoted memories, and
-    nothing on this path promotes any; wiring a reader to an empty store would
-    report `memory_enabled` for a capability that cannot return anything.
+    With `grounded=True`, memory recall is composed over the durable store:
+    the reader resolves ownership from the session store (ADR-014) and the
+    same deterministic retriever the in-memory slice uses ranks what it
+    admits (ADR-015). Memories become durable when a caller runs an
+    `ExperiencePipeline` over the same database; recall on this path reads
+    whatever earlier runs promoted. Turns recall session-scoped by default;
+    user scope is explicit on the query.
     """
     settings = settings or Settings.from_env()
     registry = ModelRegistry.from_settings(settings)
@@ -247,18 +273,37 @@ def build_persistent_service(
     )
     connection = connect(database)
     events = SqliteEventRepository(connection)
+    sessions = SqliteSessionRepository(connection)
+    # The durable memory store behind the composition. Recall reads through
+    # a reader; the write side stays with ExperiencePipeline and the caller
+    # that builds one over the same database.
+    memories = SqliteMemoryRepository(connection)
     identity = DefaultIdentityComposer(profile=settings.profile)
     budget_policy = ReserveBasedBudgetPolicy(
         identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
     )
+    memory_retriever = None
+    if grounded:
+        # Phase 5 persistent composition: SQLite store -> reader (ownership
+        # resolved from the session store, ADR-014) -> deterministic retriever
+        # (ADR-015) -> the context assembler inside the stack.
+        memory_retriever = SimpleMemoryRetriever(
+            reader=MemoryReader(
+                source=memories, session_owner=_session_owner_for(sessions)
+            )
+        )
     stack = (
-        _knowledge_stack(budget_policy, evidence_limit=evidence_limit)
+        _knowledge_stack(
+            budget_policy,
+            evidence_limit=evidence_limit,
+            memory_retriever=memory_retriever,
+        )
         if grounded
         else None
     )
     service = ConversationService(
         users=SqliteUserRepository(connection),
-        sessions=SqliteSessionRepository(connection),
+        sessions=sessions,
         messages=SqliteMessageRepository(connection),
         events=events,
         provider=provider,
@@ -272,6 +317,7 @@ def build_persistent_service(
         events=events,
         connection=connection,
         ingestion=stack.ingestion if stack is not None else None,
+        memories=memories if grounded else None,
     )
 
 

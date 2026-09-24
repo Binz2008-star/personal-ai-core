@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .domain import new_id, utcnow
 
@@ -71,6 +71,23 @@ class PromotionDecision(str, Enum):
     PROMOTED = "promoted"
     REJECTED = "rejected"
     HELD = "held"
+
+
+class MemoryScope(str, Enum):
+    """The eligibility scope of one recall query.
+
+    `SESSION` is the Phase 4 default and preserves it: a turn recalls only
+    that session's memories, exactly as ADR-009 fixed it. `USER` is the
+    Phase 5 widening (ADR-014/ADR-015): a turn recalls the memories owned by
+    the user who owns the query's session, across that user's sessions.
+
+    The scope is explicit on the query, never inferred (ADR-015). A caller
+    that does not name one gets `SESSION`, so existing behavior is the
+    default and widening is an opt-in.
+    """
+
+    SESSION = "session"
+    USER = "user"
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,10 +254,19 @@ class MemoryRetrievalError(str, Enum):
 class MemoryQuery:
     """One turn's recall request.
 
-    `session_id` is a hard filter, applied at the reader boundary so no
-    caller can widen it. `language` is a ranking signal only: dropping a
-    memory because the current turn is in another language would discard a
-    preference the user actually stated.
+    `scope` says whose memories are eligible and is explicit (ADR-015):
+
+    - `MemoryScope.SESSION` (the default): `session_id` is a hard filter,
+      applied at the reader boundary so no caller can widen it.
+    - `MemoryScope.USER`: the reader resolves `session_id` to its owner
+      through the injected session->user resolver and admits every active
+      memory that resolves to that same owner, across the owner's sessions.
+      The anchor `session_id` is still required: the user is derived from it,
+      never named by the caller (ADR-014).
+
+    `language` is a ranking signal only: dropping a memory because the current
+    turn is in another language would discard a preference the user actually
+    stated.
 
     Validation here covers only what this type can know. A blank `text` or
     an unbounded `limit` are the retriever's constraints, not the query's,
@@ -251,6 +277,7 @@ class MemoryQuery:
     text: str
     language: str
     limit: int = 5
+    scope: MemoryScope = MemoryScope.SESSION
 
     def __post_init__(self) -> None:
         if not self.session_id:
@@ -302,11 +329,20 @@ class MemoryReader:
     deliberately constructed as one.
 
     `list_active_for_session` folds the session filter into the read
-    contract so a caller cannot forget it.
+    contract so a caller cannot forget it. `list_active_for_session_owner`
+    folds the user filter in the same way: the owner is derived from the
+    session by the injected `session_owner` resolver, never named by the
+    caller, so one caller cannot widen a read into another user (ADR-014).
     """
 
-    def __init__(self, source: _ReadableStore) -> None:
+    def __init__(
+        self,
+        source: _ReadableStore,
+        *,
+        session_owner: Callable[[str], str | None] | None = None,
+    ) -> None:
         self._source = source
+        self._session_owner = session_owner
 
     def read(self, memory_id: str) -> MemoryRecord | None:
         return self._source.read(memory_id)
@@ -316,4 +352,31 @@ class MemoryReader:
             record
             for record in self._source.list_active()
             if record.session_id == session_id
+        )
+
+    def list_active_for_session_owner(self, session_id: str) -> Sequence[MemoryRecord]:
+        """Active memories owned by the user who owns `session_id`.
+
+        The owner is resolved through the injected `session_owner` resolver
+        (`session_id -> user_id`), then every active record whose own session
+        resolves to that same user is eligible. Records whose sessions
+        resolve to nobody are never attributed, and an anchor session that
+        resolves to nobody recalls nothing: both are isolation, not errors.
+
+        Raises `ValueError` when the reader was built without a resolver --
+        user scope cannot be answered by a reader that cannot resolve users.
+        """
+        if self._session_owner is None:
+            raise ValueError(
+                "user-scoped recall requires a session owner resolver; "
+                "build MemoryReader with session_owner=<session -> user>"
+            )
+        owner = self._session_owner(session_id)
+        if owner is None:
+            return ()
+        resolve = self._session_owner
+        return tuple(
+            record
+            for record in self._source.list_active()
+            if resolve(record.session_id) == owner
         )

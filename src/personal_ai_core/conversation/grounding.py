@@ -43,6 +43,7 @@ from ..core.memory import (
     MemoryEvidence,
     MemoryQuery,
     MemoryRetrievalError,
+    MemoryScope,
 )
 
 GROUNDING_PREAMBLE = (
@@ -452,6 +453,10 @@ class ContextBuilder:
                 text=query,
                 language=language,
                 limit=self._limit,
+                # Turns recall session-scoped; user scope is an explicit
+                # opt-in on the query (ADR-015), not something the
+                # conversation path infers.
+                scope=MemoryScope.SESSION,
             )
         except ValueError:
             # The query this layer assembled is not one the contract accepts.
