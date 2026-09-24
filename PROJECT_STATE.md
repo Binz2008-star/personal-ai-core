@@ -3,21 +3,24 @@ PROJECT STATE
 
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
-Accepted phase: Phase 4 (ACCEPTED / MERGED — PR #2, implementation e8062ff2fa8b6eb5a4471ac8475f29bed76fd369, merge bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Main branch head: 74a2ae28b8e031f84cd93e3aa12cbfb7735fa269 (short: 74a2ae2 — Merge pull request #58)
-  The accepted PHASE is still Phase 4. PRs #3-#58 are correction, hardening
-  and design work on top of it, not a new phase: see POST-PHASE-4 MERGES.
-  Three exceptions are worth naming, because "correction and hardening" no
-  longer covers them: PR #39 BUILT Phase 1's last component; PR #44 wired a
-  durable store; PR #45 added an entry point, so the system can be RUN rather
-  than only imported. PR #58 then made retrieval reachable from that entry
-  point. None of them accepts a phase or starts one.
+Accepted phase: Phase 5 (ACCEPTED / MERGED — PR #69, implementation 193da3371c942e74d91969169dc34631f345ba64, merge e50c98d7b8a3ad62b60251303f51c7cb6b5714a4)
+Main branch head: e50c98d7b8a3ad62b60251303f51c7cb6b5714a4 (short: e50c98d — Merge pull request #69)
+  Phase 5 is the accepted phase. Everything between it and Phase 4 -- PRs
+  #3-#59 and #64-#67 -- was correction, hardening and design work on top of
+  Phase 4, not a new phase: see POST-PHASE-4 MERGES. A few of those exceptions
+  are worth naming, because "correction and hardening" no longer covers them:
+  PR #39 BUILT Phase 1's last component; PR #44 wired a durable store; PR #45
+  added an entry point, so the system can be RUN rather than only imported;
+  PR #58 made retrieval reachable from that entry point. Phase 5 (ADR-014,
+  ADR-015) is the first new accepted phase since Phase 4.
   (Phrased so the line does not begin with a "#<number> " token: the ledger
   parser reads any such line as a row, and the first draft of this paragraph
   was picked up as a row whose SHA was the word "is". The guard caught it.)
 Phase 2 accepted commit: 0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511
 Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
 Phase 4 implementation: e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 (PR #2, branch claude/phase-4-memory-aware-context)
+Phase 5 implementation: 193da3371c942e74d91969169dc34631f345ba64 (PR #69, branch claude/phase5-memory-scope)
+Phase 5 accepted merge: e50c98d7b8a3ad62b60251303f51c7cb6b5714a4 (PR #69)
 
 Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
@@ -35,12 +38,12 @@ Test verification (remote):
    windows-latest. The figure is no longer a single-platform claim, and the
    gate that confirms it is in CI rather than in someone remembering to run
    it on a laptop)
-   Phase 5 (pending PR, branch claude/phase5-memory-scope): 1093 passed / 14
-   skipped locally (+34 items, 0 failures) at commit 193da33; ruff 0 errors;
-   pyright 0 errors
+   Phase 5 (PR #69, merged e50c98d): 1093 passed / 14 skipped, CONFIRMED ON
+   BOTH PLATFORMS (+34 items, 0 failures); ruff 0 errors; pyright 0 errors
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at 74a2ae2 (Phase 4 merged, plus PRs #3-#58)
+Synchronization: origin/main is at e50c98d (Phase 4 merged in PR #2, the
+  post-Phase-4 record in PRs #3-#59 and #64-#67, and Phase 5 via PR #69)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -105,9 +108,10 @@ Phase 4 — ACCEPTED / MERGED (PR #2)
          catch them; an independent review did. Recorded so the acceptance gate
          is not read as stronger than it proved to be.
 
-Phase 5 — IMPLEMENTED / NOT ACCEPTED (commit 193da33, branch claude/phase5-memory-scope, PR pending)
-  NOT ACCEPTED — implemented and awaiting the owner's acceptance; acceptance is
-  not claimed here. ADRs 014 and 015 record the contract.
+Phase 5 — ACCEPTED (PR #69 — implementation 193da33, merge e50c98d)
+  Accepted by the owner on 2026-09-24, through the same gate every phase
+  passes: design (ADRs 014 and 015) -> authorization -> implementation ->
+  tests -> invariant review -> git verification -> owner acceptance.
   Ownership is DERIVED, not stored: MemoryRecord.session_id maps to
   Session.user_id through an injected `session_owner` resolver (ADR-014,
   Option A) -- no MemoryRecord.user_id, no schema change. Recall scope is
@@ -369,6 +373,9 @@ claim written in one place with nothing that notices it going stale.
   #67 36bfa47  feat(agent): web search, reading pages, and the owner's shell.
                Its ledger-recording docs commit rode inside this PR, so this
                row was written after its own merge -- the lag budget, not drift
+  #69 e50c98d  feat(memory): Phase 5 ownership and scope for cross-session
+               recall (ADR-014, ADR-015). Phase 5 is ACCEPTED; a test-only
+               substrate-conformance flake found by suite-windows rode in
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -566,8 +573,8 @@ Phase 1: PARTIAL / NOT COMPLETE — identity unbuilt; see PHASE_1_RECONCILIATION
 Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
 Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 → bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Phase 5: IMPLEMENTED / NOT ACCEPTED (commit 193da33, branch claude/phase5-memory-scope — PR pending; acceptance is the owner's)
-Post-Phase-4: merged, no new phase — see POST-PHASE-4 MERGES for the
+Phase 5: ACCEPTED / MERGED (PR #69 — 193da3371c942e74d91969169dc34631f345ba64 → e50c98d7b8a3ad62b60251303f51c7cb6b5714a4)
+Post-Phase-4: merged, no new phase until Phase 5 (PR #69) — see POST-PHASE-4 MERGES for the
   row-by-row record. The range and the head are deliberately not repeated
   here: they were, as "#3-#28 (head 5136e84)", and went four merges stale
   because nothing checks a summary line. A phase gate is a durable fact;
@@ -792,7 +799,7 @@ Owner's standing constraints:
     owner's call.
 
 Done, owner-approved and merged: F-3 (#53), F-4 (#52), F-5 (#54), the docs
-alignment (#57), and F-2 (#58).
+alignment (#57), F-2 (#58), and Phase 5 (#69).
 
 What is next is not an agent's call to start. These are candidates, not a queue:
   - ADR-013's harness, where a live model runs. Its injection case is now
