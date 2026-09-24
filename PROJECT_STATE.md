@@ -140,6 +140,16 @@ PERSISTENCE — ADR PROPOSED; THE RECOMMENDED OPTION IS BUILT AND WIRED
   knowledge left in memory -- recording why an append-only log remains
   defensible. The ADR is still PROPOSED: building an option is not accepting
   the document, and this file will not read one as the other.
+PERSISTENCE — PRODUCTION BACKEND AUTHORIZED (ADR-016, PHASE 6)
+  ADR-016 (docs/ADR/ADR-016-production-persistence.md) records the owner's
+  2026-09-24 decision: the deployment constraint changed (Neon endpoint
+  provided via DATABASE_URL; NEON_API_KEY set; Neon tooling configured), so
+  Option C (PostgreSQL/Neon) is selected for the stores that cannot be
+  rebuilt -- events, messages, sessions, users, memory records. Knowledge
+  stays out (derived, rebuilt by re-ingestion; pgvector and the production
+  embedding adapter remain blocked). A PostgreSQL driver, the project's first
+  new dependency, and a migrations framework are authorized with the backend.
+  SQLite stays the default; the server backend is an opt-in composition.
   Prerequisite: CLOSED by PR #41. Event.payload now has a serialisation
   contract, checked at construction. The second, smaller one is still open:
   `add` and `append` return None, so a caller cannot distinguish a completed
@@ -530,8 +540,9 @@ CURRENT LIMITATIONS (ACCEPTED)
 - Memory retrieval is enrichment/degradation, not a write path
 - Rendering overhead: evidence is now charged at its rendered cost (#52). Only the
   provider's chat-template tokens remain an estimate inside DEFAULT_OVERHEAD
-- Persistence is one local SQLite file (#42, #44); there is no server database and no
-  migrations framework. Knowledge is not persisted: `pac --documents` re-reads the
+- Persistence is one local SQLite file (#42, #44); the server backend
+  (Neon/PostgreSQL) and a migrations framework are AUTHORIZED (ADR-016,
+  Phase 6) and under construction. Knowledge is not persisted: `pac --documents` re-reads the
   corpus on every run (#58)
 - Cross-session conflict handling: the write side passes the global active
   intent set to the promotion gate (memory/pipeline.py); the read side bounds
@@ -579,7 +590,9 @@ Post-Phase-4: merged, no new phase until Phase 5 (PR #69) — see POST-PHASE-4 M
   here: they were, as "#3-#28 (head 5136e84)", and went four merges stale
   because nothing checks a summary line. A phase gate is a durable fact;
   a head is not.
-Persistence: ADR-010 PROPOSED, no option selected (PR #15)
+Persistence: ADR-010 PROPOSED (#15); ADR-016 ACCEPTED (Phase 6) — server
+  backend (Neon/PostgreSQL) authorized for the non-rebuildable stores; SQLite
+  remains the default
 Identity: BUILT (PR #39). ADR-011 and ADR-012 remain PROPOSED, not accepted
   Prerequisite A: DONE — ContextAllocation carries identity. No longer funded
     at zero: the factory measures the composed text with the same estimator
@@ -620,10 +633,10 @@ BLOCKED WORK
 
 Explicitly recorded as BLOCKED / NOT AUTHORIZED:
 
-- Neon changes
-- pgvector changes
-- database migrations
-- production memory persistence (Postgres/Neon adapter)
+- Neon changes beyond the Phase 6 backend authorized in ADR-016 (e.g., new
+  projects, branches, or regions)
+- pgvector changes (no embeddings infrastructure in Phase 6; R5 stands)
+- database migrations beyond the Phase 6 schema/migration runner (ADR-016)
 - production embedding adapter
 - BM25/stemming redesign
 - Boss model replacement
