@@ -371,6 +371,15 @@ def test_the_two_substrates_agree_on_user_scope(db):
     sqlite_memories = SqliteMemoryRepository(db)
     sqlite_sessions = SqliteSessionRepository(db)
 
+    # One set of logical records, written to both substrates. Constructing a
+    # fresh _record per store would stamp each with its own utcnow(), and the
+    # retriever's recency tie-break would then legitimately order the two
+    # stores differently whenever construction straddles a clock tick -- the
+    # nondeterminism this conformance test exists to catch (found by
+    # suite-windows, not by the local run).
+    mine_a = _record(memory_id="m1", session_id="s1", content="prefers Arabic")
+    mine_b = _record(memory_id="m2", session_id="s2", content="prefers concise")
+    theirs = _record(memory_id="m3", session_id="s3", content="prefers Haskell")
     for memories, sessions in (
         (in_mem_memories, in_mem_sessions),
         (sqlite_memories, sqlite_sessions),
@@ -378,9 +387,8 @@ def test_the_two_substrates_agree_on_user_scope(db):
         sessions.add(Session(user_id="u1", id="s1"))
         sessions.add(Session(user_id="u1", id="s2"))
         sessions.add(Session(user_id="u2", id="s3"))
-        memories.write(_record(memory_id="m1", session_id="s1", content="prefers Arabic"))
-        memories.write(_record(memory_id="m2", session_id="s2", content="prefers concise"))
-        memories.write(_record(memory_id="m3", session_id="s3", content="prefers Haskell"))
+        for record in (mine_a, mine_b, theirs):
+            memories.write(record)
 
     def recall(memories, sessions):
         retriever = SimpleMemoryRetriever(
