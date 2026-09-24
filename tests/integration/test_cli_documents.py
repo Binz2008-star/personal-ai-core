@@ -228,10 +228,12 @@ def test_the_evidence_pac_sends_fits_the_budget_it_recorded(tmp_path):
             encoding="utf-8",
         )
     # A window small enough that the budget binds. At the default window
-    # everything fits, and "fits" would prove nothing.
+    # everything fits, and "fits" would prove nothing. Re-tuned from 2000 on
+    # 2026-09-25: the estimator calibration raised the per-character cost, and
+    # at 2000 no passage fit at all.
     code, output, transport = run(
         ["--database", str(database), "--documents", str(folder)],
-        env={"PAC_BOSS_CONTEXT_WINDOW": "2000"},
+        env={"PAC_BOSS_CONTEXT_WINDOW": "2370"},
     )
     assert code == 0
 

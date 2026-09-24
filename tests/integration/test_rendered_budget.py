@@ -8,6 +8,15 @@ Measured before the fix, with a 2000-token window: the evidence budget was
 398 tokens and the evidence message the model received estimated 650. Every
 passage had been admitted on its bare text, and the boundary lines and the
 preamble around them were paid for by nobody.
+
+The window below was re-tuned on 2026-09-25, when the estimator calibration
+(cost per character raised, aggregate estimates ~1.9x) went in. At 2000
+tokens the turn now admits no passage at all -- the identity and history
+charges stand at 500 tokens, the evidence budget falls to 220, and the
+preamble section alone costs 271 -- so there is no message left to audit.
+At the re-tuned window the same budget still binds: measured under the new
+calibration, the evidence budget is 470 tokens and the charged, rendered
+evidence is 437, with four of five passages dropped.
 """
 from __future__ import annotations
 
@@ -20,7 +29,11 @@ from personal_ai_core.core.knowledge import Document
 from .test_grounded_conversation import Recorder, evidence_message
 
 # Small enough that the budget binds: some passages must be left out.
-WINDOW = 2000
+# Re-tuned from 2000 on 2026-09-25: the estimator calibration raised the
+# per-character cost, so at 2000 nothing fit and there was no message to
+# test. 2250 is the smallest window where the budget still binds (four of
+# five passages dropped) while one passage and its rendering are admitted.
+WINDOW = 2250
 
 
 def grounded_turn():
