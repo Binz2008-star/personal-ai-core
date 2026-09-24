@@ -35,6 +35,9 @@ Test verification (remote):
    windows-latest. The figure is no longer a single-platform claim, and the
    gate that confirms it is in CI rather than in someone remembering to run
    it on a laptop)
+   Phase 5 (pending PR, branch claude/phase5-memory-scope): 1093 passed / 14
+   skipped locally (+34 items, 0 failures) at commit 193da33; ruff 0 errors;
+   pyright 0 errors
 - ruff: 0 errors  |  pyright: 0 errors
 
 Synchronization: origin/main is at 74a2ae2 (Phase 4 merged, plus PRs #3-#58)
@@ -102,25 +105,30 @@ Phase 4 — ACCEPTED / MERGED (PR #2)
          catch them; an independent review did. Recorded so the acceptance gate
          is not read as stronger than it proved to be.
 
-Phase 5 — NOT AUTHORIZED / DESIGN NOT STARTED
-  Note: UNAUTHORIZED / FUTURE DESIGN — no contract, no implementation, no cross-session recall approval
-  Not gated by persistence. ADR-010 (PROPOSED, PR #15) records that
-         cross-session memory semantics and durable persistence are separate
-         concerns.
+Phase 5 — IMPLEMENTED / NOT ACCEPTED (commit 193da33, branch claude/phase5-memory-scope, PR pending)
+  NOT ACCEPTED — implemented and awaiting the owner's acceptance; acceptance is
+  not claimed here. ADRs 014 and 015 record the contract.
+  Ownership is DERIVED, not stored: MemoryRecord.session_id maps to
+  Session.user_id through an injected `session_owner` resolver (ADR-014,
+  Option A) -- no MemoryRecord.user_id, no schema change. Recall scope is
+  carried by the query: MemoryScope.SESSION remains the default (the ADR-009
+  shape), MemoryScope.USER is opt-in (ADR-015). The reader holds eligibility
+  and isolation; the retriever only dispatches and ranks.
 
-         Cross-session memory SEMANTICS can be designed and contract-validated
-         against the existing in-memory repositories. Recall in Phase 4 REMAINS
-         SESSION-SCOPED (ADR-009): no cross-session recall implementation
-         exists and none is authorized. What scopes recall today is the session
-         filter in MemoryReader, not the absence of durability -- which is a
-         statement about where the constraint lives, not about a capability
-         being available.
+         Delivered with no schema, migration or infrastructure change: no
+         embeddings, no pgvector, no Neon, no new dependency. SealedMemoryStore
+         stays protected; ExperiencePipeline remains the sole memory writer;
+         ConversationService performs no memory writes; no dead enum members.
+         Persistent recall is grounded end to end: SQLite store ->
+         reader(session_owner) -> retriever -> assembler, with retrieved
+         memories exposed on PersistentSlice.memories. The in-memory slice
+         stays session-scoped off the shelf (SESSION default).
 
-         This is a limit on what persistence can be claimed to block, not a
-         widening of what Phase 5 is permitted to be. An earlier draft of
-         ADR-010 claimed persistence gated Phase 5; that claim was corrected
-         before merge. See also CURRENT LIMITATIONS and BLOCKED WORK, which
-         state the same thing from the feature side and remain accurate.
+         The write-side cross-session-conflict blocker noted under ADR-009 was
+         already satisfied: ExperiencePipeline.ingest passes the global active
+         set to the promotion gate. Phase 5 adds the read side, bounded by the
+         query's scope. Recall wider than MemoryScope.USER remains blocked; see
+         CURRENT LIMITATIONS and BLOCKED WORK.
 
 PERSISTENCE — ADR PROPOSED; THE RECOMMENDED OPTION IS BUILT AND WIRED
   ADR-010 (docs/ADR/ADR-010-persistence-model.md, PR #15) compares four
@@ -358,6 +366,9 @@ claim written in one place with nothing that notices it going stale.
                Landed as one merge; #60-#63 were closed as superseded
   #65 294ceba  feat(profile): the owner's profile.md, read into every turn and task
   #66 6672d6c  feat(profile): projects.md beside it, read with it
+  #67 36bfa47  feat(agent): web search, reading pages, and the owner's shell.
+               Its ledger-recording docs commit rode inside this PR, so this
+               row was written after its own merge -- the lag budget, not drift
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -505,9 +516,9 @@ Do NOT imply that conversation turns directly write memory.
 
 CURRENT LIMITATIONS (ACCEPTED)
 ------------------------------
-- Phase 4 recall is session-scoped (ADR-009) — no cross-session recall.
-  Unchanged by ADR-010: that a contract could be validated in-process says
-  nothing about a capability existing. None does.
+- Recall defaults to session scope (ADR-009); cross-session recall exists only
+  as the opt-in MemoryScope.USER query (ADR-015, commit 193da33), on the
+  persistent slice's grounded composition. Wider recall is not available.
 - No semantic embedding-based memory ranking (Phase 2 HashingEmbeddingProvider is not semantic)
 - Memory retrieval is enrichment/degradation, not a write path
 - Rendering overhead: evidence is now charged at its rendered cost (#52). Only the
@@ -515,7 +526,9 @@ CURRENT LIMITATIONS (ACCEPTED)
 - Persistence is one local SQLite file (#42, #44); there is no server database and no
   migrations framework. Knowledge is not persisted: `pac --documents` re-reads the
   corpus on every run (#58)
-- Cross-session conflict handling not implemented (deferred with ADR-009)
+- Cross-session conflict handling: the write side passes the global active
+  intent set to the promotion gate (memory/pipeline.py); the read side bounds
+  recall through the reader's owner resolver and the query's scope (ADR-014)
 
 AGENT BOOT PROTOCOL
 ===================
@@ -553,7 +566,7 @@ Phase 1: PARTIAL / NOT COMPLETE — identity unbuilt; see PHASE_1_RECONCILIATION
 Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
 Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 → bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
-Phase 5: NOT AUTHORIZED / DESIGN NOT STARTED — UNAUTHORIZED / FUTURE DESIGN
+Phase 5: IMPLEMENTED / NOT ACCEPTED (commit 193da33, branch claude/phase5-memory-scope — PR pending; acceptance is the owner's)
 Post-Phase-4: merged, no new phase — see POST-PHASE-4 MERGES for the
   row-by-row record. The range and the head are deliberately not repeated
   here: they were, as "#3-#28 (head 5136e84)", and went four merges stale
@@ -608,10 +621,11 @@ Explicitly recorded as BLOCKED / NOT AUTHORIZED:
 - BM25/stemming redesign
 - Boss model replacement
 - modifications to legacy/source repositories
-- Phase 5 implementation
+- Phase 5 expansion beyond commit 193da33 (the authorized ownership/scope
+  contract; further scope change requires authorization)
 - any unapproved Phase 3/4 expansion
-- cross-session memory recall (deferred with ADR-009) — still blocked, and not
-  unblocked by ADR-010, which addresses persistence only
+- cross-session recall wider than the opt-in MemoryScope.USER query (ADR-015):
+  the default remains session-scoped, and production persistence stays blocked
 
 Important:
 Do NOT imply that real embedding adaptation or BM25/stemming is a prerequisite for Phase 3/4 Memory Foundation.
