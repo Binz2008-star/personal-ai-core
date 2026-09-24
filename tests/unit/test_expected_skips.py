@@ -47,10 +47,18 @@ NESTED_MARKER = "PAC_SKIP_AUDIT_CHILD"
 ALLOWED_SKIP_SOURCES = {
     "tests/unit/test_dependency_direction.py",
     "tests/integration/test_token_estimator_validation.py",
+    # The server-gated conformance (ADR-016): the whole module skips when no
+    # PostgreSQL is advertised (POSTGRES_TEST_URL unset, as in CI) and runs
+    # against a real server locally. A server-gated suite that cannot reach a
+    # server must read as a skip, not as a pass.
+    "tests/unit/test_postgres_backend.py",
 }
 
-# Skips outside the tokenizer harness are individually accounted for.
-MAX_NON_HARNESS_SKIPS = 2
+# Skips outside the tokenizer harness are individually accounted for:
+# the two layering-check exemptions, plus the 28 collected legs of the
+# Postgres conformance module (10 parametrised tests x 2 substrates + 8
+# server-only tests) when no server is advertised.
+MAX_NON_HARNESS_SKIPS = 30
 
 pytestmark = pytest.mark.skipif(
     os.environ.get(NESTED_MARKER) == "1",

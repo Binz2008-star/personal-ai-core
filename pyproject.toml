@@ -11,6 +11,10 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
+# The server backend (ADR-016): psycopg 3, the PostgreSQL driver. Kept out of
+# `dependencies` so a SQLite-only install never pulls it; `persistence/postgres.py`
+# imports it lazily for the same reason.
+server = ["psycopg[binary]>=3.2"]
 
 # The entry point. `python -m personal_ai_core.app` does the same thing
 # without installing anything; this is the form most people will use.
