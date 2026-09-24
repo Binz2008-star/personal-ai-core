@@ -31,6 +31,7 @@ from ..core.memory import (
     MemoryReader,
     MemoryRecord,
     MemoryRetrievalError,
+    MemoryScope,
 )
 
 
@@ -63,7 +64,12 @@ def _overlap(left: frozenset[str], right: frozenset[str]) -> float:
 
 
 class SimpleMemoryRetriever:
-    """Session-scoped, language-weighted, deterministic recall.
+    """Scope-aware, language-weighted, deterministic recall.
+
+    Eligibility is the reader's job and the scope's: `MemoryScope.SESSION`
+    asks for one session's active memories, `MemoryScope.USER` for the owner's
+    across sessions (ADR-015). This class only dispatches on the scope and
+    ranks what the reader admits.
 
     Ranking is surface-level and says so. It combines how sure the gate was
     that a memory is true, whether it is in the language of this turn, and
@@ -78,7 +84,8 @@ class SimpleMemoryRetriever:
     semantic ranker is a later phase and a different class.
 
     Ordering is a total order -- score, then recency, then id -- so the
-    same query over the same records always produces the same sequence.
+    same query over the same records always produces the same sequence,
+    whatever the scope.
     """
 
     MAX_LIMIT = 100
@@ -102,6 +109,11 @@ class SimpleMemoryRetriever:
 
         # Region 2: the reader call, and only the reader call.
         #
+        # The scope decides which eligibility method the reader answers with;
+        # the reader, not this class, holds the filter (ADR-015). A reader
+        # that cannot resolve users raises for USER scope, and that raise is
+        # classified UNAVAILABLE like any other unreachable read.
+        #
         # The raise happens *after* the handler, not inside it. `raise ...
         # from None` clears `__cause__` but Python still populates
         # `__context__` with the original exception, and a store's error
@@ -112,7 +124,10 @@ class SimpleMemoryRetriever:
         failed: MemoryRetrievalError | None = None
         records: Sequence[MemoryRecord] = ()
         try:
-            records = self._reader.list_active_for_session(query.session_id)
+            if query.scope is MemoryScope.USER:
+                records = self._reader.list_active_for_session_owner(query.session_id)
+            else:
+                records = self._reader.list_active_for_session(query.session_id)
         except Exception:
             failed = MemoryRetrievalError.UNAVAILABLE
         if failed is not None:
