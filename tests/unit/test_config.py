@@ -12,6 +12,12 @@ def test_boss_model_default_is_not_the_benchmark_model():
     assert Settings.from_env({}).boss_model != "qwen2.5:7b"
 
 
+def test_boss_model_mechanical_pin():
+    # Mechanical regression pin (Workstream A). The Canonical Boss model is
+    # exact; replacing it is a deliberate, reviewed decision (ADR-002).
+    assert DEFAULT_BOSS_MODEL == "huihui_ai/qwen2.5-abliterate:7b"
+
+
 def test_boss_context_window_matches_the_configured_rig():
     # Not the audited source's 24000 (ADR-005).
     settings = Settings.from_env({})
