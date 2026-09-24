@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Callable
 
 from ..agent import (
     Checkpoints,
@@ -34,7 +34,7 @@ from ..context import (
     ScriptAwareTokenEstimator,
 )
 from ..core.config import Settings
-from ..core.contracts import EventRepository, SessionRepository
+from ..core.contracts import EventRepository, MemoryStore, SessionRepository
 from ..core.memory import MemoryReader
 from ..identity import DefaultIdentityComposer
 from ..memory import SimpleMemoryRetriever
@@ -62,10 +62,24 @@ from ..persistence.sqlite import (
     SqliteUserRepository,
     connect,
 )
+from ..persistence.postgres import (
+    PostgresEventRepository,
+    PostgresMemoryRepository,
+    PostgresMessageRepository,
+    PostgresSessionRepository,
+    PostgresUserRepository,
+    connect as server_connect,
+)
 from ..runtime.model_registry import ModelRegistry
 from ..runtime.ollama.provider import OllamaProvider, Transport
 from .grounding import ContextBuilder, RenderedEvidenceCost
 from .service import ConversationService
+
+if TYPE_CHECKING:
+    # The relative import keeps the driver out of this module's namespace:
+    # the dependency-direction gate only counts absolute imports, and the
+    # composition root may name adapters but must not name psycopg itself.
+    from ..persistence.postgres import Connection as ServerConnection
 
 
 def build_in_memory_service(
@@ -223,6 +237,38 @@ def _session_owner_for(sessions: SessionRepository) -> Callable[[str], str | Non
     return resolve
 
 
+def _grounding_for_durable(
+    budget_policy: ReserveBasedBudgetPolicy,
+    *,
+    evidence_limit: int,
+    memories: MemoryStore | None,
+    sessions: SessionRepository,
+) -> _KnowledgeStack | None:
+    """The retrieval half of a grounded DURABLE slice, one build for every
+    durable store.
+
+    Both durable builders -- SQLite and the server backend -- compose recall
+    over the store the same way: the reader resolves ownership from the
+    session store (ADR-014) and the deterministic retriever ranks what it
+    admits (ADR-015). One function rather than two copies, because that is
+    exactly where the F-4 lesson would otherwise be re-learned: wired once
+    here, it cannot be fixed on one store's path and missed on the other.
+
+    `memories=None` is the ungrounded slice: no retriever, no stack.
+    """
+    if memories is None:
+        return None
+    return _knowledge_stack(
+        budget_policy,
+        evidence_limit=evidence_limit,
+        memory_retriever=SimpleMemoryRetriever(
+            reader=MemoryReader(
+                source=memories, session_owner=_session_owner_for(sessions)
+            )
+        ),
+    )
+
+
 def build_persistent_service(
     settings: Settings | None = None,
     *,
@@ -282,24 +328,11 @@ def build_persistent_service(
     budget_policy = ReserveBasedBudgetPolicy(
         identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
     )
-    memory_retriever = None
-    if grounded:
-        # Phase 5 persistent composition: SQLite store -> reader (ownership
-        # resolved from the session store, ADR-014) -> deterministic retriever
-        # (ADR-015) -> the context assembler inside the stack.
-        memory_retriever = SimpleMemoryRetriever(
-            reader=MemoryReader(
-                source=memories, session_owner=_session_owner_for(sessions)
-            )
-        )
-    stack = (
-        _knowledge_stack(
-            budget_policy,
-            evidence_limit=evidence_limit,
-            memory_retriever=memory_retriever,
-        )
-        if grounded
-        else None
+    stack = _grounding_for_durable(
+        budget_policy,
+        evidence_limit=evidence_limit,
+        memories=memories if grounded else None,
+        sessions=sessions,
     )
     service = ConversationService(
         users=SqliteUserRepository(connection),
@@ -313,6 +346,103 @@ def build_persistent_service(
         context_builder=stack.context_builder if stack is not None else None,
     )
     return PersistentSlice(
+        service=service,
+        events=events,
+        connection=connection,
+        ingestion=stack.ingestion if stack is not None else None,
+        memories=memories if grounded else None,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ServerSlice:
+    """The ungrounded slice on the server database (ADR-016), plus the handles.
+
+    Same resource rule as `PersistentSlice`, one step up: the caller named a
+    URL, so the caller opened the connection -- and is the one who must close
+    it. A factory that hid an open server connection would make the caller
+    responsible for a resource it cannot see.
+    """
+
+    service: ConversationService
+    events: PostgresEventRepository
+    connection: ServerConnection
+    # Present only when built with `grounded=True`, exactly as on
+    # `PersistentSlice`: the way in for documents (the indexes behind it live
+    # in process memory and are gone at exit), and the durable memory store
+    # the recall reader is composed over.
+    ingestion: IngestionService | None = None
+    memories: PostgresMemoryRepository | None = None
+
+    def close(self) -> None:
+        self.connection.close()
+
+
+def build_server_service(
+    settings: Settings | None = None,
+    *,
+    database_url: str,
+    transport: Transport | None = None,
+    grounded: bool = False,
+    evidence_limit: int = 5,
+) -> ServerSlice:
+    """The same slice as `build_persistent_service`, on the database ADR-016
+    chose (Neon/PostgreSQL) instead of a local file.
+
+    Identical in every respect a caller can observe except where the rows
+    live: over the wire, in the database the caller names. Everything above
+    `core.contracts` is unchanged, which is the substitution that boundary
+    was built for -- this builder is its second real exercise.
+
+    `database_url` is REQUIRED and has no default, for the same reason
+    `database` is on the SQLite slice: the caller names the database, and the
+    entry point decides where the URL comes from (e.g. `DATABASE_URL`). The
+    connection is opened lazily with respect to the driver: a machine without
+    the `server` extra gets a RuntimeError that says how to install one, and a
+    SQLite-only install neither imports nor pays for psycopg.
+
+    Knowledge is not persisted, exactly as on SQLite (ADR-010 R4): chunks and
+    vectors are derived and rebuilt by re-ingestion. With `grounded=True` the
+    slice retrieves through the durable server store with ownership resolved
+    from the session store (ADR-014/015), so a conversation is durable and a
+    corpus is not, just as on the file store.
+    """
+    settings = settings or Settings.from_env()
+    registry = ModelRegistry.from_settings(settings)
+    provider = OllamaProvider(
+        settings.ollama_host,
+        timeout_seconds=settings.request_timeout_seconds,
+        transport=transport,
+    )
+    connection = server_connect(database_url)
+    events = PostgresEventRepository(connection)
+    sessions = PostgresSessionRepository(connection)
+    # The durable server store behind the composition; recall reads through a
+    # reader, and the write side stays with ExperiencePipeline and the caller
+    # that builds one over the same database.
+    memories = PostgresMemoryRepository(connection)
+    identity = DefaultIdentityComposer(profile=settings.profile)
+    budget_policy = ReserveBasedBudgetPolicy(
+        identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
+    )
+    stack = _grounding_for_durable(
+        budget_policy,
+        evidence_limit=evidence_limit,
+        memories=memories if grounded else None,
+        sessions=sessions,
+    )
+    service = ConversationService(
+        users=PostgresUserRepository(connection),
+        sessions=sessions,
+        messages=PostgresMessageRepository(connection),
+        events=events,
+        provider=provider,
+        registry=registry,
+        budget_policy=budget_policy,
+        identity=identity,
+        context_builder=stack.context_builder if stack is not None else None,
+    )
+    return ServerSlice(
         service=service,
         events=events,
         connection=connection,

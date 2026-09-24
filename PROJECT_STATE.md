@@ -21,6 +21,10 @@ Phase 3 accepted merge: f090100e933d1a6ff18d6e546b384b2e727b2889 (PR #1)
 Phase 4 implementation: e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 (PR #2, branch claude/phase-4-memory-aware-context)
 Phase 5 implementation: 193da3371c942e74d91969169dc34631f345ba64 (PR #69, branch claude/phase5-memory-scope)
 Phase 5 accepted merge: e50c98d7b8a3ad62b60251303f51c7cb6b5714a4 (PR #69)
+Phase 6 implementation: 7803d2e (PR #72, branch claude/phase6-postgres-backend, merged 1c5042d)
+  (the merge is 1c5042d1d4ef85f51276b8e4b0d36220e8e610dc)
+Phase 6 wiring: PR #73 (branch claude/phase6-server-wiring)
+Phase 6 status: IMPLEMENTED / NOT ACCEPTED — backend, conformance (PR #72) and wiring (PR #73); owner acceptance pending
 
 Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
@@ -40,10 +44,18 @@ Test verification (remote):
    it on a laptop)
    Phase 5 (PR #69, merged e50c98d): 1093 passed / 14 skipped, CONFIRMED ON
    BOTH PLATFORMS (+34 items, 0 failures); ruff 0 errors; pyright 0 errors
+   Phase 6 (backends PR #72, merged 1c5042d; wiring PR #73): the server-
+   gated legs ALL RUN against POSTGRES_TEST_URL (a dedicated non-production
+   database): the 28-leg conformance module and the 6-leg server composition,
+   locally 1120 passed / 14 skipped with the skip-audit file excluded -- the
+   audit's 300s child window is sized for the no-server CI shape, where it is
+   green: 1094 passed / 48 skipped (14 baseline + 34 accounted server legs).
+   ruff 0 errors; pyright 0 errors
 - ruff: 0 errors  |  pyright: 0 errors
 
-Synchronization: origin/main is at e50c98d (Phase 4 merged in PR #2, the
-  post-Phase-4 record in PRs #3-#59 and #64-#67, and Phase 5 via PR #69)
+Synchronization: origin/main is at 1c5042d (Phase 4 merged in PR #2, the
+  post-Phase-4 record in PRs #3-#59 and #64-#67, Phase 5 via PR #69, ADR-016
+  via PR #71, and the Phase 6 backend via PR #72)
 
 PHASE STATUS SUMMARY
 --------------------
@@ -150,6 +162,14 @@ PERSISTENCE — PRODUCTION BACKEND AUTHORIZED (ADR-016, PHASE 6)
   embedding adapter remain blocked). A PostgreSQL driver, the project's first
   new dependency, and a migrations framework are authorized with the backend.
   SQLite stays the default; the server backend is an opt-in composition.
+  STATE: IMPLEMENTED / NOT ACCEPTED. PR #72 landed the backend
+  (`persistence/postgres.py`) and its server-gated conformance suite; PR #73
+  wired it as `build_server_service`, the second durable composition in
+  `conversation/factory.py`, sharing the grounding helper with the SQLite
+  slice so the two stores cannot drift (the F-4 lesson). The connection
+  lifecycle is a pinned contract: autocommit connections and explicit
+  `transaction()` blocks -- never `with connection:`, which psycopg 3.3
+  changed to close the connection on exit.
   Prerequisite: CLOSED by PR #41. Event.payload now has a serialisation
   contract, checked at construction. The second, smaller one is still open:
   `add` and `append` return None, so a caller cannot distinguish a completed
@@ -386,6 +406,14 @@ claim written in one place with nothing that notices it going stale.
   #69 e50c98d  feat(memory): Phase 5 ownership and scope for cross-session
                recall (ADR-014, ADR-015). Phase 5 is ACCEPTED; a test-only
                substrate-conformance flake found by suite-windows rode in
+  #70 08d4da6  docs: Phase 5 ACCEPTED; record #69 in the merge ledger
+  #71 22fd081  docs: ADR-016 production persistence (server backend
+               authorized)
+  #72 1c5042d  feat(persistence): PostgreSQL server backend (ADR-016) -- the
+               implementation half: adapter, server-gated conformance,
+               `server` extra, CI driver installs, skip accounting. 28/28 on
+               a dedicated non-production database; full suite 1122 passed /
+               14 skipped (verified with the server legs RUN)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -541,8 +569,10 @@ CURRENT LIMITATIONS (ACCEPTED)
 - Rendering overhead: evidence is now charged at its rendered cost (#52). Only the
   provider's chat-template tokens remain an estimate inside DEFAULT_OVERHEAD
 - Persistence is one local SQLite file (#42, #44); the server backend
-  (Neon/PostgreSQL) and a migrations framework are AUTHORIZED (ADR-016,
-  Phase 6) and under construction. Knowledge is not persisted: `pac --documents` re-reads the
+  (Neon/PostgreSQL) is BUILT (PR #72) and WIRED as `build_server_service`
+  (PR #73), useable where a caller names a database_url, but it is NOT yet
+  ACCEPTED and nothing in the entry point selects it; a migrations framework
+  remains AUTHORIZED (ADR-016) and not yet built. Knowledge is not persisted: `pac --documents` re-reads the
   corpus on every run (#58)
 - Cross-session conflict handling: the write side passes the global active
   intent set to the promotion gate (memory/pipeline.py); the read side bounds
@@ -585,14 +615,19 @@ Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
 Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 → bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
 Phase 5: ACCEPTED / MERGED (PR #69 — 193da3371c942e74d91969169dc34631f345ba64 → e50c98d7b8a3ad62b60251303f51c7cb6b5714a4)
+Phase 6: IMPLEMENTED / NOT ACCEPTED (PR #72 — 7803d2e → 1c5042d; wiring
+  PR #73). The acceptance gate has not been passed: design (ADR-016) ->
+  authorization -> implementation -> tests -> invariant review -> git
+  verification -> owner acceptance. The first five are done or in place;
+  owner acceptance is pending.
 Post-Phase-4: merged, no new phase until Phase 5 (PR #69) — see POST-PHASE-4 MERGES for the
   row-by-row record. The range and the head are deliberately not repeated
   here: they were, as "#3-#28 (head 5136e84)", and went four merges stale
   because nothing checks a summary line. A phase gate is a durable fact;
   a head is not.
 Persistence: ADR-010 PROPOSED (#15); ADR-016 ACCEPTED (Phase 6) — server
-  backend (Neon/PostgreSQL) authorized for the non-rebuildable stores; SQLite
-  remains the default
+  backend (Neon/PostgreSQL) authorized for the non-rebuildable stores,
+  IMPLEMENTED (PR #72) and WIRED (PR #73); SQLite remains the default
 Identity: BUILT (PR #39). ADR-011 and ADR-012 remain PROPOSED, not accepted
   Prerequisite A: DONE — ContextAllocation carries identity. No longer funded
     at zero: the factory measures the composed text with the same estimator

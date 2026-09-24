@@ -109,6 +109,12 @@ from ..core.memory import (
 if TYPE_CHECKING:
     import psycopg
 
+    # The connection type, re-exported so callers can name it without
+    # importing psycopg themselves: the factory's composition root is kept
+    # driver-free by the dependency-direction gate ("may name adapters; it
+    # still must not speak SQL itself").
+    Connection = psycopg.Connection[Any]
+
 SCHEMA_VERSION = 1
 
 # Each statement is executed individually: psycopg 3 refuses multi-statement

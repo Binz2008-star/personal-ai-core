@@ -52,13 +52,17 @@ ALLOWED_SKIP_SOURCES = {
     # against a real server locally. A server-gated suite that cannot reach a
     # server must read as a skip, not as a pass.
     "tests/unit/test_postgres_backend.py",
+    # The server composition (ADR-016, wired): the same gate as the
+    # conformance module, on the factory slice that composes the backend.
+    "tests/integration/test_server_service.py",
 }
 
 # Skips outside the tokenizer harness are individually accounted for:
 # the two layering-check exemptions, plus the 28 collected legs of the
 # Postgres conformance module (10 parametrised tests x 2 substrates + 8
-# server-only tests) when no server is advertised.
-MAX_NON_HARNESS_SKIPS = 30
+# server-only tests) and the 6 legs of the server-composition integration
+# file, all when no server is advertised.
+MAX_NON_HARNESS_SKIPS = 36
 
 pytestmark = pytest.mark.skipif(
     os.environ.get(NESTED_MARKER) == "1",
