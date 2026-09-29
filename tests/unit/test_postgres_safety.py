@@ -519,9 +519,18 @@ def test_the_bootstrap_can_drop_everything_the_gate_classifies():
     it cannot see is a relation that survives the reset, and the reset is what
     every later INITIALIZE depends on.
     """
-    assert set(_USER_RELATION_KINDS) <= set(_BOOTSTRAP_RELATION_KINDS), (
+    # Both sides are relkind codes, i.e. strings. `_USER_RELATION_KINDS` is a
+    # module constant in `postgres.py`, so pyright infers its element type as
+    # the literal union ("r" | "p" | ...), and `set[Literal[...]] - set[str]`
+    # is an error it is right to report: the operand types genuinely do not
+    # line up. The annotated locals widen both to `set[str]`, which is what
+    # they are, and make the comparison well-typed without a cast or an
+    # ignore. Runtime behaviour is unchanged.
+    gates: set[str] = set(_USER_RELATION_KINDS)
+    bootstraps: set[str] = set(_BOOTSTRAP_RELATION_KINDS)
+    assert gates <= bootstraps, (
         "the gate classifies relkinds the bootstrap cannot drop: "
-        f"{sorted(set(_USER_RELATION_KINDS) - set(_BOOTSTRAP_RELATION_KINDS))}"
+        f"{sorted(gates - bootstraps)}"
     )
 
 
