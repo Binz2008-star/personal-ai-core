@@ -63,11 +63,13 @@ from ..persistence.sqlite import (
     connect,
 )
 from ..persistence.postgres import (
+    DatabaseIdentity,
     PostgresEventRepository,
     PostgresMemoryRepository,
     PostgresMessageRepository,
     PostgresSessionRepository,
     PostgresUserRepository,
+    SchemaIntent,
     connect as server_connect,
 )
 from ..runtime.model_registry import ModelRegistry
@@ -382,6 +384,8 @@ def build_server_service(
     settings: Settings | None = None,
     *,
     database_url: str,
+    intent: SchemaIntent,
+    identity: DatabaseIdentity,
     transport: Transport | None = None,
     grounded: bool = False,
     evidence_limit: int = 5,
@@ -394,10 +398,22 @@ def build_server_service(
     `core.contracts` is unchanged, which is the substitution that boundary
     was built for -- this builder is its second real exercise.
 
-    `database_url` is REQUIRED and has no default, for the same reason
-    `database` is on the SQLite slice: the caller names the database, and the
-    entry point decides where the URL comes from (e.g. `DATABASE_URL`). The
-    connection is opened lazily with respect to the driver: a machine without
+    `database_url`, `intent` and `identity` are all REQUIRED and none has a
+    default. The first names the database; the second says whether this call is
+    creating the schema or using one that exists; the third is the caller's
+    independent statement of which host, port and database it believes it is
+    reaching. `connect` checks all three against what the server reports before
+    it runs a single DDL statement, and refuses on any mismatch.
+
+    `identity` is not derived from `database_url` here, and must not be by a
+    caller either. A confirmation read off the URL the code is about to dial
+    restates that URL: it would agree with itself by construction, and the
+    check it feeds would be incapable of failing. The entry point's job is to
+    decide where the URL comes from (e.g. `DATABASE_URL`); the value that
+    identifies the database is a separate piece of knowledge, and it is the
+    owner's to supply.
+
+    The connection is opened lazily with respect to the driver: a machine without
     the `server` extra gets a RuntimeError that says how to install one, and a
     SQLite-only install neither imports nor pays for psycopg.
 
@@ -414,16 +430,22 @@ def build_server_service(
         timeout_seconds=settings.request_timeout_seconds,
         transport=transport,
     )
-    connection = server_connect(database_url)
+    connection = server_connect(database_url, intent=intent, identity=identity)
     events = PostgresEventRepository(connection)
     sessions = PostgresSessionRepository(connection)
     # The durable server store behind the composition; recall reads through a
     # reader, and the write side stays with ExperiencePipeline and the caller
     # that builds one over the same database.
     memories = PostgresMemoryRepository(connection)
-    identity = DefaultIdentityComposer(profile=settings.profile)
+    # Named `identity_composer`, not `identity`: this function's `identity`
+    # parameter is the DATABASE identity, and binding the identity composer to
+    # the same name would shadow it for the rest of the body. It happened to be
+    # harmless while `connect` was the only reader, because that call comes
+    # first -- which is exactly the kind of accident that stops being harmless
+    # the moment someone moves a line.
+    identity_composer = DefaultIdentityComposer(profile=settings.profile)
     budget_policy = ReserveBasedBudgetPolicy(
-        identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
+        identity_reserve=identity_composer.tokens(ScriptAwareTokenEstimator())
     )
     stack = _grounding_for_durable(
         budget_policy,
@@ -439,7 +461,7 @@ def build_server_service(
         provider=provider,
         registry=registry,
         budget_policy=budget_policy,
-        identity=identity,
+        identity=identity_composer,
         context_builder=stack.context_builder if stack is not None else None,
     )
     return ServerSlice(

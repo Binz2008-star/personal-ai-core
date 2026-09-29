@@ -33,9 +33,18 @@ it exactly as it found it.
 from __future__ import annotations
 
 import importlib.util
-import os
+from dataclasses import replace
+from typing import Any
 
 import pytest
+from support.postgres_target import (
+    NO_SERVER_IDENTITY,
+    server_identity,
+    server_url,
+)
+from support.postgres_target import (
+    reset_to_empty as _reset_to_empty,
+)
 
 from personal_ai_core.core.contracts import (
     EventRepository,
@@ -67,39 +76,125 @@ from personal_ai_core.persistence.in_memory import (
 )
 from personal_ai_core.persistence.memory_store import InMemoryMemoryRepository
 from personal_ai_core.persistence.postgres import (
+    _EXPECTED_TABLES,
     SCHEMA_VERSION,
-    SchemaVersionMismatch,
+    DatabaseIdentity,
+    DatabaseIdentityError,
+    DatabaseVerdict,
     PostgresEventRepository,
     PostgresMemoryRepository,
     PostgresMessageRepository,
     PostgresSessionRepository,
     PostgresUserRepository,
+    SchemaIntent,
+    SchemaVersionMismatch,
+    UnapprovedDatabaseError,
+    approve_test_database,
     connect,
     drop_all,
+    inspect_database,
 )
 
 # The two conditions that gate this suite, stated separately so the skip
 # reason can say which one is missing. `find_spec` rather than `import`
 # because an absent driver must skip, not raise at collection.
 DRIVER_PRESENT = importlib.util.find_spec("psycopg") is not None
-# `os.environ.get` without a default types as `str | None`; the empty string
-# is equally falsy for the skip gate, so type the value as a `str` and never
-# let a possibly-None URL flow into connect(URL).
-TEST_URL: str = os.environ.get("POSTGRES_TEST_URL", "")
+# Resolved through the one module that owns this decision, at COLLECTION time.
+# It returns "" when no server is advertised (so the skip gate below reads
+# naturally) and RAISES when POSTGRES_TEST_URL names the same database as
+# DATABASE_URL -- a misconfiguration that must not be able to render as "no
+# server available".
+URL = server_url()
+# This suite's own statement of which database it is reaching. Derived from the
+# resolved test URL on purpose; see `support.postgres_target.server_identity`
+# for why that is the test's assertion rather than the library's self-attestation.
+#
+# `or NO_SERVER_IDENTITY` rather than `None`: this is a module-level constant,
+# and the skip marker below means it is never consumed when there is no server.
+# If that ever changed, the sentinel would make `connect` refuse loudly instead
+# of the confirmation quietly going missing.
+IDENTITY: DatabaseIdentity = server_identity() or NO_SERVER_IDENTITY
 
 pytestmark = pytest.mark.skipif(
-    not (DRIVER_PRESENT and TEST_URL),
+    not (DRIVER_PRESENT and URL),
     reason="no PostgreSQL server reached; run with POSTGRES_TEST_URL set",
 )
 
-URL = TEST_URL  # non-None once the module is not skipped
+
+def open_database(intent: SchemaIntent) -> Any:
+    """`connect` with this suite's declared intent and identity."""
+    return connect(URL, intent=intent, identity=IDENTITY)
+
+
+def clean_up(connection: Any) -> None:
+    """Drop this project's tables, and only with a live approval.
+
+    The approval is minted here rather than cached, because `drop_all`
+    re-verifies it against the connection it is handed: an approval is a
+    capability, and a capability that does not expire when the database changes
+    underneath it is not one.
+    """
+    drop_all(connection, approval=approve_test_database(connection))
+
+
+def raw_connection() -> Any:
+    """A driver connection to the test database that does NOT go through the
+    gate, for test SETUP that must create something the gate would refuse.
+
+    The tests below plant a foreign `users` table, a foreign `jobs` table and
+    a view named `users` -- and they can only do that against an empty
+    database, because a database that already holds this project's schema has
+    those six names taken. `open_database(INITIALIZE)` cannot be used, and
+    neither can `connect` in any other mode: the whole point is a state
+    `connect` will refuse to reach.
+
+    So setup and teardown speak to the server directly, while every ASSERTION
+    about the gate goes through `connect`/`drop_all`/`approve_test_database`.
+    The gate is never the thing under test here; it is the thing the test
+    attacks, and it is attacked through its real entry points.
+    """
+    import psycopg
+    from psycopg.rows import dict_row
+
+    connection: Any = psycopg.connect(URL, autocommit=True)
+    connection.row_factory = dict_row
+    return connection
+
+
+def reset_to_empty() -> None:
+    """The shared bootstrap, bound to THIS module's resolved URL.
+
+    The implementation lives in `support.postgres_target` because two modules
+    need it and a bootstrap that bypasses the safety gate must exist in exactly
+    one place -- see that function's docstring for why it is allowed to, and for
+    why it takes the URL as an argument instead of re-reading the environment:
+    tests here monkeypatch `POSTGRES_TEST_URL`, and a bootstrap that trusted the
+    environment would clean the wrong database during their teardown.
+    """
+    _reset_to_empty(URL)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _known_starting_point():
+    """Establish a VACUOUS database ONCE, before any test in this module runs.
+
+    Scoped to the module rather than to each test, and that is the whole
+    design. INITIALIZE is now only legal against an empty database, so a
+    leftover from a previous run would make the first test fail for a reason
+    that has nothing to do with it. But resetting per test would throw away the
+    property worth having: if a test leaks a relation, the NEXT test's
+    INITIALIZE is refused as OCCUPIED, and the leak is reported rather than
+    silently absorbed. One reset at the start establishes the starting point;
+    after that the suite holds itself to the gate.
+    """
+    reset_to_empty()
 
 
 @pytest.fixture
 def pg():
-    connection = connect(URL)
+    connection = open_database(SchemaIntent.INITIALIZE)
     yield connection
-    drop_all(connection)
+    clean_up(connection)
     connection.close()
 
 
@@ -238,6 +333,8 @@ def test_a_rewritten_memory_keeps_sqlite_replaces_ordering(pg):
 
     from personal_ai_core.persistence.sqlite import (
         SqliteMemoryRepository,
+    )
+    from personal_ai_core.persistence.sqlite import (
         connect as sqlite_connect,
     )
 
@@ -324,7 +421,7 @@ def test_a_failed_supersede_leaves_neither_write_behind(pg):
 
 
 def test_everything_survives_closing_and_reopening_the_connection():
-    first = connect(URL)
+    first = open_database(SchemaIntent.INITIALIZE)
     user = User()
     session = Session(user_id=user.id)
     message = Message(session_id=session.id, role=Role.USER, content="مرحبا",
@@ -345,7 +442,10 @@ def test_everything_survives_closing_and_reopening_the_connection():
 
     reopened = None
     try:
-        reopened = connect(URL)
+        # OPERATE, not INITIALIZE: the schema exists now, and re-declaring the
+        # intent to create it is how a second builder ends up silently
+        # re-applying a schema to a database it should only be using.
+        reopened = open_database(SchemaIntent.OPERATE)
         assert PostgresUserRepository(reopened).get(user.id) == user
         assert PostgresSessionRepository(reopened).get(session.id) == session
         assert (
@@ -362,14 +462,14 @@ def test_everything_survives_closing_and_reopening_the_connection():
         assert PostgresMemoryRepository(reopened).read(record.id) == record
     finally:
         if reopened is not None:
-            drop_all(reopened)
+            clean_up(reopened)
             reopened.close()
 
 
 def test_the_order_is_a_stored_fact_not_an_artefact_of_a_list():
     """ADR-010's R3, against the server: `seq` is a stored column, so the
     order survives connections the way sqlite's survives the process."""
-    first = connect(URL)
+    first = open_database(SchemaIntent.INITIALIZE)
     repository = PostgresEventRepository(first)
     sent = [
         Event(session_id="s-1", type=EventType.MESSAGE_RECEIVED, payload={"i": i})
@@ -381,12 +481,12 @@ def test_the_order_is_a_stored_fact_not_an_artefact_of_a_list():
 
     reopened = None
     try:
-        reopened = connect(URL)
+        reopened = open_database(SchemaIntent.OPERATE)
         read_back = PostgresEventRepository(reopened).list_for_session("s-1")
         assert [e.payload["i"] for e in read_back] == list(range(20))
     finally:
         if reopened is not None:
-            drop_all(reopened)
+            clean_up(reopened)
             reopened.close()
 
 
@@ -427,20 +527,24 @@ def test_the_schema_version_is_written_on_creation(pg):
 def test_a_database_from_another_schema_version_is_refused():
     """Refused, not migrated -- same discipline as the SQLite backend: a
     backend that silently adapts to a database it does not recognise is how
-    data is quietly lost."""
-    connection = connect(URL)
+    data is quietly lost.
+
+    Declared as OPERATE, and that is now the only way to reach the version
+    check. The database still has this project's shape, so it reads as PAC --
+    but INITIALIZE refuses a non-empty database before it ever looks at a row,
+    and asking to CREATE a schema is not the question this test is asking.
+    """
+    connection = open_database(SchemaIntent.INITIALIZE)
     connection.execute("UPDATE schema_version SET version = 99")
     connection.commit()
     connection.close()
 
     with pytest.raises(SchemaVersionMismatch, match="99"):
-        connect(URL)
+        open_database(SchemaIntent.OPERATE)
     # The refused connection must not have corrupted the database it refused
     # -- but a normal connect() refuses it too, and that is the point of the
     # gate. Open a raw driver connection instead, deliberately bypassing the
     # version check, and read what connect() refused to touch.
-    from typing import Any
-
     import psycopg
     from psycopg.rows import dict_row
 
@@ -457,7 +561,9 @@ def test_a_database_from_another_schema_version_is_refused():
     assert (
         version_row["version"] == 99
     )  # untouched -- version 99 still there, nothing migrated
-    drop_all(clean)
+    # Still needs a live approval: the capability is about the database, not
+    # about how the connection was opened.
+    clean_up(clean)
     clean.close()
 
 
@@ -470,3 +576,599 @@ def test_every_postgres_repository_satisfies_its_protocol(pg):
     assert isinstance(PostgresMessageRepository(pg), MessageRepository)
     assert isinstance(PostgresEventRepository(pg), EventRepository)
     assert isinstance(PostgresMemoryRepository(pg), MemoryStore)
+
+
+# ============================================================================
+# THE DESTRUCTIVE-ENTRY GATE, AGAINST A REAL SERVER
+# ============================================================================
+#
+# The classification is proven driver-free in `test_postgres_safety.py`. What
+# cannot be proven without a server is the part that matters most: that
+# `connect` and `drop_all` actually consult it, and that a refusal leaves the
+# database exactly as it was found. Every test below asserts the SECOND half
+# too -- the surviving table is the evidence, not the raised exception.
+
+
+def relation_inventory(connection) -> dict[str, list[str]]:
+    """relkind -> relation names, for the schema a connection is pointed at."""
+    found: dict[str, list[str]] = {}
+    for row in connection.execute(
+        "SELECT c.relkind, c.relname FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = current_schema() AND c.relkind IN "
+        "  ('r','p','v','m','S','f','c','i','I') ORDER BY c.relname"
+    ).fetchall():
+        found.setdefault(row["relkind"], []).append(row["relname"])
+    return found
+
+
+def planted_survives(connection, name: str) -> bool:
+    return connection.execute("SELECT to_regclass(%s) AS t", (name,)).fetchone()[
+        "t"
+    ] is not None
+
+
+def test_a_freshly_initialized_database_reads_as_pac_and_nothing_else():
+    """The happy path, and the claim PAC rests on: EXACTLY the expected set.
+
+    Not "the six tables are there". If `_SCHEMA` ever started leaving another
+    relation behind -- a fourth sequence, a helper table, a trigger table --
+    every OPERATE in production would start refusing a database this backend
+    created, and the drift test below is what says so before that happens.
+    """
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        inspection = inspect_database(connection)
+        assert inspection.verdict is DatabaseVerdict.PAC
+        assert set(inspection.snapshot.relations) == {
+            "events", "memories", "messages", "schema_version", "sessions", "users",
+            "events_seq_seq", "memories_seq_seq", "messages_seq_seq",
+        }
+        # And the shape the classifier compares against is the shape `_SCHEMA`
+        # actually produced, not a hand-written guess about it.
+        for name, expected in inspection.snapshot.columns.items():
+            if name in _EXPECTED_TABLES:
+                assert expected == _EXPECTED_TABLES[name], f"{name} drifted"
+    finally:
+        clean_up(connection)
+        connection.close()
+
+
+def test_dropping_everything_returns_the_database_to_vacuous():
+    """And leaves nothing behind -- including the indexes, and the sequences."""
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        clean_up(connection)
+        inventory = relation_inventory(connection)
+        assert inventory == {}, f"drop_all left {inventory}"
+        assert inspect_database(connection).verdict is DatabaseVerdict.VACUOUS
+    finally:
+        connection.close()
+
+
+def test_an_unrelated_users_table_is_never_taken_for_this_projects_schema():
+    """The regression this whole gate exists for.
+
+    An unrelated application can own a table called `users` with real rows
+    behind it. `_DROP_ALL` is the exact inverse of `_SCHEMA`, so without the
+    gate, pointing this backend at such a database and cleaning up after a test
+    run drops that table, CASCADE, with everything it owns. Both intents must
+    refuse, and the table must still be there afterwards.
+    """
+    reset_to_empty()
+    plant = raw_connection()
+    try:
+        plant.execute(
+            "CREATE TABLE users (id integer, email text, password_hash text, "
+            "role text, is_active boolean)"
+        )
+        plant.execute(
+            "INSERT INTO users (id, email) VALUES (1, 'someone@example.com')"
+        )
+
+        assert inspect_database(plant).verdict is DatabaseVerdict.FOREIGN
+
+        for intent in (SchemaIntent.INITIALIZE, SchemaIntent.OPERATE):
+            with pytest.raises(DatabaseIdentityError, match="foreign"):
+                open_database(intent)
+
+        # The evidence. An exception is a claim; the surviving row is the proof.
+        assert planted_survives(plant, "users")
+        assert plant.execute(
+            "SELECT email FROM users WHERE id = 1"
+        ).fetchone()["email"] == "someone@example.com"
+        # And this project's schema was never created alongside it.
+        assert not planted_survives(plant, "events")
+    finally:
+        plant.execute("DROP TABLE users")
+        plant.close()
+    reset_to_empty()
+
+
+def test_a_database_of_unrelated_tables_is_occupied_and_refused():
+    """No name collision, and still not an empty database.
+
+    `jobs` and `leads` match none of this project's six names, so a
+    collision-only check would call this VACUOUS and INITIALIZE would create
+    six tables inside somebody else's application. The surviving tables are the
+    evidence.
+    """
+    reset_to_empty()
+    plant = raw_connection()
+    try:
+        plant.execute("CREATE TABLE jobs (id integer, payload text)")
+        plant.execute("CREATE TABLE leads (id integer, email text)")
+
+        assert inspect_database(plant).verdict is DatabaseVerdict.OCCUPIED
+
+        with pytest.raises(DatabaseIdentityError, match="occupied"):
+            open_database(SchemaIntent.INITIALIZE)
+        with pytest.raises(DatabaseIdentityError, match="occupied"):
+            open_database(SchemaIntent.OPERATE)
+
+        assert planted_survives(plant, "jobs")
+        assert planted_survives(plant, "leads")
+        assert not planted_survives(plant, "users")
+    finally:
+        plant.execute("DROP TABLE jobs")
+        plant.execute("DROP TABLE leads")
+        plant.close()
+    reset_to_empty()
+
+
+def test_a_view_named_users_is_foreign_not_a_table():
+    """A view is not a table, and the gate reads the kind rather than guessing.
+
+    A view called `users` whose columns happened to match this project's
+    `users` would pass a column-only comparison, and the backend would then
+    insert into it. `pg_class.relkind` is what distinguishes them.
+    """
+    reset_to_empty()
+    plant = raw_connection()
+    try:
+        plant.execute("CREATE VIEW users AS SELECT 'a'::text AS id, 'b'::text AS created_at")
+
+        inspection = inspect_database(plant)
+        assert inspection.verdict is DatabaseVerdict.FOREIGN
+        assert "v" in inspection.reason
+
+        for intent in (SchemaIntent.INITIALIZE, SchemaIntent.OPERATE):
+            with pytest.raises(DatabaseIdentityError):
+                open_database(intent)
+        assert planted_survives(plant, "users")
+    finally:
+        plant.execute("DROP VIEW users")
+        plant.close()
+    reset_to_empty()
+
+
+def test_this_projects_tables_coexisting_with_a_foreign_table_are_refused():
+    """All six correct, plus somebody else's: not our database.
+
+    This is a database this project was installed INTO, which is a worse
+    situation than one it merely resembles, so the verdict is OCCUPIED and
+    both intents refuse.
+    """
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        connection.execute("CREATE TABLE somebody_elses (id integer)")
+        inspection = inspect_database(connection)
+        assert inspection.verdict is DatabaseVerdict.OCCUPIED
+        with pytest.raises(DatabaseIdentityError, match="occupied"):
+            open_database(SchemaIntent.OPERATE)
+        with pytest.raises(DatabaseIdentityError, match="occupied"):
+            open_database(SchemaIntent.INITIALIZE)
+    finally:
+        connection.execute("DROP TABLE somebody_elses")
+        clean_up(connection)
+        connection.close()
+
+
+def test_five_of_the_six_tables_is_partial_and_both_intents_refuse_it():
+    reset_to_empty()
+    plant = open_database(SchemaIntent.INITIALIZE)
+    try:
+        plant.execute("DROP TABLE memories CASCADE")
+        assert inspect_database(plant).verdict is DatabaseVerdict.PARTIAL
+        for intent in (SchemaIntent.INITIALIZE, SchemaIntent.OPERATE):
+            with pytest.raises(DatabaseIdentityError, match="partial"):
+                open_database(intent)
+    finally:
+        plant.close()
+    reset_to_empty()
+
+
+def test_operate_applies_no_ddl_even_for_a_table_it_could_recreate():
+    """"OPERATE performs no DDL", made observable.
+
+    Relation counts would not show this: `CREATE TABLE IF NOT EXISTS` against
+    tables that already exist is a no-op that still executes. So drop a table
+    this backend would happily have re-created, and require that OPERATE
+    REFUSES and leaves it absent. If `_SCHEMA` ran under OPERATE, this test
+    would find the table back and the connection would have succeeded.
+    """
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        connection.execute("DROP TABLE events CASCADE")
+        with pytest.raises(DatabaseIdentityError, match="partial"):
+            open_database(SchemaIntent.OPERATE)
+        assert not planted_survives(connection, "events")
+    finally:
+        connection.close()
+        # `clean_up` CANNOT be used here, and that is the gate working: a
+        # PARTIAL database is not in `_APPROVAL_ALLOWS`, so `drop_all` refuses
+        # it. A damaged schema is exactly the state the bootstrap exists to
+        # undo, so the bootstrap is what undoes it.
+        reset_to_empty()
+
+
+def test_operate_on_an_intact_database_changes_nothing():
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        before = relation_inventory(connection)
+        other = open_database(SchemaIntent.OPERATE)
+        try:
+            assert relation_inventory(other) == before
+        finally:
+            other.close()
+    finally:
+        clean_up(connection)
+        connection.close()
+
+
+def test_connect_refuses_a_database_the_caller_did_not_confirm():
+    """The identity check, against a real connection.
+
+    Everything else in this file confirms the database the way the resolver
+    derived it, which is the right thing for a suite to do and the wrong thing
+    to rely on -- a check that always agrees proves nothing. So here the
+    caller asserts something different from the truth and the connection must
+    be refused, having written nothing.
+    """
+    try:
+        reset_to_empty()
+        for field, wrong in (
+            ("host", DatabaseIdentity("not-the-host.example", 5432, "pac_test")),
+            ("port", DatabaseIdentity(host="localhost", port=1, database="pac_test")),
+            ("database", DatabaseIdentity("localhost", 5432, "not_the_database")),
+        ):
+            identity = replace(IDENTITY, **{field: wrong})
+            with pytest.raises(DatabaseIdentityError, match="confirmed"):
+                connect(URL, intent=SchemaIntent.INITIALIZE, identity=identity)
+        # The proof that the refusals wrote nothing: read the database over a
+        # connection that did not go through `connect` at all, and find it
+        # still exactly as empty as the three refusals found it. Asserting
+        # AFTER a successful INITIALIZE would prove nothing -- that call creates
+        # the six tables, so PAC is what it must read.
+        probe = raw_connection()
+        try:
+            assert inspect_database(probe).verdict is DatabaseVerdict.VACUOUS
+        finally:
+            probe.close()
+    finally:
+        reset_to_empty()
+
+
+def test_initializing_refuses_an_already_initialized_database():
+    """Initialization is a separate, deliberate act, not a side effect of
+    opening a connection. A second builder must say OPERATE."""
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        with pytest.raises(DatabaseIdentityError, match="empty database"):
+            open_database(SchemaIntent.INITIALIZE)
+    finally:
+        clean_up(connection)
+        connection.close()
+
+
+# --- the search-path pin ----------------------------------------------------
+
+
+def point_the_database_at(schema_sql: str) -> Any:
+    """Make every NEW connection to this database resolve `search_path` to the
+    given schema, and return a connection to set it up with.
+
+    `ALTER DATABASE ... SET`, not `SET search_path` on a live connection, and
+    that distinction is the whole difficulty of testing the pin. `connect()`
+    opens its own connection, so a session setting made here would never reach
+    it -- the pin happens inside a transaction on a connection this test does
+    not have. A per-database default IS inherited by that connection, which is
+    the only way to hand `connect` a session whose `search_path` disagrees with
+    the default.
+
+    `schema_sql` is raw SQL, not a string, so a deliberately hostile name is
+    quoted by the server's own `quote_ident` rather than by this test.
+    """
+    raw = raw_connection()
+    try:
+        raw.execute(f"ALTER DATABASE pac_test SET search_path TO {schema_sql}")
+    except BaseException:
+        raw.close()
+        raise
+    return raw
+
+
+def restore_default_search_path(raw: Any) -> None:
+    """Undo `point_the_database_at`. Every test that uses it must call this."""
+    try:
+        raw.execute("ALTER DATABASE pac_test RESET search_path")
+    finally:
+        raw.close()
+    reset_to_empty()
+
+
+def test_inspection_and_ddl_land_in_the_same_schema():
+    """The pin, and the property it exists to guarantee.
+
+    `_SCHEMA` writes unqualified names, so those names land wherever
+    `search_path` resolves. Point the database at some other schema entirely
+    and the gate must inspect THAT schema and write to THAT schema -- not
+    inspect one and write to the other, which is the failure the pin exists to
+    rule out and which no amount of correct reasoning elsewhere would catch.
+    """
+    reset_to_empty()
+    raw = point_the_database_at("pac_side")
+    try:
+        raw.execute("CREATE SCHEMA IF NOT EXISTS pac_side")
+
+        connection = open_database(SchemaIntent.INITIALIZE)
+        try:
+            inspection = inspect_database(connection)
+            assert inspection.schema == "pac_side"
+            assert inspection.verdict is DatabaseVerdict.PAC
+            landed = connection.execute(
+                "SELECT count(*) AS n FROM pg_class x "
+                "JOIN pg_namespace n ON n.oid = x.relnamespace "
+                "WHERE n.nspname = 'pac_side' AND x.relkind = 'r'"
+            ).fetchone()["n"]
+            assert landed == 6, "DDL landed somewhere other than the pinned schema"
+            # ...and NOT in the schema it would have used without the pin.
+            # This is the half that matters: a gate that inspected `pac_side`
+            # while `_SCHEMA` wrote to `public` would pass the line above and
+            # still be wrong.
+            public_tables = connection.execute(
+                "SELECT count(*) AS n FROM pg_class x "
+                "JOIN pg_namespace n ON n.oid = x.relnamespace "
+                "WHERE n.nspname = 'public' AND x.relkind = 'r'"
+            ).fetchone()["n"]
+            assert public_tables == 0
+        finally:
+            connection.close()
+    finally:
+        raw.execute("DROP SCHEMA IF EXISTS pac_side CASCADE")
+        restore_default_search_path(raw)
+
+
+def test_the_pin_survives_a_schema_name_that_breaks_naive_quoting():
+    """`quote_ident` is applied server-side, so this cannot inject.
+
+    A `search_path` built by string-formatting an identifier is an injection
+    point; one built with PostgreSQL's own quoting function is not -- including
+    for a name containing a double quote, a comma and a space, all three of
+    which are structural in a `search_path` value. A comma is the sharpest of
+    the three: unquoted, it silently turns one schema name into two.
+    """
+    reset_to_empty()
+    setup = raw_connection()
+    hostile = 'we"ird, name'
+    quoted = setup.execute(
+        "SELECT quote_ident(%s) AS q", (hostile,)
+    ).fetchone()["q"]
+    setup.execute(f"CREATE SCHEMA IF NOT EXISTS {quoted}")
+    setup.close()
+
+    raw = point_the_database_at(quoted)
+    try:
+        connection = open_database(SchemaIntent.INITIALIZE)
+        try:
+            assert inspect_database(connection).schema == hostile
+            landed = connection.execute(
+                "SELECT count(*) AS n FROM pg_class x "
+                "JOIN pg_namespace n ON n.oid = x.relnamespace "
+                "WHERE n.nspname = %s AND x.relkind = 'r'", (hostile,)
+            ).fetchone()["n"]
+            assert landed == 6
+            # If the name had been interpolated into the `search_path` value
+            # rather than quoted, the comma would have split it and the
+            # schema it resolved to would be the prefix before the quote --
+            # a different, non-existent schema, and `current_schema()` would
+            # not be the hostile name at all.
+            assert connection.execute("SELECT current_schema() AS n").fetchone()[
+                "n"
+            ] == hostile
+        finally:
+            connection.close()
+    finally:
+        drop = raw_connection()
+        try:
+            drop.execute(f"DROP SCHEMA IF EXISTS {quoted} CASCADE")
+        finally:
+            drop.close()
+        restore_default_search_path(raw)
+
+
+# --- the drop capability -----------------------------------------------------
+
+
+def test_drop_all_refuses_without_an_approval():
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        with pytest.raises(TypeError):
+            # Deliberately invalid: `approval` is a required keyword argument,
+            # and the refusal has to come from the call signature, before the
+            # body runs. The ignore is scoped to this one line for that reason.
+            drop_all(connection)  # type: ignore[call-arg]
+        assert planted_survives(connection, "users")
+    finally:
+        clean_up(connection)
+        connection.close()
+
+
+def test_drop_all_refuses_an_approval_for_another_database():
+    """A token is not authority: the approval is re-checked against the live
+    connection, on every field it binds.
+
+    One wrong field is enough. An approval that only bound the host would pass
+    here; an approval that binds host, port, database AND schema is what
+    "cannot succeed against an unapproved database" actually requires.
+    """
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        genuine = approve_test_database(connection)
+        for field, value in (
+            ("host", "somewhere-else.example"),
+            ("port", genuine.identity.port + 1),
+            ("database", "some_other_database"),
+        ):
+            forged = replace(
+                genuine, identity=replace(genuine.identity, **{field: value})
+            )
+            with pytest.raises(UnapprovedDatabaseError, match="approved for"):
+                drop_all(connection, approval=forged)
+            # The schema field binds too.
+        with pytest.raises(UnapprovedDatabaseError, match="approved for"):
+            drop_all(connection, approval=replace(genuine, schema="somewhere_else"))
+        # After all five refusals, everything is still standing.
+        for table in ("users", "sessions", "messages", "events", "memories"):
+            assert planted_survives(connection, table)
+    finally:
+        clean_up(connection)
+        connection.close()
+
+
+def test_an_approval_is_refused_when_the_database_is_no_longer_safe():
+    """The verdict is re-checked at drop time, not only when the approval was
+    minted. Something foreign appeared since; the drop is refused."""
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        approval = approve_test_database(connection)
+        connection.execute("CREATE TABLE interloper (id integer)")
+        with pytest.raises(UnapprovedDatabaseError, match="foreign objects"):
+            drop_all(connection, approval=approval)
+        assert planted_survives(connection, "users")
+        assert planted_survives(connection, "interloper")
+    finally:
+        connection.execute("DROP TABLE interloper")
+        clean_up(connection)
+        connection.close()
+
+
+def test_approval_is_refused_for_a_database_that_is_not_the_declared_test_one(
+    monkeypatch,
+):
+    """POSTGRES_TEST_URL names the target; a connection to anything else is
+    not approved, however innocent that anything else looks."""
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        monkeypatch.setenv(
+            "POSTGRES_TEST_URL", URL.replace("/pac_test", "/somewhere_else")
+        )
+        with pytest.raises(UnapprovedDatabaseError, match="POSTGRES_TEST_URL names"):
+            approve_test_database(connection)
+        assert planted_survives(connection, "users")
+    finally:
+        # `reset_to_empty`, not `clean_up`: this test's own subject is a
+        # `POSTGRES_TEST_URL` that cannot approve anything, and `monkeypatch`
+        # has not yet undone it inside the `finally`. Asking the approval
+        # mechanism to clean up after a test about the approval mechanism
+        # refusing would just re-run the refusal.
+        connection.close()
+        reset_to_empty()
+
+
+def test_approval_is_refused_when_the_url_is_the_same_database_spelled_differently(
+    monkeypatch,
+):
+    """Normalised, not string-compared.
+
+    Adding a query parameter does not change which database a URL reaches. A
+    string comparison would wave this through; a normalised identity does not.
+    """
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        separator = "&" if "?" in URL else "?"
+        monkeypatch.setenv(
+            "POSTGRES_TEST_URL", f"{URL}{separator}application_name=something_else"
+        )
+        # Same database, so the identity matches and approval is still granted
+        # -- which is the point: a differing spelling is not a different target.
+        assert approve_test_database(connection).identity == inspect_database(
+            connection
+        ).identity
+
+        monkeypatch.setenv(
+            "POSTGRES_TEST_URL",
+            URL.replace(f"@{IDENTITY.host}", "@127.0.0.1"),
+        )
+        with pytest.raises(UnapprovedDatabaseError, match="POSTGRES_TEST_URL names"):
+            approve_test_database(connection)
+    finally:
+        connection.close()
+        reset_to_empty()
+
+
+def test_approval_is_refused_when_no_test_url_is_advertised(monkeypatch):
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        monkeypatch.delenv("POSTGRES_TEST_URL", raising=False)
+        with pytest.raises(UnapprovedDatabaseError, match="not set"):
+            approve_test_database(connection)
+        assert planted_survives(connection, "users")
+    finally:
+        connection.close()
+        reset_to_empty()
+
+
+def test_a_configured_denylist_refuses_an_otherwise_legitimate_database(
+    monkeypatch,
+):
+    """The OPTIONAL hardening, exercised.
+
+    Not the guard -- a database with a foreign `users` is refused without
+    consulting configuration at all, which the other tests here show. This is
+    the one case the shape check cannot cover: a database that IS entirely
+    pac-shaped and still must not be dropped.
+
+    A whole URL, because that is what the variable holds: `database_identity_of`
+    takes a URL and refuses to guess at a bare hostname, so a denylist entry
+    that is not a URL is a loud error rather than a silently ignored line.
+    """
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        monkeypatch.setenv("PAC_PROTECTED_DATABASE_URLS", URL)
+        with pytest.raises(UnapprovedDatabaseError, match="PAC_PROTECTED_DATABASE_URLS"):
+            approve_test_database(connection)
+
+        # And a drop refuses too, even with an approval minted before the
+        # denylist was set -- the check runs at drop time, not only at minting.
+        monkeypatch.delenv("PAC_PROTECTED_DATABASE_URLS")
+        genuine = approve_test_database(connection)
+        monkeypatch.setenv("PAC_PROTECTED_DATABASE_URLS", URL)
+        with pytest.raises(UnapprovedDatabaseError, match="PAC_PROTECTED_DATABASE_URLS"):
+            drop_all(connection, approval=genuine)
+        assert planted_survives(connection, "users")
+    finally:
+        monkeypatch.delenv("PAC_PROTECTED_DATABASE_URLS", raising=False)
+        connection.close()
+        reset_to_empty()
+
+
+def test_a_denylist_entry_that_is_not_a_url_is_an_error_not_a_silent_no_op(
+    monkeypatch,
+):
+    """A denylist that quietly ignores what it cannot parse is not a denylist.
+
+    `database_identity_of` refuses a URL that names no host, and that refusal
+    propagates out of `_protected_identities` rather than being caught and
+    dropped. A typo in the denylist therefore fails loudly at the moment
+    someone tries to drop a database -- which is the one moment it matters.
+    """
+    connection = open_database(SchemaIntent.INITIALIZE)
+    try:
+        monkeypatch.setenv("PAC_PROTECTED_DATABASE_URLS", "not-a-url")
+        with pytest.raises(ValueError, match="no host"):
+            approve_test_database(connection)
+    finally:
+        monkeypatch.delenv("PAC_PROTECTED_DATABASE_URLS", raising=False)
+        connection.close()
+        reset_to_empty()

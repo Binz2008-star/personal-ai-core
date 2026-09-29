@@ -85,9 +85,12 @@ permits.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+import os
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Sequence
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from urllib.parse import urlparse
 
 from ..core.domain import (
     Event,
@@ -186,6 +189,441 @@ _DROP_ALL = (
 )
 
 
+# ============================================================================
+# THE DESTRUCTIVE-ENTRY GATE
+# ============================================================================
+#
+# `_SCHEMA` and `_DROP_ALL` are the only two things in this file that can
+# change the shape of a database, and both are exact inverses. Against a
+# database that is not this project's, the pair is not a partial risk: applying
+# `_SCHEMA` writes six tables into a stranger's schema, and `_DROP_ALL` drops
+# whatever occupies those six names, CASCADE, taking the stranger's data with
+# it. An unrelated application reachable through the same driver can have a
+# table called `users` with real accounts behind it, and the name alone does not
+# distinguish the two databases.
+#
+# So neither runs on a URL. Both run on a URL PLUS an explicit statement of what
+# the caller intends to do and an independent statement of which database it
+# believes it is reaching -- and both are checked against what the server
+# actually says, read-only, BEFORE any DDL. A refusal leaves zero writes.
+
+
+class SchemaIntent(str, Enum):
+    """What the caller is about to do, declared rather than inferred.
+
+    `INITIALIZE` creates this project's schema; `OPERATE` runs against one that
+    already exists. The two are separate acts on purpose: creating a schema in a
+    database is the destructive one, and a caller that means to read and write
+# should have to say so before it can do it.
+    """
+
+    INITIALIZE = "initialize"
+    OPERATE = "operate"
+
+
+class DatabaseVerdict(str, Enum):
+    """What a database turned out to be, decided read-only.
+
+    Every member is produced by `decide_verdict` and consulted by every gate;
+    `tests/unit/test_postgres_safety.py` asserts both directions so that no
+    member can be added here and left unreachable.
+    """
+
+    VACUOUS = "vacuous"
+    PAC = "pac"
+    PARTIAL = "partial"
+    FOREIGN = "foreign"
+    OCCUPIED = "occupied"
+
+
+class DatabaseIdentityError(RuntimeError):
+    """The connection is not the database the caller said it was."""
+
+
+class UnapprovedDatabaseError(RuntimeError):
+    """A destructive operation was attempted without a live, matching approval."""
+
+
+@dataclass(frozen=True)
+class DatabaseIdentity:
+    """Host, port and database -- the whole of what `connect` may confirm.
+
+    The caller's `identity=` is an INDEPENDENT assertion of these three values.
+    It is never derived from `database_url`: a value read off the URL the code
+    is about to connect to is a restatement of its own input, which would make
+    the check unfailable by construction rather than merely untrue.
+
+    `database` alone cannot discriminate. An unrelated application this backend
+    must never touch is also named `neondb`, so the name proves nothing and the
+    host is what actually separates the two. Port is included for the same
+    reason: one host serves several endpoints.
+
+    Deliberately three fields. Schema is session execution context, not
+    identity: it is pinned per transaction by `_pin_target_schema` and verified
+    there, rather than asserted by a caller who could simply get it wrong.
+    """
+
+    host: str
+    port: int
+    database: str
+
+
+@dataclass(frozen=True)
+class TestDatabaseApproval:
+    """The capability `drop_all` requires, minted by `approve_test_database`.
+
+    A frozen value, not a private symbol: the guarantee is that `drop_all`
+    cannot succeed against an unapproved database, which is a property of the
+    runtime re-check and not of the token's name. Binding the schema as well as
+    the identity makes the capability exact -- this host, port, database AND
+    schema -- rather than "whatever the session resolved to at drop time".
+    """
+
+    identity: DatabaseIdentity
+    schema: str
+
+
+@dataclass(frozen=True)
+class SchemaSnapshot:
+    """A read-only observation of the target schema. Pure data, no behaviour."""
+
+    relations: Mapping[str, str]
+    columns: Mapping[str, tuple[tuple[str, str, bool], ...]]
+
+    @classmethod
+    def from_rows(cls, rows: Sequence[Mapping[str, Any]]) -> SchemaSnapshot:
+        relations: dict[str, str] = {}
+        columns: dict[str, list[tuple[str, str, bool]]] = {}
+        for row in rows:
+            relations[row["relname"]] = row["relkind"]
+            if row["attname"] is not None:
+                columns.setdefault(row["relname"], []).append(
+                    (row["attname"], row["ty"], bool(row["attnotnull"]))
+                )
+        return cls(relations, {k: tuple(v) for k, v in columns.items()})
+
+
+@dataclass(frozen=True)
+class DatabaseInspection:
+    """Everything the gate learned, in one value, so refusals can say why."""
+
+    verdict: DatabaseVerdict
+    reason: str
+    snapshot: SchemaSnapshot
+    identity: DatabaseIdentity
+    schema: str
+    reported_database: str
+    server_address: str
+
+
+def database_identity_of(url: str) -> DatabaseIdentity:
+    """Normalise a PostgreSQL URL down to (host, port, database).
+
+    Everything that does not change WHICH database a URL reaches is discarded:
+    scheme, credentials, query parameters, their order, and their absence. Two
+    URLs differing only in `?sslmode=require&channel_binding=require` versus
+    `?channel_binding=require&sslmode=require` name the same database, and a
+    safety check that missed that would be trivially evaded by adding a
+    parameter.
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError(f"URL names no host: {url!r}")
+    try:
+        port = 5432 if parsed.port is None else int(parsed.port)
+    except ValueError as exc:  # non-numeric port
+        raise ValueError(f"URL names an invalid port: {url!r}") from exc
+    database = (parsed.path or "").lstrip("/")
+    if not database:
+        raise ValueError(f"URL names no database: {url!r}")
+    return DatabaseIdentity(host=host, port=port, database=database)
+
+
+def live_identity_of(connection: Any) -> DatabaseIdentity:
+    """The identity of the connection actually in hand, from libpq's report.
+
+    Taken from `connection.info` -- the endpoint this session actually opened.
+
+    NOT from `inet_server_addr()`. That returns the server's IP address, and a
+    hostname never equals an IP literal, so comparing a caller's `host` against
+    it could never match: the check would fail on every connection, including
+    the correct ones. `inspect_database` keeps that value for diagnostics only.
+
+    A Unix-socket connection reports its socket directory as the host and has no
+    port, so it cannot be expressed in this model. Rather than approximate it
+    and compare the wrong thing, this refuses and says so.
+    """
+    info = connection.info
+    port = info.port
+    if not isinstance(port, int):
+        raise DatabaseIdentityError(
+            "this connection is not a TCP endpoint, so it has no host/port "
+            "identity to confirm; use a TCP URL"
+        )
+    return DatabaseIdentity(
+        host=(info.host or "").lower(), port=int(port), database=info.dbname or ""
+    )
+
+
+# The shape `_SCHEMA` produces, read off PostgreSQL 18.6 rather than derived by
+# hand. `confidence DOUBLE PRECISION` reports as `double precision`, not
+# `float8`, which is exactly the kind of detail a hand-written expectation gets
+# wrong and a live server does not. A change to `_SCHEMA` must change this, and
+# `test_the_expected_shape_matches_what_the_schema_creates` is what says so.
+_EXPECTED_TABLES: Mapping[str, tuple[tuple[str, str, bool], ...]] = {
+    "events": (
+        ("seq", "bigint", True),
+        ("id", "text", True),
+        ("session_id", "text", True),
+        ("type", "text", True),
+        ("payload", "text", True),
+        ("message_id", "text", False),
+        ("actor", "text", True),
+        ("occurred_at", "text", True),
+    ),
+    "memories": (
+        ("seq", "bigint", True),
+        ("id", "text", True),
+        ("session_id", "text", True),
+        ("type", "text", True),
+        ("content", "text", True),
+        ("language", "text", True),
+        ("status", "text", True),
+        ("confidence", "double precision", True),
+        ("version", "integer", True),
+        ("supersedes", "text", False),
+        ("links", "text", True),
+        ("created_at", "text", True),
+        ("updated_at", "text", True),
+        ("prov_session_id", "text", True),
+        ("prov_event_id", "text", True),
+        ("prov_promoted_by", "text", True),
+        ("prov_promoted_at", "text", True),
+        ("prov_message_id", "text", False),
+    ),
+    "messages": (
+        ("seq", "bigint", True),
+        ("id", "text", True),
+        ("session_id", "text", True),
+        ("role", "text", True),
+        ("content", "text", True),
+        ("language", "text", True),
+        ("created_at", "text", True),
+    ),
+    "schema_version": (("version", "integer", True),),
+    "sessions": (
+        ("id", "text", True),
+        ("user_id", "text", True),
+        ("status", "text", True),
+        ("created_at", "text", True),
+    ),
+    "users": (
+        ("id", "text", True),
+        ("created_at", "text", True),
+    ),
+}
+
+# `_SCHEMA` declares `seq BIGSERIAL` on messages, events and memories, and
+# BIGSERIAL creates a sequence named `<table>_<column>_seq`. Verified on 18.6:
+# exactly these three, and nothing else beyond the six tables and their indexes.
+#
+# They matter because a sequence IS a user-defined relation. Without naming them
+# here, a correctly initialized database would read as OCCUPIED and OPERATE
+# would refuse the database this backend itself created.
+_EXPECTED_SEQUENCES = frozenset(
+    {"messages_seq_seq", "events_seq_seq", "memories_seq_seq"}
+)
+_EXPECTED_RELATIONS = frozenset(_EXPECTED_TABLES) | _EXPECTED_SEQUENCES
+
+# `relkind` values that count as a user-defined relation: ordinary and
+# partitioned tables, views, materialized views, sequences, foreign tables and
+# composite types. `i` and `I` (indexes) are excluded because every table has
+# them and none is user-authored, and `T` (TOAST) likewise. `c` is included
+# because `CREATE TYPE ... AS` is something a user did.
+_USER_RELATION_KINDS = ("r", "p", "v", "m", "S", "f", "c")
+_TABLE_KIND = "r"
+
+# Which verdicts each gate admits. Stated as data rather than as scattered
+# `is` comparisons so that "every verdict is decided somewhere" is a property a
+# test can read, and a sixth enum member cannot be added and left unhandled.
+_INITIALIZE_ALLOWS = frozenset({DatabaseVerdict.VACUOUS})
+_OPERATE_ALLOWS = frozenset({DatabaseVerdict.PAC})
+_APPROVAL_ALLOWS = frozenset({DatabaseVerdict.VACUOUS, DatabaseVerdict.PAC})
+_DROP_ALLOWS = frozenset({DatabaseVerdict.VACUOUS, DatabaseVerdict.PAC})
+
+
+def decide_verdict(snapshot: SchemaSnapshot) -> tuple[DatabaseVerdict, str]:
+    """Classify a snapshot. Pure: no connection, no environment, no DDL.
+
+    The ordering below is the safety argument, so it is worth stating why each
+    rule sits where it does.
+
+    KIND BEFORE SHAPE, and both before completeness. A relation called `users`
+    that is a view would otherwise be compared column-by-column against a
+    table's shape and, if the columns happened to line up, accepted as this
+    project's table. Shape-beats-completeness for the same reason: on a foreign
+    database, "most of the tables matched" is precisely the answer that fails
+    silently.
+
+    `VACUOUS` is EMPTINESS, not absence-of-collision. A database holding only
+    `jobs`, `leads` and `paddle_*` collides with nothing and is still not
+    empty, and treating it as a blank slate would create this project's tables
+    inside somebody else's application. Name-collision detection is not
+    emptiness detection, and only the second prevents the first.
+
+    `PAC` is EXCLUSIVE. Six correct tables coexisting with fifty foreign
+    relations is not this project's database; it is a database this project was
+    installed into, and refusing it is the point.
+    """
+    expected = frozenset(_EXPECTED_TABLES)
+    claimed = sorted(name for name in snapshot.relations if name in expected)
+    for name in claimed:
+        kind = snapshot.relations[name]
+        if kind != _TABLE_KIND:
+            return DatabaseVerdict.FOREIGN, (
+                f"{name} exists but is a {kind}, not an ordinary table"
+            )
+        if snapshot.columns.get(name, ()) != _EXPECTED_TABLES[name]:
+            return DatabaseVerdict.FOREIGN, f"{name} has unexpected columns"
+    if len(claimed) == len(expected):
+        present = set(snapshot.relations)
+        if present == _EXPECTED_RELATIONS:
+            return DatabaseVerdict.PAC, "this project's schema, and nothing else"
+        outside = sorted(present - _EXPECTED_RELATIONS)
+        if outside:
+            return DatabaseVerdict.OCCUPIED, (
+                f"this project's tables coexist with {len(outside)} unrelated "
+                f"relations (e.g. {', '.join(outside[:3])})"
+            )
+        # All six tables, correct, but a relation this project's schema should
+        # have is missing -- almost always one of the BIGSERIAL sequences, whose
+        # absence leaves the column default dangling. A subset of PAC is
+        # PARTIAL, not PAC: the check is equality, so an incomplete database is
+        # refused rather than adopted.
+        return DatabaseVerdict.PARTIAL, (
+            "all six tables exist but "
+            f"{len(_EXPECTED_RELATIONS - present)} expected relations are "
+            f"missing (e.g. {', '.join(sorted(_EXPECTED_RELATIONS - present)[:3])})"
+        )
+    if claimed:
+        return DatabaseVerdict.PARTIAL, (
+            f"{len(claimed)} of {len(expected)} expected tables exist"
+        )
+    extra = sorted(snapshot.relations)
+    if extra:
+        return DatabaseVerdict.OCCUPIED, (
+            f"the schema holds {len(extra)} unrelated relations and none of "
+            f"this project's tables (e.g. {', '.join(extra[:3])})"
+        )
+    return DatabaseVerdict.VACUOUS, "no user-defined relations"
+
+
+def _pin_target_schema(connection: Any) -> str:
+    """Bind the current transaction to one schema, and return it.
+
+    `_SCHEMA` writes unqualified names, so those names land wherever
+    `search_path` resolves -- and `inspect_database` reads from
+    `current_schema()`. If the two could disagree, the gate would classify one
+    database and the DDL would write to another, and no amount of correct
+    reasoning elsewhere would help. So the session is pinned FIRST, the value is
+    read from the pin, and the inspection re-reads it: the property holds by
+    construction and is then verified rather than assumed.
+
+    `set_config(..., is_local := true)` is `SET LOCAL`, reverted on commit and
+    on rollback alike, so nothing leaks to the caller. `quote_ident` is applied
+    SERVER-side, so a schema name containing quotes, commas or whitespace is
+    handled exactly by PostgreSQL's own rule and cannot inject. `pg_temp` is
+    listed last deliberately: left implicit, a temporary table would be searched
+    before the pinned schema and resolution would stop being deterministic.
+    """
+    schema = connection.execute("SELECT current_schema() AS n").fetchone()["n"]
+    if not schema:
+        raise DatabaseIdentityError(
+            "search_path names no existing schema, so an unqualified CREATE "
+            "TABLE would fail"
+        )
+    connection.execute(
+        "SELECT set_config('search_path', "
+        "       quote_ident(%s) || ', pg_catalog, pg_temp', true)",
+        (schema,),
+    )
+    return schema
+
+
+def inspect_database(connection: Any) -> DatabaseInspection:
+    """READ-ONLY. Decide what this database is.
+
+    One catalog query yields schema, relation kind and column shape together,
+    from an explicit `pg_namespace` join. `to_regclass()` is deliberately not
+    used: it resolves through `search_path` without stating a schema, so a
+    relation of the same name in an earlier schema would be inspected, and it
+    matches ANY relation kind, so a view could pass as a table.
+
+    Writes nothing, deletes nothing, and is called before any DDL in the same
+    transaction, so a refusal leaves the database exactly as it was found.
+    """
+    connection.row_factory = _dict_row()
+    snapshot = SchemaSnapshot.from_rows(
+        connection.execute(
+            "SELECT c.relname, c.relkind, a.attname, "
+            "       format_type(a.atttypid, a.atttypmod) AS ty, a.attnotnull "
+            "FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "LEFT JOIN pg_attribute a "
+            "  ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped "
+            "WHERE n.nspname = current_schema() "
+            f"  AND c.relkind IN ({', '.join(repr(k) for k in _USER_RELATION_KINDS)}) "
+            "ORDER BY c.relname, a.attnum"
+        ).fetchall()
+    )
+    verdict, reason = decide_verdict(snapshot)
+    return DatabaseInspection(
+        verdict=verdict,
+        reason=reason,
+        snapshot=snapshot,
+        identity=live_identity_of(connection),
+        schema=connection.execute("SELECT current_schema() AS n").fetchone()["n"],
+        reported_database=connection.execute(
+            "SELECT current_database() AS n"
+        ).fetchone()["n"],
+        # Diagnostics only. Never compared: this is an IP literal and a
+        # hostname is never equal to one.
+        server_address=connection.execute(
+            "SELECT coalesce(inet_server_addr()::text, 'local') || ':' "
+            "|| coalesce(inet_server_port()::text, '') AS a"
+        ).fetchone()["a"],
+    )
+
+
+_PROTECTED_ENV = "PAC_PROTECTED_DATABASE_URLS"
+
+
+def _protected_identities() -> frozenset[DatabaseIdentity]:
+    """OPTIONAL hardening, from configuration. Empty unless an owner sets it.
+
+    A production endpoint's hostname does not belong in library source, where
+    it goes stale the moment an endpoint is rebuilt and cannot be updated by
+    whoever owns it. So this reads a denylist instead of hardcoding one, and it
+    is inert by default.
+
+    It is a tripwire in front of the guard, not the guard. The guard is the
+    shape check: a database holding an unrelated `users` table is FOREIGN and
+    `approve_test_database` refuses it without consulting this at all. Configure
+    it for the one case the shape check cannot cover -- an endpoint that is
+    entirely pac-shaped and still must not be dropped.
+    """
+    raw = os.environ.get(_PROTECTED_ENV, "")
+    if not raw.strip():
+        return frozenset()
+    found = set()
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if piece:
+            found.add(database_identity_of(piece))
+    return frozenset(found)
+
+
 class SchemaVersionMismatch(RuntimeError):
     """The database was written by a different schema version.
 
@@ -206,28 +644,108 @@ def _driver() -> Any:
     return psycopg
 
 
-def connect(database_url: str) -> "psycopg.Connection[Any]":
-    """Open the database, applying the schema and checking its version.
+def _dict_row() -> Any:
+    """The dict row factory, imported lazily for the same reason as the driver.
 
-    The schema and its version row are applied in ONE transaction, so a half
-    applied schema cannot exist on disk. A database whose version disagrees
-    with this build's `SCHEMA_VERSION` is closed and refused -- nothing is
-    read or written -- exactly as the SQLite backend refuses a foreign file.
+    Rows are read by COLUMN NAME throughout this module, and `dict_row` is
+    what makes that possible. It is fetched through a function rather than
+    imported at module level so that importing this file on a machine with no
+    psycopg installed still works -- the module docstring's whole argument
+    about the `server` extra depends on that staying true.
+    """
+    from psycopg.rows import dict_row  # pyright: ignore[reportMissingImports]
 
-    The connection is opened in autocommit mode: statement groups commit
-    when their explicit `transaction()` block exits, and nowhere else. In
-    particular `with connection:` must not be used -- psycopg 3.3 changed
-    it to close the connection on exit (see the module docstring).
+    return dict_row
+
+
+def connect(
+    database_url: str,
+    *,
+    intent: SchemaIntent,
+    identity: DatabaseIdentity,
+) -> psycopg.Connection[Any]:
+    """Open the database, after checking it is the one the caller named.
+
+    `intent` and `identity` are REQUIRED and keyword-only, with no defaults. A
+    default would be a value the caller did not choose, and a value derived
+    from `database_url` would be a restatement of this function's own input --
+    either way the check could not fail, which is the same as not having it.
+
+    The order is fixed and every step precedes any DDL:
+
+      1. pin `search_path` to one schema for this transaction, so the
+         inspection and the DDL that follows cannot target different schemas;
+      2. inspect, read-only, IN THE SAME TRANSACTION as the DDL -- so the
+         catalog snapshot and the statements it authorises share one snapshot
+         and a concurrent `DROP` cannot make the verdict describe a database
+         that no longer exists by the time `_SCHEMA` runs;
+      3. confirm the live identity equals what the caller asserted, on all
+         three fields;
+      4. confirm the verdict is one this intent admits;
+      5. only then, and only for `INITIALIZE`, apply `_SCHEMA`.
+
+    `OPERATE` applies NO DDL at all -- not even `CREATE TABLE IF NOT EXISTS`,
+    which would be a write on every open and would mask the fact that it is
+    being used against a database that was never initialized.
+
+    Any refusal closes the connection and raises before a single row is
+    written. The transaction rolls back, so the database is as it was found.
+
+    The connection is opened in autocommit mode: statement groups commit when
+    their explicit `transaction()` block exits, and nowhere else. In particular
+    `with connection:` must not be used -- psycopg 3.3 changed it to close the
+    connection on exit (see the module docstring).
     """
     psycopg = _driver()
-    from psycopg.rows import dict_row
 
     connection = psycopg.connect(database_url, autocommit=True)
-    connection.row_factory = dict_row
+    connection.row_factory = _dict_row()
     try:
         with connection.transaction():
-            for statement in _SCHEMA:
-                connection.execute(statement)
+            schema = _pin_target_schema(connection)
+            inspection = inspect_database(connection)
+            if inspection.schema != schema:
+                raise DatabaseIdentityError(
+                    "the target schema moved between the search-path pin and "
+                    f"the inspection ({schema} -> {inspection.schema}). "
+                    "Nothing was written."
+                )
+            live = inspection.identity
+            if (live.host, live.port, live.database) != (
+                identity.host,
+                identity.port,
+                identity.database,
+            ):
+                raise DatabaseIdentityError(
+                    f"confirmed {identity.host}:{identity.port}/{identity.database}, "
+                    f"connected to {live.host}:{live.port}/{live.database} "
+                    f"(server address {inspection.server_address}). "
+                    "Nothing was written."
+                )
+            if live.database != inspection.reported_database:
+                raise DatabaseIdentityError(
+                    f"the URL named {live.database} but the server reports "
+                    f"{inspection.reported_database}. Nothing was written."
+                )
+            if intent is SchemaIntent.INITIALIZE and (
+                inspection.verdict not in _INITIALIZE_ALLOWS
+            ):
+                raise DatabaseIdentityError(
+                    "INITIALIZE requires an empty database; this one is "
+                    f"{inspection.verdict.value}: {inspection.reason}. "
+                    "Nothing was written."
+                )
+            if intent is SchemaIntent.OPERATE and (
+                inspection.verdict not in _OPERATE_ALLOWS
+            ):
+                raise DatabaseIdentityError(
+                    "OPERATE requires this project's schema; this one is "
+                    f"{inspection.verdict.value}: {inspection.reason}. "
+                    "Nothing was written."
+                )
+            if intent is SchemaIntent.INITIALIZE:
+                for statement in _SCHEMA:
+                    connection.execute(statement)
             row = connection.execute(
                 "SELECT version FROM schema_version"
             ).fetchone()
@@ -249,14 +767,93 @@ def connect(database_url: str) -> "psycopg.Connection[Any]":
     return connection
 
 
-def drop_all(connection: "psycopg.Connection[Any]") -> None:
+def approve_test_database(connection: Any) -> TestDatabaseApproval:
+    """Mint the capability `drop_all` requires, or refuse to.
+
+    Reads `POSTGRES_TEST_URL` and configuration. It never reads `DATABASE_URL`,
+    and no module under `src/` names that variable at all; whether the two URLs
+    point at the same database is a TEST-policy question and lives in
+    `tests/support/postgres_target.py`, where it can be compared with the
+    normaliser instead of with string equality.
+
+    Three conditions, all required:
+      - `POSTGRES_TEST_URL` is set, and names the database this connection
+        actually reached -- compared through `database_identity_of`, so a
+        differing query string or credential cannot make a foreign URL look
+        like a different one;
+      - the verdict is VACUOUS or PAC, so a test run can only ever clean up
+        after this project;
+      - the endpoint is not on the optional configured denylist.
+    """
+    declared = os.environ.get("POSTGRES_TEST_URL", "")
+    if not declared:
+        raise UnapprovedDatabaseError(
+            "POSTGRES_TEST_URL is not set, so there is no approved test "
+            "database. Nothing was dropped."
+        )
+    inspection = inspect_database(connection)
+    live = inspection.identity
+    wanted = database_identity_of(declared)
+    if live != wanted:
+        raise UnapprovedDatabaseError(
+            f"POSTGRES_TEST_URL names {wanted.host}:{wanted.port}/"
+            f"{wanted.database}, but this connection is {live.host}:"
+            f"{live.port}/{live.database}. Nothing was dropped."
+        )
+    if inspection.verdict not in _APPROVAL_ALLOWS:
+        raise UnapprovedDatabaseError(
+            f"a test database holds foreign objects: {inspection.reason}. "
+            "Nothing was dropped."
+        )
+    if live in _protected_identities():
+        raise UnapprovedDatabaseError(
+            f"{live.host}:{live.port}/{live.database} is listed in "
+            f"{_PROTECTED_ENV}. Nothing was dropped."
+        )
+    return TestDatabaseApproval(identity=live, schema=inspection.schema)
+
+
+def drop_all(connection: Any, *, approval: TestDatabaseApproval) -> None:
     """Remove every table this backend creates, in dependency order.
 
     Exposed for the conformance suite so a verification run against a real
     server leaves the database exactly as it found it -- a test that writes
     into a server database must also be able to clean up after itself.
+
+    Requires an approval, and RE-VERIFIES it against the live connection: a
+    token is not authority. An approval minted for one database is checked
+    again here, by re-reading the identity and the schema from the server, so
+    holding a valid approval does not make one database's passkey open another
+    database's door. The verdict is re-checked for the same reason -- the
+    approval says this was a safe database when it was minted, and the question
+    is worth asking again now.
     """
     with connection.transaction():
+        # Pinned for its EFFECT, not for the name it returns: `inspect_database`
+        # reads `current_schema()` on this same transaction, so the pin this
+        # call installs is the one the inspection is taken under. Naming the
+        # result would imply the name is what makes the two agree, and it is
+        # not -- the shared transaction is.
+        _pin_target_schema(connection)
+        inspection = inspect_database(connection)
+        live = inspection.identity
+        if live != approval.identity or inspection.schema != approval.schema:
+            raise UnapprovedDatabaseError(
+                f"approved for {approval.identity.host}:"
+                f"{approval.identity.port}/{approval.identity.database} in "
+                f"{approval.schema}, connected to {live.host}:{live.port}/"
+                f"{live.database} in {inspection.schema}. Nothing was dropped."
+            )
+        if live in _protected_identities():
+            raise UnapprovedDatabaseError(
+                f"{live.host}:{live.port}/{live.database} is listed in "
+                f"{_PROTECTED_ENV}. Nothing was dropped."
+            )
+        if inspection.verdict not in _DROP_ALLOWS:
+            raise UnapprovedDatabaseError(
+                f"a test database holds foreign objects: {inspection.reason}. "
+                "Nothing was dropped."
+            )
         for statement in _DROP_ALL:
             connection.execute(statement)
 
