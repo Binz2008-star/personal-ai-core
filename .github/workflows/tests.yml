@@ -58,7 +58,15 @@ jobs:
       # layout, and that with no POSTGRES_TEST_URL advertised -- which is the
       # situation in CI -- the resolver returns empty and the server-gated
       # suites skip with an accounted reason rather than raising.
+      #
+      # PYTHONPATH=src because `postgres_target` imports `personal_ai_core`,
+      # and nothing installs the package: pytest finds src/ through
+      # `pythonpath` in pyproject.toml, a bare `python -c` does not. Same
+      # src-layout resolution, stated explicitly -- no editable install, so
+      # what this checks is the tree as committed.
       - name: Test support package resolves
+        env:
+          PYTHONPATH: src
         run: >-
           python -c "import sys; sys.path.insert(0, 'tests');
           from support.postgres_target import server_url, server_identity;
