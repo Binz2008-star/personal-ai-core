@@ -441,6 +441,9 @@ claim written in one place with nothing that notices it going stale.
                grounding for both durable slices, driver-free composition
                root, 6-leg server-gated integration suite. Phase 6 ACCEPTED;
                recorded in this docs commit
+  #74 896eeee  docs: Phase 6 ACCEPTED; record #73 in the merge ledger
+  #75 7a2a6bf  test(config): pin the canonical Boss model mechanically (ADR-002)
+  #77 cb21f35  Phase 2: context calibration and persistence safety
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
