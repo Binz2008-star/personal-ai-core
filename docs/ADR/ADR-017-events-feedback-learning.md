@@ -934,9 +934,11 @@ Three facts from it shape the decisions below:
 ### 15.2 What an Observation is
 
 A frozen, in-memory value produced by a pure function. There is **exactly one
-Observation per `source_event_id` that has at least one `FEEDBACK_RECORDED`
-record**. A conversation event with no feedback produces none. An Observation
-is not persisted, not an event, not feedback and not memory (review point 6).
+Observation per eligible source event: a `GENERATION_COMPLETED` event with at
+least one `FEEDBACK_RECORDED` record**. Feedback referencing any other source
+event produces no Observation and is returned as `unobserved` (D2). A
+conversation event with no feedback produces none. An Observation is not
+persisted, not an event, not feedback and not memory (review point 6).
 
 ### 15.3 Fields — replaces the §3.3 field list
 
@@ -1026,10 +1028,26 @@ moves to `core/feedback.py`, and `app/cli.py` imports it from there. The value
 is unchanged, so stored data is unaffected.
 
 **D7 — Determinism.** Derivation takes values, not repositories. It performs no
-I/O, reads no clock, calls no model and mints no random id. Order is the event
-store's `seq` order as the read methods return it
-(`EventRepository.list_for_session`, `FeedbackRepository.list_for_session`).
-It is never re-sorted by `occurred_at`.
+I/O, reads no clock, calls no model and mints no random id.
+
+*Ordering is a precondition, not something derivation computes* (clarified
+2026-09-30). Neither `Event` nor `FeedbackRecord` carries `seq`: it is a storage
+column, and it reaches a caller only as the order of the sequence a read method
+returns. So:
+
+- `events` and `feedback` **must be supplied in ascending `seq` order**, exactly
+  as `EventRepository.list_for_session` and `FeedbackRepository.list_for_session`
+  return them;
+- derivation **preserves input order** and treats it as the total order. "Last
+  record", `feedback_ids` and `conflicts` are all positions in that order;
+- derivation **never sorts**, and in particular never by `occurred_at`, which
+  is display data only.
+
+This follows the existing precedent `core.feedback.classify_feedback_rows`, a
+pure function whose contract is "rows must arrive in `seq` order". Sorting
+inside derivation was considered and not adopted. It would need `seq` on
+`Event` and `FeedbackRecord`, which is a `core` domain and persistence change
+that §15.5 excludes from Unit 2 and that would need its own authorization.
 
 ### 15.5 Unit 2 boundary, if authorized
 
@@ -1054,7 +1072,8 @@ It is never re-sorted by `occurred_at`.
 **Required tests:**
 - determinism: equal input gives equal output, and the input is not mutated;
 - one Observation per judged source event, several source events in one session;
-- `seq` order, including records whose `occurred_at` disagrees with `seq`;
+- input order is the total order: the result follows input order even when
+  `occurred_at` disagrees with it, and inputs are never re-sorted (D7);
 - D1 with the smoke-data case (GOOD then CORRECTION), a single record, and the
   same outcome recorded by two actors (no conflict);
 - D2: a non-generation source and a missing source event appear in
