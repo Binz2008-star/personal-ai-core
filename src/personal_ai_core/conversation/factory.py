@@ -48,6 +48,7 @@ from ..knowledge import (
     InMemoryVectorIndex,
     IngestionService,
 )
+from ..learning import FeedbackRecorder
 from ..persistence.in_memory import (
     InMemoryEventRepository,
     InMemoryMessageRepository,
@@ -56,6 +57,7 @@ from ..persistence.in_memory import (
 )
 from ..persistence.sqlite import (
     SqliteEventRepository,
+    SqliteFeedbackRepository,
     SqliteMemoryRepository,
     SqliteMessageRepository,
     SqliteSessionRepository,
@@ -142,6 +144,11 @@ class PersistentSlice:
     service: ConversationService
     events: SqliteEventRepository
     connection: sqlite3.Connection
+    # The way a judgement of an earlier reply enters the store (ADR-017 §3.1).
+    # Beside the service, not inside it: the recorder writes FEEDBACK_RECORDED
+    # events through `FeedbackRepository.append` and reaches no memory store,
+    # so the conversation path is exactly what it was without it.
+    feedback: FeedbackRecorder
     # Present only when built with `grounded=True`: the way in for documents.
     # The indexes behind it live in process memory and are gone at exit --
     # see `build_persistent_service`.
@@ -351,6 +358,7 @@ def build_persistent_service(
         service=service,
         events=events,
         connection=connection,
+        feedback=FeedbackRecorder(SqliteFeedbackRepository(connection)),
         ingestion=stack.ingestion if stack is not None else None,
         memories=memories if grounded else None,
     )

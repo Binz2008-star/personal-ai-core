@@ -34,7 +34,9 @@ from ..conversation.factory import (
     build_persistent_service,
 )
 from ..core.config import Settings
+from ..core.domain import EventType
 from ..core.errors import ProviderError
+from ..core.feedback import FEEDBACK_EVENT_TYPE, FeedbackOutcome
 from ..core.knowledge import Document
 
 # What a DIRECTORY given to --documents contributes. A file named explicitly
@@ -156,6 +158,21 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         metavar="TEXT",
         help="add one line to your profile, and exit.",
+    )
+    parser.add_argument(
+        "--feedback",
+        default=None,
+        metavar="LABEL",
+        help=(
+            "judge the latest reply in --session, and exit. One of: "
+            f"{', '.join(o.value for o in FeedbackOutcome)}."
+        ),
+    )
+    parser.add_argument(
+        "--correction",
+        default=None,
+        metavar="TEXT",
+        help="with --feedback correction only: what the reply should have said.",
     )
     return parser
 
@@ -302,6 +319,121 @@ def _load_profile(path: Path | None, out: TextIO) -> str | None:
     return text
 
 
+# The one payload key feedback from `pac` may carry, and only on CORRECTION.
+# Anything wider would be a payload schema, and ADR-017 has not designed one.
+CORRECTION_KEY = "correction"
+
+
+def _latest_reply(events, session_id: str):
+    """The source event B1 judges: the session's latest GENERATION_COMPLETED.
+
+    "Latest" is the event store's own session order (`seq`); no second
+    ordering is introduced here. None when the session has no reply yet.
+    """
+    replies = [
+        event
+        for event in events.list_for_session(session_id)
+        if event.type is EventType.GENERATION_COMPLETED
+    ]
+    return replies[-1] if replies else None
+
+
+def _feedback_count(events, session_id: str) -> int:
+    return sum(
+        1
+        for event in events.list_for_session(session_id)
+        if event.type is FEEDBACK_EVENT_TYPE
+    )
+
+
+def _feedback(args, database: Path | None, settings: Settings, transport, out: TextIO) -> int:
+    """Record one judgement of the latest reply in a stored session, and exit.
+
+    Record-and-exit, like --remember, rather than a command typed into the
+    conversation: a chat line is always a turn, so nothing a user says to the
+    model can be taken for feedback, and no model is called here.
+
+    Every refusal happens before the database is opened, except the two that
+    need it -- whether the session exists, and whether it has a reply yet.
+    The write itself is `FeedbackRecorder.record`; this function only decides
+    what to judge. Duplicate arbitration stays with the repository's unique
+    index; the before/after count only reports what it decided.
+    """
+    if args.feedback is None:
+        print("--correction goes with --feedback correction", file=out)
+        return 2
+    if database is None:
+        print("--feedback judges a stored conversation; it cannot be used with --ephemeral", file=out)
+        return 2
+    if args.agent or args.documents is not None or args.remember is not None:
+        print(
+            "--feedback records one judgement and exits; it cannot be combined "
+            "with --agent, --documents or --remember",
+            file=out,
+        )
+        return 2
+    if not args.session:
+        print("--feedback needs --session ID: the conversation whose latest reply it judges", file=out)
+        return 2
+    try:
+        outcome = FeedbackOutcome(args.feedback)
+    except ValueError:
+        print(
+            f"unknown feedback label: {args.feedback!r}. Use one of: "
+            f"{', '.join(o.value for o in FeedbackOutcome)}",
+            file=out,
+        )
+        return 2
+    payload = None
+    if args.correction is not None:
+        if outcome is not FeedbackOutcome.CORRECTION:
+            print(
+                f"--correction goes with --feedback correction, not {outcome.value}",
+                file=out,
+            )
+            return 2
+        correction = " ".join(args.correction.split())
+        if not correction:
+            print("--correction needs the text the reply should have had", file=out)
+            return 2
+        payload = {CORRECTION_KEY: correction}
+    if not database.is_file():
+        # Opening would create an empty store: a judgement cannot be the
+        # first thing written to a database.
+        print(f"no stored conversations at {database}", file=out)
+        return 2
+
+    slice_ = build_persistent_service(settings, database=database, transport=transport)
+    try:
+        session_id = args.session
+        if not slice_.service.has_session(session_id):
+            print(f"no such session: {session_id}", file=out)
+            return 2
+        source = _latest_reply(slice_.events, session_id)
+        if source is None:
+            print(f"session {session_id} has no reply to give feedback on yet", file=out)
+            return 2
+        before = _feedback_count(slice_.events, session_id)
+        slice_.feedback.record(
+            source_event_id=source.id,
+            session_id=session_id,
+            outcome=outcome,
+            actor="user",
+            payload=payload,
+        )
+        if _feedback_count(slice_.events, session_id) == before:
+            print(
+                f"feedback already recorded: {outcome.value} on reply {source.id} "
+                "-- nothing added; the first recording stands",
+                file=out,
+            )
+        else:
+            print(f"feedback recorded: {outcome.value} on reply {source.id}", file=out)
+        return 0
+    finally:
+        slice_.close()
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -325,6 +457,8 @@ def main(
     lines = iter(stdin if stdin is not None else sys.stdin)
 
     database = None if args.ephemeral else _database_path(args.database, environment)
+    if args.feedback is not None or args.correction is not None:
+        return _feedback(args, database, settings, transport, out)
     profile_path = _profile_path(args.profile, environment, database)
     if args.remember is not None:
         return _remember(profile_path, args.remember, out)
