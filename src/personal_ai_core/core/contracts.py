@@ -19,6 +19,7 @@ from .context import (
     HybridBudgetedContext,
 )
 from .domain import Event, Message, ModelResponse, Session, User
+from .feedback import FeedbackRecord
 from .knowledge import (
     CandidateList,
     Chunk,
@@ -125,6 +126,64 @@ class EventRepository(Protocol):
 
     def append(self, event: Event) -> None: ...
     def list_for_session(self, session_id: str) -> Sequence[Event]: ...
+
+
+@runtime_checkable
+class FeedbackRepository(Protocol):
+    """Atomic, idempotent storage for feedback (ADR-017 review point 1).
+
+    `append` either stores `record` and returns it, or -- if a record with
+    the same `idempotency_key` already exists -- returns the STORED record
+    and appends nothing. A duplicate is a no-op that yields the same value
+    (the first record), which a caller can observe by comparing
+    `returned.id == record.id`.
+
+    Atomicity is a property of this boundary, not a caller-side read-then-
+    write. On the durable backends the key check and the insert are ONE
+    operation: an unconditional INSERT whose duplicate case is arbitrated by
+    the partial unique index `events_feedback_idem_unique`, so the DATABASE
+    decides the winner and no statement reads first. The predicate form this
+    replaced (`INSERT ... WHERE NOT EXISTS`) is not equivalent -- under MVCC
+    two concurrent transactions can both read "no such row" and both insert.
+    In memory the same property comes from one method with no await/yield
+    between the check and the store.
+
+    `record.source_event_id` must already exist in the same session, or
+    `append` raises `ValueError` -- a judgement of nothing is not feedback.
+
+    ORDER, which this contract previously left undefined and which the
+    implementations used to disagree on: that source validation is
+    evaluated FIRST, by every implementation, and the key check second.
+    A record that both names a source that does not exist AND reuses a
+    stored key therefore raises `ValueError` rather than returning the
+    stored record -- the record is invalid on its own terms regardless of
+    what is already there.
+
+    The durable backends cannot check "is this key taken?" before
+    inserting without reintroducing exactly the read-then-write this
+    protocol exists to prevent; only the index may settle a duplicate. So
+    the source check is a cheap pre-insert read that both backends already
+    had, and running it first is free. Ordering it after the duplicate
+    would be impossible on the durable side anyway.
+
+    The implementations previously disagreed here: `InMemoryFeedbackRepository`
+    checked the key first and returned the stored record, while both durable
+    backends raised. That made "is this feedback valid?" a
+    backend-dependent question, which is the one thing a repository
+    protocol must not be. The corner is reachable only from a hand-written
+    key that contradicts its own fields -- `feedback_idempotency_key` derives
+    the key FROM `source_event_id`, so a derived key cannot.
+    """
+
+    def append(self, record: FeedbackRecord) -> FeedbackRecord: ...
+
+    def list_for_source(self, source_event_id: str) -> Sequence[FeedbackRecord]:
+        """Feedback for one source event, in total order (seq / append order)."""
+        ...
+
+    def list_for_session(self, session_id: str) -> Sequence[FeedbackRecord]:
+        """Feedback for one session, in total order."""
+        ...
 
 
 @runtime_checkable

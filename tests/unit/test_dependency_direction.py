@@ -44,6 +44,13 @@ LAYER_MAY_IMPORT = {
     "knowledge": {"core"},                          # Phase 2 retrieval stack
     "context": {"core"},                            # Phase 2 budgeting
     "memory": {"core"},                             # Phase 3 promotion pipeline
+    # ADR-017 review point 4: the learning components talk to core.contracts
+    # repositories and nothing else -- never persistence, never conversation,
+    # never the memory store. `test_learning_never_reaches_below_core` below
+    # walks the real `learning/` tree and is what makes this row load-bearing
+    # rather than decorative: a new layer with no row fails the per-module
+    # check above, so the row cannot be forgotten when the layer is added.
+    "learning": {"core"},                           # Phase 7 feedback/observation
     # ADR-011 question 8: the contract TYPES are in core and the TEXT is here,
     # so this layer needs core and nothing else. `conversation` must not
     # import it -- the composer reaches ConversationService through
@@ -234,6 +241,80 @@ def test_the_layering_check_actually_detects_a_violation():
     )
     assert "persistence" not in LAYER_MAY_IMPORT["conversation"], (
         "conversation must not be permitted to import persistence"
+    )
+
+
+def test_learning_never_reaches_below_core():
+    """ADR-017 review point 4, as an invariant rather than a table entry.
+
+    `LAYER_MAY_IMPORT["learning"]` is only worth a row if the row is
+    load-bearing. This walks the REAL `learning/` tree -- not a hand-written
+    stand-in -- and requires every internal import to land in the declared
+    boundary, so the claim "learning -> core only" is checked against the
+    code that exists rather than asserted in a comment.
+
+    It is the direct counterpart of
+    `test_the_layering_check_actually_detects_a_violation`: that one proves the
+    mechanism fires, this one proves the boundary is currently respected. Both
+    are needed -- a green suite with the mechanism broken looks identical to a
+    green suite with the boundary respected, and only the pair distinguishes
+    them.
+    """
+    assert "learning" in LAYER_MAY_IMPORT, (
+        "learning/ exists on disk, so it must have a declared boundary"
+    )
+    allowed = LAYER_MAY_IMPORT["learning"] | {"learning"}
+
+    modules = sorted((SRC / "learning").rglob("*.py"))
+    assert modules, (
+        "learning/ is listed in LAYER_MAY_IMPORT but no such package exists; "
+        "a stale row would make this test pass without checking anything"
+    )
+
+    for path in modules:
+        found = internal_imports(path)
+        offenders = found - allowed
+        assert not offenders, (
+            f"learning/{path.name} imports {sorted(offenders)}; the Phase 7 "
+            f"layer may only import {sorted(allowed)}. Feedback reaches storage "
+            "through core.contracts.FeedbackRepository, and the memory store is "
+            "reachable only from memory/pipeline.py (ADR-017 review point 5)."
+        )
+
+
+def test_the_layering_check_detects_a_learning_module_importing_persistence():
+    """Adversarial, for the learning boundary specifically.
+
+    A `learning/` module reaching `persistence` is the specific mistake this
+    layer exists to prevent: it would let the observation/rule side choose a
+    concrete backend, and with it a transaction boundary it does not own.
+    The row above is the rule; this proves the rule fires for this case.
+    """
+    import tempfile
+
+    violation = (
+        "from ..core.contracts import FeedbackRepository\n"
+        "from ..persistence.sqlite import SqliteFeedbackRepository\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_pkg = Path(tmp) / "learning"
+        fake_pkg.mkdir()
+        module = fake_pkg / "offender.py"
+        module.write_text(violation, encoding="utf-8")
+
+        # resolve against the fake root the same way the real check does
+        global SRC
+        real_src, SRC = SRC, Path(tmp)
+        try:
+            found = internal_imports(module)
+        finally:
+            SRC = real_src
+
+    assert "persistence" in found, (
+        "the layering check failed to see a learning module import persistence"
+    )
+    assert "persistence" not in LAYER_MAY_IMPORT["learning"], (
+        "learning must not be permitted to import persistence"
     )
 
 

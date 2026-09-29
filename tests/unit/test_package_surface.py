@@ -34,7 +34,7 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "personal_ai_core"
 
 # Packages that declare a surface. A package with no `__all__` is making no
 # claim, so there is nothing here to check.
-PACKAGES = ("context", "knowledge", "memory")
+PACKAGES = ("context", "knowledge", "memory", "learning")
 
 # A public class the package deliberately does not re-export, with the
 # reason. Empty, and that is the point: every exclusion has to be argued

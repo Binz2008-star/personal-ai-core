@@ -30,6 +30,14 @@ SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "personal_ai_core"
 # guard works compare against the same set rather than two copies of it.
 ALLOWED_WRITERS = {"memory/pipeline.py"}
 
+# The mutating calls on a MemoryStore. `.write(` and `.supersede(` are the
+# same operation as far as this invariant is concerned: each one changes what
+# the store holds, and neither may be performed by anything but the pipeline.
+# ADR-017 review point 5 required `.supersede(` to be scanned too; it was not,
+# and a scan of `.write(` alone would have passed a suite in which a learning
+# component superseded memories directly.
+_WRITER_METHODS = ("write", "supersede")
+
 
 def _relative_module(root: PurePath, path: PurePath) -> str:
     """Path relative to `root`, always with forward slashes.
@@ -135,7 +143,16 @@ def test_rejected_candidates_are_retained_with_rejected_status():
 def _memory_store_writers(
     root: PurePath, sources: Iterable[tuple[PurePath, str]]
 ) -> list[str]:
-    """Modules under `root` that call `.write(` on a MemoryStore.
+    """Modules under `root` that call a MemoryStore MUTATING method.
+
+    Scans for both `.write(` and `.supersede(`. Supersession was added to
+    this scan for ADR-017 review point 5, and the reason is that it is a
+    memory write by every definition the repository uses: it writes the old
+    record `SUPERSEDED`, writes a new record `ACTIVE`, and links them, all
+    inside one transaction. A guard that watched `.write(` alone would have
+    reported a green suite while a second component superseded memories
+    directly -- the exact thing review point 5 forbids, and the exact thing
+    the first `FORGET_THIS` implementation will want to do.
 
     Takes the sources rather than reading them, so the same collection code
     that guards src/ can be driven with paths CI never sees. Returned names
@@ -164,7 +181,7 @@ def _memory_store_writers(
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            if not isinstance(func, ast.Attribute) or func.attr != "write":
+            if not isinstance(func, ast.Attribute) or func.attr not in _WRITER_METHODS:
                 continue
             receiver = func.value
             if isinstance(receiver, ast.Name) and receiver.id in binds_memory_store:
@@ -188,17 +205,50 @@ def test_pipeline_is_the_only_module_that_writes_to_memory_store():
     """Sole-writer invariant, statically enforced.
 
     Scans every src/ file for a call whose receiver is a name bound to a
-    MemoryStore. Only pipeline.py may contain one.
+    MemoryStore, for BOTH mutating methods -- `.write(` and `.supersede(`.
+    Only pipeline.py may contain one.
     """
     offenders = _memory_store_writers(SRC_ROOT, _src_sources())
     unexpected = [o for o in offenders if o not in ALLOWED_WRITERS]
     assert not unexpected, (
-        "MemoryStore.write is called outside memory/pipeline.py:\n  "
+        f"MemoryStore.{' / .'.join(_WRITER_METHODS)} is called outside "
+        "memory/pipeline.py:\n  "
         + "\n  ".join(unexpected)
         + "\n\nExperiencePipeline is the sole writer. If a second writer is needed, "
         "the invariant is being lost; add the new caller to `ALLOWED_WRITERS` only "
         "after the design has been reconsidered."
     )
+
+
+def test_the_sole_writer_scan_detects_a_supersede_outside_the_pipeline():
+    """Adversarial: the `.supersede(` half of the scan is not decorative.
+
+    `.supersede(` has zero production callers today, which is precisely why it
+    needed adding deliberately: a rule that has never fired cannot be shown to
+    work by the absence of failures. This feeds the scan a module that binds a
+    MemoryStore and supersedes through it, and requires a detection. Without
+    it, deleting `supersede` from `_WRITER_METHODS` would turn this guard
+    green while review point 5 stopped being enforced.
+    """
+    offender = (
+        "def forget(store: MemoryStore, old_id: str, new: MemoryRecord) -> None:\n"
+        "    store.supersede(old_id, new)\n"
+    )
+    found = _memory_store_writers(
+        WINDOWS_SRC, [(WINDOWS_SRC / "learning" / "forget.py", offender)]
+    )
+    assert found == ["learning/forget.py"], (
+        f"the scan did not detect a supersede outside the pipeline; it returned "
+        f"{found}. A supersession IS a memory write, and it must be guarded "
+        "exactly as `.write(` is."
+    )
+
+    # and the same source, with `.write(`, was already caught -- so the two
+    # methods are covered by one mechanism rather than one being special-cased
+    writer_offender = offender.replace("supersede", "write")
+    assert _memory_store_writers(
+        WINDOWS_SRC, [(WINDOWS_SRC / "learning" / "forget.py", writer_offender)]
+    ) == ["learning/forget.py"]
 
 
 def test_the_scan_still_finds_the_sole_writer():
