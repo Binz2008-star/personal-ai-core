@@ -1,7 +1,8 @@
 # ADR-017 — Phase 7: events → feedback → observation → experience → evaluation → promote/reject
 
 **Status:** PROPOSED · Phase 7 design draft · persistence slice implemented
-**Revision:** 3 — corrects the idempotency mechanism per review point 1 (2026-09-29)
+**Revision:** 4 — Amendment A1 narrows the Observation contract (§15, 2026-09-30).
+Revision 3 corrected the idempotency mechanism per review point 1 (2026-09-29).
 
 - Phase: 7 (the first unnumbered plan phase, per playbook §8 — "events + feedback
   + learning"; it gains a number when authorised)
@@ -323,6 +324,10 @@ call site in `src/`: `ExperiencePipeline`** — the same sole-writer rule as
   governed writer — rather than relocating an existing call.
 
 ### 3.3 What an `Observation` is (question B)
+
+> **Amended by §15 (A1, 2026-09-30).** The field list below is the original
+> draft and is kept as history. Where it and §15 disagree -- `kind`, `signals`
+> and `event_ids` in particular -- §15 governs.
 
 An **interpretation derived deterministically from durable evidence** (events +
 feedback). Not a new kind of event and not persisted:
@@ -891,3 +896,186 @@ feedback slice — see §4 and §13 open decision 4.
 - **Still required:** acceptance of this design draft as a whole; separate
   authorization for ADR-013's harness; explicit owner authorization if any
   migration is ever needed.
+
+## 15. Amendment A1 — the Observation contract (2026-09-30)
+
+**What this amendment is.** Decisions the owner recorded on 2026-09-30, after a
+read-only contract review of the evidence B1 actually stores. It narrows §3.3
+and settles points the ADR left open.
+
+**What it is not.** It does not accept ADR-017 as a whole, which remains
+PROPOSED. It authorizes no implementation. The owner has made authorization of
+Unit 2 (Observation derivation) conditional on this amendment being recorded;
+that authorization is a separate, explicit act.
+
+### 15.1 The evidence it is based on
+
+B1 (PR #79, merge `338a0d1`) made feedback reachable from `pac` on the
+persistent SQLite path. A smoke test against the Boss model on 2026-09-30
+stored, for one session, in `seq` order:
+
+```text
+session.started → message.received → generation.requested
+→ generation.completed (message_id → the assistant message)
+→ feedback.recorded  actor=user  outcome=good        effect=evaluation_signal     payload={}
+→ feedback.recorded  actor=user  outcome=correction  effect=candidate_strengthen  payload={"correction": "..."}
+idempotency key: feedback:<session>:<source event>:<outcome>:<actor>
+```
+
+Three facts from it shape the decisions below:
+
+- `generation.completed` carries `message_id` pointing at the assistant
+  message; its payload holds model and token counts, never the reply text.
+- Both feedback records judge the same reply with different outcomes, so the
+  real data already exercises the conflict rule.
+- The idempotency key does not include the payload, so a second CORRECTION on
+  the same reply by the same actor is a duplicate: the first text is kept.
+
+### 15.2 What an Observation is
+
+A frozen, in-memory value produced by a pure function. There is **exactly one
+Observation per `source_event_id` that has at least one `FEEDBACK_RECORDED`
+record**. A conversation event with no feedback produces none. An Observation
+is not persisted, not an event, not feedback and not memory (review point 6).
+
+### 15.3 Fields — replaces the §3.3 field list
+
+| Field | Meaning |
+|---|---|
+| `session_id` | the session of the source event |
+| `source_event_id` | the judged `GENERATION_COMPLETED` event |
+| `source_message_id` | that event's `message_id`: the assistant message, or `None` if the event carries none |
+| `feedback_ids` | every feedback record on the source event, in `seq` order |
+| `effective_outcome` | the outcome of the last record in `seq` order (D1) |
+| `effective_effect` | the effect code **stored** on that last record, carried forward rather than re-derived; `learning.outcomes.effect_for(effective_outcome)` only when the stored code is empty (§3.1 permits an empty code on a directly constructed record) |
+| `conflicted` | `True` iff the records hold more than one distinct outcome (D1) |
+| `conflicts` | every earlier record whose outcome differs from `effective_outcome`, as `(feedback_id, outcome, occurred_at)`, in `seq` order |
+| `correction` | see D5 |
+
+Removed from the §3.3 draft, and why:
+
+- **`kind` is deferred.** §3.3 named it but never defined its values. An
+  `ObservationKind` enum would add members that each need a producer
+  (hard invariant 4) and would duplicate `effective_effect`: the one "kind"
+  the ADR mentions, the gap observation, is already the stored code
+  `knowledge_gap_observation`. Reintroducing `kind` needs a further amendment
+  that names every member and its producer.
+- **`signals` moves to the Experience stage.** `ExperienceRecord.signals` is
+  built from these fields there (§3.4). An Observation carries no open-ended
+  mapping.
+- **`event_ids` is replaced by `source_event_id` and `source_message_id`,**
+  which is everything the stored evidence references.
+- **There is no random `id`.** An Observation is identified by what it was
+  derived from, `(source_event_id, feedback_ids)`. The same input therefore
+  yields an equal value.
+
+### 15.4 Decisions
+
+**D1 — Conflict rule (review point 2, kept as written).** Any two distinct
+`FeedbackOutcome` values associated with the same `source_event_id` constitute
+a conflict. The Observation is marked `conflicted=True`. `effective_outcome`
+remains the last feedback record in `seq` order, and the conflicting earlier
+records are retained in `conflicts`. A conflicted Observation is `INSUFFICIENT`
+for downstream promotion and therefore cannot be promoted.
+
+The smoke data is exactly this case: GOOD then CORRECTION on one reply gives
+`effective_outcome=CORRECTION`, `conflicted=True`, and GOOD in `conflicts`.
+A taxonomy of compatible outcomes was considered and **not** adopted. It would
+be new semantics, requiring evidence and its own authorization.
+
+**D2 — Source-event rule.** Observation derivation produces Observations only
+for feedback whose `source_event_id` identifies a `GENERATION_COMPLETED` event.
+Feedback referencing another event type is not silently discarded and does not
+cause derivation to fail. It is returned separately as **unobserved** evidence,
+so the caller can inspect or report it. The return contract is explicit:
+
+```text
+derive_observations(events, feedback) -> (observations, unobserved)
+```
+
+Each `unobserved` entry names the `source_event_id`, the source event's type
+(`None` when that event is absent from the supplied events), and the feedback
+ids that referenced it. The type is reported as the stored value, so no new
+enum is introduced.
+
+**D3 — Actor rule (across actors).** Derivation groups all feedback records by
+`source_event_id`, regardless of actor. The effective outcome is the last
+feedback record in `seq` order, and distinct outcomes from different actors
+take part in the same conflict rule. This does **not** mean the latest actor is
+trusted: a different outcome from a second actor makes the Observation
+conflicted, and therefore not promotable (D1). A per-actor model would change
+Observation identity and is not adopted without a concrete second actor.
+
+**D4 — Production caller rule.** Unit 2 may be implemented and tested as a pure
+derivation function without a production caller. No production integration is
+authorized by this decision. Its callers are initially tests, and later only
+consumers that are explicitly authorized. The precedent is `FeedbackRecorder`,
+which had no production caller before B1.
+
+**D5 — Correction text.** `correction` is `payload["correction"]` from the
+effective record, copied verbatim, **only when `effective_outcome` is
+CORRECTION**; otherwise `None`. No other payload key is read, so no general
+payload schema is created. An earlier record's text stays reachable through
+`feedback_ids`. First-correction-wins is inherited from the idempotency key
+(§15.1) and is not changed here. The text is user-written and is untrusted
+input at every later stage, as a retrieved document is.
+
+**D6 — Where the payload key lives.** The key `"correction"` is defined today
+only in `app/cli.py` (`CORRECTION_KEY`), which `learning/` may not import. It
+moves to `core/feedback.py`, and `app/cli.py` imports it from there. The value
+is unchanged, so stored data is unaffected.
+
+**D7 — Determinism.** Derivation takes values, not repositories. It performs no
+I/O, reads no clock, calls no model and mints no random id. Order is the event
+store's `seq` order as the read methods return it
+(`EventRepository.list_for_session`, `FeedbackRepository.list_for_session`).
+It is never re-sorted by `occurred_at`.
+
+### 15.5 Unit 2 boundary, if authorized
+
+**In scope:**
+- the frozen `Observation` value in `core`;
+- moving `CORRECTION_KEY` to `core/feedback.py` (D6);
+- `learning/` `derive_observations(events, feedback) -> (observations, unobserved)`;
+- the tests below.
+
+**Out of scope, and must not appear in the Unit 2 PR:**
+- the Observation → Experience adapter, `ExperienceRecord` construction, any
+  `ExperiencePipeline` or rule change, `CorrectionRule` strengthening;
+- `EvaluationGate`, `EvaluationVerdict`, ADR-013;
+- memory promotion, `MemoryStore.write` or `.supersede`, supersede from feedback;
+- persisting Observations, any new `EventType` member, any production
+  persistence change, PostgreSQL feedback, Neon, schema, `SCHEMA_VERSION`,
+  migrations;
+- `ObservationKind` or any new enum member;
+- wiring into `pac`, `factory.py` or `ConversationService`;
+- changes to `SealedMemoryStore`.
+
+**Required tests:**
+- determinism: equal input gives equal output, and the input is not mutated;
+- one Observation per judged source event, several source events in one session;
+- `seq` order, including records whose `occurred_at` disagrees with `seq`;
+- D1 with the smoke-data case (GOOD then CORRECTION), a single record, and the
+  same outcome recorded by two actors (no conflict);
+- D2: a non-generation source and a missing source event appear in
+  `unobserved` and never in `observations`;
+- D3: two actors with different outcomes give one conflicted Observation;
+- D5: correction present, absent, and present on a non-effective record;
+- `effective_effect` carried from the stored code, with the `effect_for`
+  fallback for an empty code;
+- no write: derivation over sealed or read-only inputs, plus the existing
+  Event != Memory, sole-memory-writer and dependency-direction guards (the new
+  module imports `core` only).
+
+### 15.6 Invariants re-checked for this amendment
+
+- **Event != Memory:** Observations are not stored and are not events, and the
+  function receives values it cannot write through.
+- **Dependency direction:** the `Observation` value lives in `core`; derivation
+  lives in `learning/`, which imports `core` only.
+- **Boss model:** not involved. Derivation is deterministic, and model-derived
+  observation stays deferred with ADR-013.
+- **No dead enum members:** no enum is added or changed.
+- **`SealedMemoryStore`:** untouched.
+- **No schema or persistence change:** none.
+- **Legacy repositories:** untouched.
