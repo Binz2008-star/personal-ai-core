@@ -125,6 +125,11 @@ class EventType(str, Enum):
     # when a run ends. Emitted only by agent/loop.py.
     AGENT_STEP = "agent.step"
     AGENT_FINISHED = "agent.finished"
+    # Phase 7 (ADR-017): the durable form of a FeedbackRecord. Deliberately
+    # no "memory." prefix -- feedback is judgement of what happened, not a
+    # promotion event, so a leak into the conversation stream cannot
+    # masquerade as one. Produced only through core/feedback.as_feedback_event.
+    FEEDBACK_RECORDED = "feedback.recorded"
 
 
 # Language is a Phase 1 field by decision, not a Phase 2 feature: messages are

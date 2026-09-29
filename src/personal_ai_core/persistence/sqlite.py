@@ -64,6 +64,14 @@ from ..core.domain import (
     User,
     utcnow,
 )
+from ..core.feedback import (
+    FEEDBACK_EVENT_TYPE,
+    FeedbackAudit,
+    FeedbackRecord,
+    as_feedback_event,
+    classify_feedback_rows,
+    feedback_record_from_event,
+)
 from ..core.memory import (
     MemoryProvenance,
     MemoryRecord,
@@ -111,6 +119,10 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_by_session ON events (session_id, seq);
 
+CREATE UNIQUE INDEX IF NOT EXISTS events_feedback_idem_unique
+    ON events (json_extract(payload, '$.feedback_idempotency_key'))
+    WHERE type = 'feedback.recorded';
+
 CREATE TABLE IF NOT EXISTS memories (
     seq             INTEGER PRIMARY KEY AUTOINCREMENT,
     id              TEXT NOT NULL UNIQUE,
@@ -144,6 +156,33 @@ class SchemaVersionMismatch(RuntimeError):
     """
 
 
+def audit_feedback_rows(path: str | Path) -> FeedbackAudit:
+    """READ-ONLY. Report what would block `events_feedback_idem_unique`.
+
+    Run this BEFORE the first `connect` with a build carrying the index. It
+    opens the file `mode=ro`, so the filesystem itself refuses a write.
+
+    It does not call `connect`, deliberately: `connect` is the thing that
+    applies the schema being audited, so using it to ask whether the schema
+    applies would destroy the question -- the very `CREATE UNIQUE INDEX` this
+    is checking for would already have run. It writes nothing, deletes
+    nothing, and selects no winner.
+
+    `payload` is fetched as TEXT and classified in Python, so both backends
+    audit identically and this is testable with no database. See
+    `core.feedback.classify_feedback_rows`.
+    """
+    connection = sqlite3.connect(f"file:{Path(path)}?mode=ro", uri=True)
+    try:
+        rows = connection.execute(
+            "SELECT id, type, payload FROM events ORDER BY seq"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    return classify_feedback_rows((row[0], row[1], row[2]) for row in rows)
+
+
 def connect(path: str | Path) -> sqlite3.Connection:
     """Open (creating if needed) a database with the schema applied.
 
@@ -155,26 +194,48 @@ def connect(path: str | Path) -> sqlite3.Connection:
     true statement about a program that has outgrown that constraint.
     """
     connection = sqlite3.connect(str(path))
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA journal_mode=WAL")
-    # FULL, not NORMAL. NORMAL can lose the last transactions on power loss,
-    # and this store exists because losing an event loses information.
-    connection.execute("PRAGMA synchronous=FULL")
-    connection.executescript(_SCHEMA)
+    # Mirrors `postgres.connect`: anything that goes wrong between opening the
+    # handle and returning it closes that handle first. `executescript(_SCHEMA)`
+    # is where that matters -- `CREATE UNIQUE INDEX events_feedback_idem_unique`
+    # refuses to build while duplicate keys exist, and the raw
+    # `sqlite3.IntegrityError` would otherwise abandon the connection.
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL")
+        # FULL, not NORMAL. NORMAL can lose the last transactions on power
+        # loss, and this store exists because losing an event loses
+        # information.
+        connection.execute("PRAGMA synchronous=FULL")
+        try:
+            connection.executescript(_SCHEMA)
+        except sqlite3.IntegrityError as exc:
+            # The index names itself in `exc`; what it cannot say is what to do
+            # next. Re-raise the same type with the way out attached, rather
+            # than leaving the operator with a bare constraint failure.
+            raise sqlite3.IntegrityError(
+                f"{exc}. Duplicate feedback idempotency keys already exist in "
+                "this database, so that index cannot be built. Run "
+                "audit_feedback_rows against it -- read-only, before touching "
+                "anything -- to see which keys are duplicated and which rows "
+                "carry no usable key. It selects no survivor: which record of "
+                "a pair to keep is a decision for the owner, not this code."
+            ) from exc
 
-    row = connection.execute("SELECT version FROM schema_version").fetchone()
-    if row is None:
-        connection.execute(
-            "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
-        )
-        connection.commit()
-    elif row["version"] != SCHEMA_VERSION:
+        row = connection.execute("SELECT version FROM schema_version").fetchone()
+        if row is None:
+            connection.execute(
+                "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
+            )
+            connection.commit()
+        elif row["version"] != SCHEMA_VERSION:
+            raise SchemaVersionMismatch(
+                f"database schema version is {row['version']}, this build writes "
+                f"{SCHEMA_VERSION}. Nothing was read or written. Migrate the file "
+                "deliberately rather than letting a mismatched build touch it."
+            )
+    except BaseException:
         connection.close()
-        raise SchemaVersionMismatch(
-            f"database schema version is {row['version']}, this build writes "
-            f"{SCHEMA_VERSION}. Nothing was read or written. Migrate the file "
-            "deliberately rather than letting a mismatched build touch it."
-        )
+        raise
     return connection
 
 
@@ -455,3 +516,125 @@ class SqliteMemoryRepository:
             self._write(superseded_old)
             self._write(linked_new)
         return linked_new
+
+
+class SqliteFeedbackRepository:
+    """SQLite implementation of `core.contracts.FeedbackRepository`.
+
+    Like the in-memory implementation, the durable form of a `FeedbackRecord`
+    is a `FEEDBACK_RECORDED` event row in the shared events table (ADR-017
+    §3.1, review point 6), so re-derivation and the audit trail see the same
+    underlying evidence and reads reconstruct records through the shared
+    `feedback_record_from_event`.
+
+    Idempotency is enforced by the DATABASE, not by a caller-side or even a
+    repository-side predicate (ADR-017 review point 1). The partial unique
+    index `events_feedback_idem_unique` over the reserved payload key makes
+    one idempotency_key per FEEDBACK_RECORDED row a storage invariant, so a
+    second writer cannot insert a second row for the same key even when both
+    are inside their own transaction.
+
+    `append` therefore performs an UNCONDITIONAL insert and lets the index
+    arbitrate. A lost race raises `sqlite3.IntegrityError`, the transaction
+    rolls back, and the stored record is read back and returned -- so a
+    duplicate is a no-op that yields the first record, never a second event.
+
+    The earlier `INSERT ... WHERE NOT EXISTS` guard is deliberately GONE. It
+    read-then-wrote inside one statement, which is a predicate, not a
+    guarantee: it is only safe here because SQLite serializes writers under a
+    single write lock, and that is an engine property rather than something
+    the statement asserts. It does not transfer to a backend with MVCC.
+
+    `SCHEMA_VERSION` stays 1. The index is an additive object inside `_SCHEMA`,
+    and every statement there is `IF NOT EXISTS` and is re-applied on every
+    open, so an existing version-1 database acquires it on its next connect
+    without a version bump and without a data migration.
+    """
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._db = connection
+
+    def append(self, record: FeedbackRecord) -> FeedbackRecord:
+        event = as_feedback_event(record)
+        try:
+            with self._db:
+                source = self._db.execute(
+                    "SELECT 1 FROM events WHERE id = ? AND session_id = ?",
+                    (record.source_event_id, record.session_id),
+                ).fetchone()
+                if source is None:
+                    raise ValueError(
+                        f"feedback source_event_id {record.source_event_id!r} "
+                        f"does not exist in session {record.session_id!r}: a "
+                        "judgement of nothing is not feedback (ADR-017)"
+                    )
+                self._db.execute(
+                    "INSERT INTO events "
+                    "(id, session_id, type, payload, message_id, actor, "
+                    "occurred_at) VALUES (?, ?, ?, ?, NULL, ?, ?)",
+                    (
+                        event.id,
+                        event.session_id,
+                        event.type.value,
+                        json.dumps(dict(event.payload)),
+                        event.actor,
+                        _iso(event.occurred_at),
+                    ),
+                )
+        except sqlite3.IntegrityError:
+            # Another writer committed this idempotency_key first. The index
+            # decided; this method's only job is to yield the record that won.
+            # `_read_by_key` re-raises if no stored row carries the key, which
+            # is how an IntegrityError from some OTHER constraint is kept from
+            # masquerading as a duplicate.
+            return self._read_by_key(record.idempotency_key)
+        return record
+
+    def list_for_source(self, source_event_id: str) -> Sequence[FeedbackRecord]:
+        return self._read_feedback(
+            self._db.execute(
+                "SELECT * FROM events WHERE type = ? "
+                "AND json_extract(payload, '$.source_event_id') = ? ORDER BY seq",
+                (FEEDBACK_EVENT_TYPE.value, source_event_id),
+            ).fetchall()
+        )
+
+    def list_for_session(self, session_id: str) -> Sequence[FeedbackRecord]:
+        return self._read_feedback(
+            self._db.execute(
+                "SELECT * FROM events WHERE session_id = ? AND type = ? "
+                "ORDER BY seq",
+                (session_id, FEEDBACK_EVENT_TYPE.value),
+            ).fetchall()
+        )
+
+    def _read_by_key(self, idempotency_key: str) -> FeedbackRecord:
+        row = self._db.execute(
+            "SELECT * FROM events WHERE type = ? "
+            "AND json_extract(payload, '$.feedback_idempotency_key') = ?",
+            (FEEDBACK_EVENT_TYPE.value, idempotency_key),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(
+                "the unique index reported a duplicate but no stored record "
+                "matches the idempotency key; the append invariant is broken"
+            )
+        return self._feedback(row)
+
+    @staticmethod
+    def _read_feedback(rows) -> Sequence[FeedbackRecord]:
+        return tuple(SqliteFeedbackRepository._feedback(row) for row in rows)
+
+    @staticmethod
+    def _feedback(row) -> FeedbackRecord:
+        return feedback_record_from_event(
+            Event(
+                id=row["id"],
+                session_id=row["session_id"],
+                type=EventType(row["type"]),
+                payload=json.loads(row["payload"]),
+                message_id=row["message_id"],
+                actor=row["actor"],
+                occurred_at=_dt(row["occurred_at"]),
+            )
+        )

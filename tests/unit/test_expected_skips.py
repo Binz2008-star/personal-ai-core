@@ -16,6 +16,9 @@ Allowed, and why each is a decision rather than an omission:
   - The token estimator validation harness, which needs a reference tokenizer
     this project deliberately does not vendor. Its skip reason states that the
     one-sided-error claim is unverified in that environment.
+  - The server-gated PostgreSQL suites (ADR-016 conformance and composition).
+    These are unverified on any engine this repository does not ship a server
+    for, which is a different and weaker claim than "passing".
 
 Recursion
 ---------
@@ -57,12 +60,40 @@ ALLOWED_SKIP_SOURCES = {
     "tests/integration/test_server_service.py",
 }
 
-# Skips outside the tokenizer harness are individually accounted for:
-# the two layering-check exemptions, plus the 28 collected legs of the
-# Postgres conformance module (10 parametrised tests x 2 substrates + 8
-# server-only tests) and the 6 legs of the server-composition integration
-# file, all when no server is advertised.
-MAX_NON_HARNESS_SKIPS = 36
+# Skips outside the tokenizer harness are individually accounted for: the two
+# layering-check exemptions, plus the 49 collected legs of the Postgres
+# conformance module and the 6 legs of the server-composition integration
+# file, all when no server is advertised. 2 + 49 + 6 = 57.
+#
+# 36 -> 57 is the destructive-entry gate. It added 21 server-gated legs to the
+# Postgres conformance module -- the foreign-`users` regression, the occupied
+# database, the view named `users`, the partial schema, the two OPERATE
+# properties, the identity-mismatch refusal, the search-path pin (including a
+# schema name that breaks naive quoting), and the seven drop-approval legs
+# (missing approval, each of the four fields bound, a verdict that changed
+# under the approval, an undeclared target, a differently-spelled target, no
+# target advertised, and the configured denylist). All of them need a real
+# server, so all of them skip here for the same accounted reason as the other
+# 36.
+#
+# 57 is MEASURED from this tree, not projected. The 21 was counted off a run
+# with no server advertised, which is the only condition under which this
+# number is the number. An earlier estimate of 52 for this change was wrong
+# by 5 and would have left this gate red.
+#
+# This number belongs to the tree it was measured in, and the tree matters.
+# While this gate and the ADR-017 feedback work shared one working tree the
+# same assertion read 66, because ADR-017 contributed 9 further server-gated
+# legs to this same module. Those legs are not in this tree. When that work
+# lands alongside this one, the budget must be re-MEASURED against the merged
+# tree, not carried over and not raised -- 66 is the number that tree earns,
+# 57 is the number this one earns, and neither is a licence for the other.
+#
+# The 56 driver-free legs of `tests/unit/test_postgres_safety.py` cost this
+# budget nothing: they classify a `SchemaSnapshot` in pure Python, so they RUN
+# in CI rather than skipping, and the gate's arithmetic is the reason the
+# safety rules are split that way in the first place.
+MAX_NON_HARNESS_SKIPS = 57
 
 pytestmark = pytest.mark.skipif(
     os.environ.get(NESTED_MARKER) == "1",

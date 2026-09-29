@@ -33,20 +33,24 @@ module.
 fall on the expensive side. `safety_margin` refuses any value under 1.0, so the
 *policy* of a one-sided error is enforced at the boundary and tested.
 
-**Not evidenced.** That the constants actually achieve it. Validating "this
-estimate is never below the real count" requires a real tokenizer to compare
-against, and this project has no runtime dependencies and no vocabulary. The
-numbers below are a calibration, chosen to be cautious; they have not been
-measured against the Boss model's tokenizer or any other.
+**Evidenced (Workstream B).** Validating "this estimate is never below the
+real count" requires a real tokenizer to compare against, and the Boss model's
+own was measured directly: its embedded vocabulary and merges are byte-
+identical to its documented tokenizer lineage, so that lineage is the -- now
+used -- authoritative reference. On a 26-sample calibration corpus spanning
+every script this estimator prices, the constants below give zero under-
+estimates and a maximum estimate/actual ratio of 2.36; the calibration ceiling
+they were chosen against is 2.5x on that corpus.
+
+This does not make the estimator an exact tokenizer. It remains a heuristic
+with no runtime dependencies and no shipped vocabulary: the claim is "never
+below a real count, and within 2.5x, on the validated corpus", not "exact for
+every string". A caller needing an exact count needs a real tokenizer behind
+this same contract. That is the point of it being a contract.
 
 `tests/integration/test_token_estimator_validation.py` is the harness that
-settles it. It skips when no reference tokenizer is installed -- which is the
-normal case here -- and checks the one-sided-error claim directly wherever one
-is. Until it has run somewhere, treat the ratios as a deliberate guess with a
-known direction, not as a measurement.
-
-A caller needing an exact count needs a real tokenizer behind this same
-contract. That is the point of it being a contract.
+keeps that claim falsifiable. It skips when no reference tokenizer is
+installed and re-checks the one-sided-error claim directly wherever one is.
 """
 from __future__ import annotations
 
@@ -56,16 +60,17 @@ import unicodedata
 # Token cost per character, by script. Higher means the script packs fewer
 # characters into a token.
 #
-# A calibration, not a measurement. Chosen toward the expensive end so the
-# error falls on the safe side -- see "What is decided, and what is actually
-# evidenced" above. Changing one of these changes every budget, so they are
-# named constants and pinned by a test.
-_LATIN_COST = 0.27          # ~3.7 chars/token; BPE prose is nearer 4
-_ARABIC_COST = 0.55         # ~1.8 chars/token
+# Measured against the Boss model's tokenizer lineage on a 26-sample corpus
+# (Workstream B) and set to the two-decimal ceiling of the min-max calibration
+# solution, so the error falls on the safe side -- see "What is decided, and
+# what is actually evidenced" above. Changing one of these changes every
+# budget, so they are named constants and pinned by a test.
+_LATIN_COST = 0.38          # ~2.6 chars/token
+_ARABIC_COST = 0.94         # ~1.1 chars/token
 _CJK_COST = 1.0             # roughly one token per character, often more
-_DIGIT_COST = 0.5           # digits are split far more finely than letters
-_OTHER_COST = 0.5           # punctuation, symbols, unlisted scripts
-_WHITESPACE_COST = 0.15     # usually absorbed into an adjacent token
+_DIGIT_COST = 0.76          # ~1.3 chars/token; digits split finely
+_OTHER_COST = 1.43          # ~0.7 chars/token; punctuation, symbols, unlisted scripts
+_WHITESPACE_COST = 0.29     # ~3.4 chars/token; usually absorbed, not free
 
 
 def _character_cost(character: str) -> float:
@@ -94,9 +99,10 @@ class ScriptAwareTokenEstimator:
     """Per-script token estimate, calibrated to err on the expensive side.
 
     Deterministic and allocation-light. "Errs on the expensive side" is the
-    intent behind the constants and is not yet verified against a real
-    tokenizer -- see the module docstring. `model_id` begins with `heuristic:`
-    so a budget traced back here can never be mistaken for a token count.
+    intent behind the constants; it was verified against the Boss model's
+    tokenizer lineage on a 26-sample corpus in Workstream B -- see the module
+    docstring. `model_id` begins with `heuristic:` so a budget traced back
+    here can never be mistaken for a token count.
     """
 
     def __init__(self, *, safety_margin: float = 1.0) -> None:

@@ -44,6 +44,35 @@ jobs:
       - name: Integration (composed, no infrastructure required)
         run: python -m pytest tests/integration -v
 
+      # `tests/support` holds no tests. It is the shared PostgreSQL URL
+      # resolver, imported by the two server-gated modules, and it is named
+      # here because `test_ci_workflow.py` requires every directory under
+      # `tests/` to appear in this workflow -- which is the right requirement,
+      # since a support package nothing imports is precisely the silently-dead
+      # directory that gate exists to prevent.
+      #
+      # It is checked by importing it rather than by running pytest against
+      # it, because `pytest tests/support` exits 5 on a directory with no
+      # tests in it, and a step that always fails is a step nobody reads. The
+      # import is the real check: it proves the module resolves on the CI path
+      # layout, and that with no POSTGRES_TEST_URL advertised -- which is the
+      # situation in CI -- the resolver returns empty and the server-gated
+      # suites skip with an accounted reason rather than raising.
+      #
+      # PYTHONPATH=src because `postgres_target` imports `personal_ai_core`,
+      # and nothing installs the package: pytest finds src/ through
+      # `pythonpath` in pyproject.toml, a bare `python -c` does not. Same
+      # src-layout resolution, stated explicitly -- no editable install, so
+      # what this checks is the tree as committed.
+      - name: Test support package resolves
+        env:
+          PYTHONPATH: src
+        run: >-
+          python -c "import sys; sys.path.insert(0, 'tests');
+          from support.postgres_target import server_url, server_identity;
+          assert server_url() == '', server_url();
+          print('tests/support resolved; no POSTGRES_TEST_URL advertised')"
+
       # Named individually so a violation is legible in the checks list
       # rather than buried in a 380-line run.
       - name: Architecture -- dependency direction

@@ -44,6 +44,13 @@ LAYER_MAY_IMPORT = {
     "knowledge": {"core"},                          # Phase 2 retrieval stack
     "context": {"core"},                            # Phase 2 budgeting
     "memory": {"core"},                             # Phase 3 promotion pipeline
+    # ADR-017 review point 4: the learning components talk to core.contracts
+    # repositories and nothing else -- never persistence, never conversation,
+    # never the memory store. `test_learning_never_reaches_below_core` below
+    # walks the real `learning/` tree and is what makes this row load-bearing
+    # rather than decorative: a new layer with no row fails the per-module
+    # check above, so the row cannot be forgotten when the layer is added.
+    "learning": {"core"},                           # Phase 7 feedback/observation
     # ADR-011 question 8: the contract TYPES are in core and the TEXT is here,
     # so this layer needs core and nothing else. `conversation` must not
     # import it -- the composer reaches ConversationService through
@@ -237,6 +244,80 @@ def test_the_layering_check_actually_detects_a_violation():
     )
 
 
+def test_learning_never_reaches_below_core():
+    """ADR-017 review point 4, as an invariant rather than a table entry.
+
+    `LAYER_MAY_IMPORT["learning"]` is only worth a row if the row is
+    load-bearing. This walks the REAL `learning/` tree -- not a hand-written
+    stand-in -- and requires every internal import to land in the declared
+    boundary, so the claim "learning -> core only" is checked against the
+    code that exists rather than asserted in a comment.
+
+    It is the direct counterpart of
+    `test_the_layering_check_actually_detects_a_violation`: that one proves the
+    mechanism fires, this one proves the boundary is currently respected. Both
+    are needed -- a green suite with the mechanism broken looks identical to a
+    green suite with the boundary respected, and only the pair distinguishes
+    them.
+    """
+    assert "learning" in LAYER_MAY_IMPORT, (
+        "learning/ exists on disk, so it must have a declared boundary"
+    )
+    allowed = LAYER_MAY_IMPORT["learning"] | {"learning"}
+
+    modules = sorted((SRC / "learning").rglob("*.py"))
+    assert modules, (
+        "learning/ is listed in LAYER_MAY_IMPORT but no such package exists; "
+        "a stale row would make this test pass without checking anything"
+    )
+
+    for path in modules:
+        found = internal_imports(path)
+        offenders = found - allowed
+        assert not offenders, (
+            f"learning/{path.name} imports {sorted(offenders)}; the Phase 7 "
+            f"layer may only import {sorted(allowed)}. Feedback reaches storage "
+            "through core.contracts.FeedbackRepository, and the memory store is "
+            "reachable only from memory/pipeline.py (ADR-017 review point 5)."
+        )
+
+
+def test_the_layering_check_detects_a_learning_module_importing_persistence():
+    """Adversarial, for the learning boundary specifically.
+
+    A `learning/` module reaching `persistence` is the specific mistake this
+    layer exists to prevent: it would let the observation/rule side choose a
+    concrete backend, and with it a transaction boundary it does not own.
+    The row above is the rule; this proves the rule fires for this case.
+    """
+    import tempfile
+
+    violation = (
+        "from ..core.contracts import FeedbackRepository\n"
+        "from ..persistence.sqlite import SqliteFeedbackRepository\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_pkg = Path(tmp) / "learning"
+        fake_pkg.mkdir()
+        module = fake_pkg / "offender.py"
+        module.write_text(violation, encoding="utf-8")
+
+        # resolve against the fake root the same way the real check does
+        global SRC
+        real_src, SRC = SRC, Path(tmp)
+        try:
+            found = internal_imports(module)
+        finally:
+            SRC = real_src
+
+    assert "persistence" in found, (
+        "the layering check failed to see a learning module import persistence"
+    )
+    assert "persistence" not in LAYER_MAY_IMPORT["learning"], (
+        "learning must not be permitted to import persistence"
+    )
+
+
 def test_package_init_files_are_checked():
     """The guard scans every package's `__init__.py` (F-4)."""
     scanned = {p.relative_to(SRC).as_posix() for p in layered_modules()}
@@ -267,6 +348,7 @@ def test_the_layering_check_sees_a_violation_in_a_package_init():
 
     assert found == {"agent", "memory"}
     assert "memory" not in LAYER_MAY_IMPORT["agent"]
+
 
 
 def test_core_does_not_import_application_or_infrastructure_packages():
@@ -447,3 +529,184 @@ def test_no_core_module_imports_anything_from_the_test_tree():
                 if head in {"tests", "characterization", "conftest"}:
                     offenders.append(f"{path.relative_to(SRC)} -> {name}")
     assert not offenders, f"source imports the test tree: {offenders}"
+
+
+# --- the destructive-entry gate must not be routed around -------------------
+
+# `DATABASE_URL` is the production endpoint. The library's gate reads
+# `POSTGRES_TEST_URL` and knows nothing about it, which is the whole reason a
+# test run cannot reach a production database by accident. The moment a module
+# under `src/` names `DATABASE_URL`, that separation is gone -- the backend
+# would have a production URL in scope at the moment it is deciding whether a
+# destructive DDL is safe to run.
+#
+# `os.environ` and `getenv` are banned from the Postgres backend for the same
+# reason, with one named exception checked separately below: the gate reads
+# exactly one variable (`POSTGRES_TEST_URL`) and one configuration denylist, and
+# an allow-list of names is the only way that stays true.
+_DATABASE_URL_FORBIDDEN = "DATABASE_URL"
+_ENV_READERS = {"environ", "getenv"}
+_ENV_EXEMPT_IN_POSTGRES = {"POSTGRES_TEST_URL", "PAC_PROTECTED_DATABASE_URLS"}
+
+
+def _code_nodes_naming(tree: ast.AST, needle: str) -> list[int]:
+    """Lines where `needle` appears as CODE -- a name, an attribute, a string
+    literal -- rather than as prose.
+
+    Without the docstring exemption a gate about `DATABASE_URL` flags every
+    sentence explaining why `DATABASE_URL` is the hazard, which is the opposite
+    of useful: the explanation would be the thing that breaks the build.
+    """
+    prose = _docstring_nodes(tree)
+    lines = []
+    for node in ast.walk(tree):
+        if id(node) in prose:
+            continue
+        names: list[str] = []
+        if isinstance(node, ast.Name):
+            names = [node.id]
+        elif isinstance(node, ast.Attribute):
+            names = [node.attr]
+        elif isinstance(node, ast.arg) and node.arg:
+            names = [node.arg]
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            names = [node.value]
+        if needle in names:
+            # `ast.walk` yields the base `AST` type, on which `lineno` is not
+            # declared -- it exists on the concrete expression and statement
+            # nodes this loop has already narrowed to. `getattr` rather than a
+            # cast because the narrowing below is exactly what makes the
+            # attribute real, and a default of 0 keeps a future node kind that
+            # lacks a position from crashing the gate that is meant to report.
+            lines.append(getattr(node, "lineno", 0))
+    return lines
+
+
+def _repository_sources() -> list[Path]:
+    """`src/` and `tests/`, and deliberately NOT `build/`.
+
+    `build/lib/` holds a stale copy of the package left by a packaging run.
+    It is a generated artifact, it is not what ships, and including it meant
+    this gate reported files nobody had edited as offenders.
+    """
+    root = SRC.parent.parent
+    return sorted(
+        path
+        for directory in ("src", "tests")
+        for path in (root / directory).rglob("*.py")
+    )
+
+
+def test_no_module_under_src_names_the_production_database_url():
+    offenders = []
+    for path in SRC.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for lineno in _code_nodes_naming(tree, _DATABASE_URL_FORBIDDEN):
+            offenders.append(f"{path.relative_to(SRC)}:{lineno}")
+    assert not offenders, (
+        f"src/ names {_DATABASE_URL_FORBIDDEN}: {offenders}. The library gate "
+        "reads POSTGRES_TEST_URL only, so a test run has no production URL in "
+        "scope; comparing the two is test policy and lives in "
+        "tests/support/postgres_target.py"
+    )
+
+
+def test_the_postgres_backend_reads_only_the_two_variables_it_may():
+    """`os.environ` is a capability, so the Postgres backend gets a narrow one.
+
+    A backend that can read any environment variable at the moment it is about
+    to run DDL can be pointed at a database by anything else in the process.
+    This pins the set of names it may read, so a third is a deliberate edit to
+    a test rather than an accident in a diff.
+    """
+    path = SRC / "persistence" / "postgres.py"
+    text = path.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute) or node.attr not in _ENV_READERS:
+            continue
+        segment = ast.get_source_segment(text, node) or ""
+        # Strip the two permitted names, then look for any subscript or `.get`
+        # -- i.e. a read of a key that is not one of them.
+        for permitted in _ENV_EXEMPT_IN_POSTGRES:
+            segment = segment.replace(permitted, "")
+        if "get" in segment or "[" in segment:
+            offenders.append(f"line {node.lineno}: {segment.strip()}")
+    assert not offenders, (
+        f"persistence/postgres.py reads environment beyond "
+        f"{sorted(_ENV_EXEMPT_IN_POSTGRES)}: {offenders}"
+    )
+
+
+def test_the_test_url_resolver_is_the_only_thing_that_reads_both_urls():
+    """The asymmetry, made structural.
+
+    `tests/support/postgres_target.py` is the one place in the repository that
+    may name `DATABASE_URL` as code AND touch the PostgreSQL backend. One file,
+    one decision, one place to audit -- and the library above it stays ignorant
+    of production entirely.
+
+    Scoped to files that actually reach the backend, on purpose. Naming
+    `DATABASE_URL` is not itself the hazard: `test_agent_web_shell.py` sets it
+    precisely to assert that the web shell does NOT leak it into a sandbox, and
+    a gate that flagged that would be flagging the test that protects against
+    the thing the gate is for.
+    """
+    touches_postgres = []
+    for path in _repository_sources():
+        # This file names both `persistence.postgres` and the forbidden
+        # variable, because it is the thing checking for them. A gate never
+        # reports itself; without this it would always fail on its own source.
+        if path.resolve() == Path(__file__).resolve():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "persistence.postgres" not in text and "persistence import postgres" not in text:
+            continue
+        if _code_nodes_naming(ast.parse(text), _DATABASE_URL_FORBIDDEN):
+            touches_postgres.append(path)
+    named = [p.relative_to(SRC.parent.parent).as_posix() for p in touches_postgres]
+    assert named == ["tests/support/postgres_target.py"], (
+        f"only the test URL resolver may name {_DATABASE_URL_FORBIDDEN} as code "
+        f"while touching the backend, but so do: {named}"
+    )
+
+
+def test_the_safety_classification_does_not_use_to_regclass():
+    """`to_regclass` resolves through `search_path` and matches any relkind.
+
+    It does not state a schema, so a relation of the same name earlier on the
+    path would be inspected instead of the intended one; and it matches views,
+    sequences and anything else, so a view called `users` could pass as a
+    table. The gate reads `pg_class` joined to `pg_namespace` and consults
+    `relkind` instead, and this pins that so nobody "simplifies" it back.
+    """
+    text = (SRC / "persistence" / "postgres.py").read_text(encoding="utf-8")
+    offenders = _code_nodes_naming(ast.parse(text), "to_regclass")
+    assert not offenders, (
+        f"the safety classification must not use to_regclass() in code: "
+        f"lines {offenders}"
+    )
+    assert "pg_namespace" in text and "relkind" in text
+
+
+def test_the_drop_capability_is_minted_in_exactly_one_place():
+    """`approve_test_database` is the only producer of a `TestDatabaseApproval`.
+
+    If a second place could mint one, the set of things that authorise a
+    `DROP TABLE ... CASCADE` would be larger than the set anyone reviewed, and
+    the capability would be only as good as its least-inspected issuer.
+    """
+    path = SRC / "persistence" / "postgres.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    constructors = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "TestDatabaseApproval"
+    ]
+    assert len(constructors) == 1, (
+        f"TestDatabaseApproval is constructed {len(constructors)} times "
+        f"(lines {constructors}); exactly one issuer is the guarantee"
+    )

@@ -101,10 +101,12 @@ def test_the_margin_is_part_of_the_identity(estimator):
 def test_the_per_script_costs_are_the_stated_calibration():
     """Every one of these changes every budget, so none may drift silently.
 
-    These are a calibration, not a measurement. Nothing here claims they match
-    a real tokenizer -- that is what
-    `tests/integration/test_token_estimator_validation.py` exists to settle,
-    and it skips until a reference tokenizer is installed.
+    Measured against the Boss model's tokenizer lineage in Workstream B and
+    validated on a 26-sample calibration corpus: zero under-estimates, a
+    maximum ratio of 2.36x. The values are the two-decimal ceiling of the
+    min-max calibration solution, chosen so the error falls on the safe side;
+    `tests/integration/test_token_estimator_validation.py` keeps the claim
+    falsifiable wherever a reference tokenizer is installed.
     """
     from personal_ai_core.context import token_estimator as te
 
@@ -115,19 +117,20 @@ def test_the_per_script_costs_are_the_stated_calibration():
         te._DIGIT_COST,
         te._OTHER_COST,
         te._WHITESPACE_COST,
-    ) == (0.27, 0.55, 1.0, 0.5, 0.5, 0.15)
+    ) == (0.38, 0.94, 1.0, 0.76, 1.43, 0.29)
 
 
-def test_the_arabic_to_latin_ratio_is_about_two():
+def test_the_arabic_to_latin_ratio_is_about_two_and_a_half():
     """Stated as what it is: a property of this calibration.
 
-    It is *not* a claim about how real tokenizers behave. If the validation
-    harness ever runs and disagrees, this constant moves and this test moves
-    with it.
+    It is *not* a claim about how real tokenizers behave. The measurement in
+    Workstream B moved the ratio from the old two: once the validation harness
+    ran against the Boss tokenizer lineage, this constant moved and this test
+    moved with it -- exactly the path the previous version recorded.
     """
     from personal_ai_core.context import token_estimator as te
 
-    assert te._ARABIC_COST / te._LATIN_COST == pytest.approx(2.0, abs=0.1)
+    assert te._ARABIC_COST / te._LATIN_COST == pytest.approx(2.5, abs=0.1)
 
 
 def test_every_script_costs_at_least_as_much_per_character_as_latin():
