@@ -1,6 +1,6 @@
 # ADR-017 — Phase 7: events → feedback → observation → experience → evaluation → promote/reject
 
-**Status:** PROPOSED · Phase 7 design draft · persistence slice implemented · Unit 2 (Observation derivation) implemented, owner-authorized 2026-09-30, no production caller (D4)
+**Status:** PROPOSED · Phase 7 design draft · persistence slice implemented · Unit 2 (Observation derivation) implemented, owner-authorized 2026-09-30; first consumer `pac --observations` (read-only display, owner-authorized 2026-09-30 under D4), no effect on any turn
 **Revision:** 4 — Amendment A1 narrows the Observation contract (§15, 2026-09-30).
 Revision 3 corrected the idempotency mechanism per review point 1 (2026-09-29).
 

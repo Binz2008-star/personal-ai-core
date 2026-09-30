@@ -472,6 +472,7 @@ claim written in one place with nothing that notices it going stale.
                recorded (ADR-004 A2)
   #94 950bf48  test: T-1 -- the Event != Memory behavioural test now observes a
                real store
+  #95 d92813f  feat(learning): ADR-017 Unit 2 -- derive Observations from feedback
   #96 cbcc10e  fix(context): charge each boundary token at its worst case
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
@@ -506,7 +507,8 @@ ADR-017 (events -> feedback -> learning): PROPOSED, not accepted.
   SQLite only. B1 (PR #79) records feedback from pac.
   PostgreSQL feedback repository and index: NOT built (ADR-017 section 13,
   open item 4). Observation (Unit 2): IMPLEMENTED as a pure function,
-  owner-authorized 2026-09-30; no production caller (D4), nothing persisted.
+  owner-authorized 2026-09-30; its only consumer is `pac --observations`,
+  a read-only display (D4). Nothing persisted; no turn is affected.
 Evaluation (ADR-013): PROPOSED, nothing built, NOT authorized.
 Context efficiency: no change authorized; agent context is MEASUREMENT
   INSUFFICIENT.
