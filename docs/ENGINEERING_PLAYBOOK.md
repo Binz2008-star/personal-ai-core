@@ -157,8 +157,9 @@ What was executed. Status here is copied from `PROJECT_STATE.md`, which is autho
 | 6 | production persistence, server backend (ADR-016) | accepted |
 
 The practical difference: memory was built as Phases 3 and 4, before events, feedback
-and learning. The plan's Phases 3 to 6 are therefore **not started**, and they no longer
-carry numbers:
+and learning. The Phase 0 plan's Phases 3 to 6 (the superseded plan numbering, not the
+executed and accepted Phases 5 and 6 in the table above) therefore no longer carry
+numbers. Their current status:
 
 - events + feedback + learning. Events are recorded; ADR-017 (PROPOSED) has its feedback
   persistence slice built and authorized; the learning pipeline has no code.
