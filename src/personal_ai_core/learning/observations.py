@@ -3,9 +3,9 @@
     derive_observations(events, feedback) -> (observations, unobserved)
 
 Pure. It takes values, not repositories; performs no I/O; reads no clock;
-calls no model; mints no id; and does not mutate its inputs (D7). It has no
-production caller (D4): its callers are tests, and later only consumers that
-are explicitly authorized.
+calls no model; mints no id; and does not mutate its inputs (D7). Its callers
+are explicitly authorized consumers only (D4): the tests, and `pac
+--observations` (#97), a read-only display that affects no turn.
 
 Ordering is a precondition, not a computation (D7). The caller passes the
 feedback in the order the repository returned it, which is `seq` order, and
