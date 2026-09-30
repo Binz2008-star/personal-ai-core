@@ -88,6 +88,10 @@ omission — but it is also not a memory foundation."*
 remains on the conversation path and still refuses every write — the ADR-003 guard
 was kept, not traded away for the foundation.
 
+*Correction (S-1): `SealedMemoryStore` was never on the conversation path. The ADR-003
+guard is the absence of a memory collaborator on `ConversationService`;
+`SealedMemoryStore` is its refusing test double.*
+
 The source analysis below is unchanged and still stands: it is what was measured
 against the two source repositories, and the Core built its own contract rather than
 adopting either.
@@ -189,6 +193,7 @@ modified. No Phase 0 document modified. No component marked complete.
 2. **Memory foundation** — **DONE (Phase 3).** The promotion pipeline was built against
    the Core contract with an in-memory store, and `SealedMemoryStore` was kept as the
    guard on the conversation path, as specified here.
+   *Correction (S-1): it was never on the path; see the note in the section above.*
 3. **Neon memory adapter** — **STILL OPEN, and now governed by ADR-010.** That ADR
    compares four persistence options and selects none; the six-fields-have-no-column
    problem recorded in §2 is one of its inputs. No option is selected, no schema exists,

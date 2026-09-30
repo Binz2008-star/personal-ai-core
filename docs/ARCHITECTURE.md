@@ -232,8 +232,8 @@ gate described above, and the name collision should not be read as partial cover
 
 **Memory** — BUILT. Holds what the system knows about the user and itself. Written only
 through the promotion pipeline, never from a conversation turn: `ExperiencePipeline` is
-the sole writer, and `SealedMemoryStore` on the conversation path refuses every
-operation. Read back through `MemoryReader`, which exposes no write. `MEMORY_ARCHITECTURE.md`.
+the sole writer, and the conversation path has no memory collaborator to write
+through; `SealedMemoryStore` is the refusing double that makes this testable. Read back through `MemoryReader`, which exposes no write. `MEMORY_ARCHITECTURE.md`.
 
 **Knowledge** — BUILT. Holds ingested documents, retrieved with provenance. Retrieval
 goes through the `Retriever` contract (`HybridRetriever` today); no component reaches an

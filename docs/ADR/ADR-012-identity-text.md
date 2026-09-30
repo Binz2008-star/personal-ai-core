@@ -1,6 +1,6 @@
 # ADR-012 — Identity text
 
-**Status:** PROPOSED · text only · nothing built
+**Status:** PROPOSED · built in #39 · not accepted
 
 - Identity implementation: still **NOT AUTHORIZED**
 - This ADR proposes **words**, not classes. It creates no package, no module and no file

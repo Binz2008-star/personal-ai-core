@@ -69,9 +69,9 @@ without starting training itself.
   on the protocol. Therefore a `learning/` component can depend on
   `core.contracts.EventRepository` while satisfying `learning → core` only
   (review point 4).
-- **Event != Memory** (ADR-003): `SealedMemoryStore` sits on the conversation
-  path and refuses every write; `ConversationService` performs no memory writes;
-  `tests/unit/test_event_not_memory.py` pins it behaviourally and structurally.
+- **Event != Memory** (ADR-003): `ConversationService` has no memory collaborator
+  and performs no memory writes; `tests/unit/test_event_not_memory.py` pins this
+  structurally, and `SealedMemoryStore` refuses writes as the contract double.
 - **Durable stores**: SQLite (PRs #42/#44) and PostgreSQL/Neon (Phase 6,
   ADR-016) persist events, messages, sessions, users and memory records.
   `SCHEMA_VERSION = 1`; there is no migrations framework; the schema is a hard
@@ -726,7 +726,8 @@ from `pac` (PR #58) — the two ADR-013 blockers.
 - **No dead enum members** — one new `EventType` member (`FEEDBACK_RECORDED`)
   with exactly one producer (`FeedbackRecorder`); every `FeedbackOutcome` member
   has an effect-table producer in `src/`. Test 9.
-- **SealedMemoryStore on conversation path** — unchanged.
+- **No memory collaborator on the conversation path; `SealedMemoryStore` sealed** —
+  unchanged.
 - **No Neon / pgvector / migration framework / new table** — none. One additive
   partial unique index, applied by the existing `_SCHEMA` initialisation;
   `SCHEMA_VERSION` stays 1. No production database has been touched.

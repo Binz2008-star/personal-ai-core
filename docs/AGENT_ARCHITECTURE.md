@@ -1,6 +1,9 @@
 # Agent Architecture
 
-**Status: Phase 0 — design.**
+**Status: Phase 0 — design. Built since (#64, #67); the deterministic control layer is
+ACCEPTED (scoped) by ADR-004 Amendment A1 (owner decision D-C, #87). `web_search` and
+`shell` are BLOCKED pending owner decisions D-A and D-B, so the risk table below is left
+as designed until those decisions are made. No expansion is authorized.**
 
 ---
 
