@@ -472,6 +472,7 @@ claim written in one place with nothing that notices it going stale.
                recorded (ADR-004 A2)
   #94 950bf48  test: T-1 -- the Event != Memory behavioural test now observes a
                real store
+  #96 cbcc10e  fix(context): charge each boundary token at its worst case
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
