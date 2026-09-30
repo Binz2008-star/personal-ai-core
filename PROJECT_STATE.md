@@ -446,6 +446,10 @@ claim written in one place with nothing that notices it going stale.
   #77 cb21f35  Phase 2: context calibration and persistence safety
   #78 6c31e01  docs: record #74 #75 and #77 in the merge ledger
   #79 338a0d1  feat(app): record feedback on the latest reply from pac (B1)
+  #80 95056fe  docs(adr): ADR-017 amendment A1 -- the Observation contract
+  #82 8a4472f  docs(adr): ADR-017 A1 contract correction -- Observation identity,
+               ordering precondition, output order (#81 closed as superseded).
+               ADR-017 stays PROPOSED; Unit 2 not authorized
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
