@@ -111,7 +111,27 @@ def ledger() -> dict[int, str]:
             f"characters: {malformed}. Reported rather than skipped -- a row "
             "that cannot be parsed is a row that is not being checked."
         )
+    repeated = duplicated(rows)
+    if repeated:
+        pytest.fail(
+            f"PROJECT_STATE.md records these PRs more than once: {repeated}. "
+            "Rows become a dict keyed by PR number, so every copy but the last "
+            "would be silently dropped -- a wrong SHA or an out-of-order row "
+            "among the dropped copies would never be checked."
+        )
     return {int(num): sha for num, sha in rows}
+
+
+def duplicated(rows: list[tuple[str, str]]) -> list[int]:
+    """PR numbers that appear on more than one ledger row, in first-seen order."""
+    seen: set[int] = set()
+    repeated: list[int] = []
+    for num, _ in rows:
+        number = int(num)
+        if number in seen and number not in repeated:
+            repeated.append(number)
+        seen.add(number)
+    return repeated
 
 
 def mismatched(
@@ -258,3 +278,22 @@ def test_a_malformed_sha_is_reported_rather_than_skipped():
     # which is what lets the fixture fail on it.
     row = "  #12 " + "9341e6e2" + "d" * 33 + "  subject\n"
     assert LEDGER_ROW.findall(row) == [("12", "9341e6e2" + "d" * 33)]
+
+
+def test_a_duplicated_row_is_reported_rather_than_collapsed():
+    """A PR recorded twice collapses to one dict entry, the last one.
+
+    Found by audit: with a stale copy `#80 deadbee` above the correct
+    `#80 95056fe`, the dict kept only the correct row, `mismatched` never saw
+    the wrong SHA, and a copy placed after a later row escaped the order check
+    as well. The fixture now fails on any repeated PR number instead.
+    """
+    rows = LEDGER_ROW.findall(
+        "  #79 338a0d1  real\n"
+        "  #80 deadbee  stale copy with a wrong SHA\n"
+        "  #80 95056fe  correct\n"
+        "  #81 1111111  next\n"
+        "  #79 338a0d1  copy placed out of order\n"
+    )
+    assert duplicated(rows) == [80, 79]
+    assert duplicated(LEDGER_ROW.findall("  #79 338a0d1  a\n  #80 95056fe  b\n")) == []
