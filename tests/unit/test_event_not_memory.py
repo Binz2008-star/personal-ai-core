@@ -6,28 +6,55 @@ These tests assert the Core does not inherit that.
 """
 import pytest
 
-from personal_ai_core.conversation.factory import build_in_memory_service
+from personal_ai_core.conversation.factory import (
+    build_grounded_in_memory_service,
+    build_in_memory_service,
+)
 from personal_ai_core.core.errors import InvariantViolation
 from personal_ai_core.persistence.in_memory import SealedMemoryStore
+from personal_ai_core.persistence.memory_store import InMemoryMemoryRepository
 
 
 def fake_transport(url, payload, timeout):
     return {"model": payload["model"], "message": {"content": "ok"}, "done_reason": "stop"}
 
 
-def test_a_conversation_turn_never_attempts_a_memory_write():
-    memory = SealedMemoryStore()
-    service, events = build_in_memory_service(transport=fake_transport)
+def test_a_conversation_turn_never_attempts_a_memory_write(monkeypatch):
+    """Behavioural, with a memory store that is really there to be reached.
 
+    Finding T-1: the earlier version counted writes on a `SealedMemoryStore`
+    it never handed to anything, so its assertion held whatever the service
+    did. Here recall is ON, so a real memory repository exists inside the
+    composed system, and every write or supersede on that repository class
+    is recorded. The spy is proved live before the conversation runs.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(
+        InMemoryMemoryRepository, "write", lambda self, record: calls.append("write")
+    )
+    monkeypatch.setattr(
+        InMemoryMemoryRepository,
+        "supersede",
+        lambda self, old_id, new_record: calls.append("supersede"),
+    )
+    slice_ = build_grounded_in_memory_service(transport=fake_transport, enable_memory=True)
+    assert slice_.memories is not None
+
+    # The spy sees a write on the very repository the system holds ...
+    slice_.memories.write(None)  # type: ignore[arg-type]
+    assert calls == ["write"]
+    calls.clear()
+
+    service, events = slice_.service, slice_.events
     session = service.start_session(service.create_user().id)
     service.send(session_id=session.id, content="remember that I prefer Arabic")
     service.send(session_id=session.id, content="my name is Roben")
     service.close_session(session.id)
 
-    # Events were recorded ...
+    # ... events were recorded ...
     assert len(events.list_for_session(session.id)) > 0
-    # ... and not one of them reached for memory.
-    assert memory.attempted_writes == 0
+    # ... and not one turn reached for memory.
+    assert calls == []
 
 
 def test_the_conversation_service_has_no_memory_collaborator():
