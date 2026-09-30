@@ -934,9 +934,12 @@ Three facts from it shape the decisions below:
 ### 15.2 What an Observation is
 
 A frozen, in-memory value produced by a pure function. There is **exactly one
-Observation per `source_event_id` that has at least one `FEEDBACK_RECORDED`
-record**. A conversation event with no feedback produces none. An Observation
-is not persisted, not an event, not feedback and not memory (review point 6).
+Observation per eligible `GENERATION_COMPLETED` `source_event_id` having at
+least one feedback record**. Feedback referencing any other source event type,
+or a source event absent from the supplied events, is returned as
+**unobserved** evidence and never produces an Observation (D2). A conversation
+event with no feedback produces none. An Observation is not persisted, not an
+event, not feedback and not memory (review point 6).
 
 ### 15.3 Fields — replaces the §3.3 field list
 
