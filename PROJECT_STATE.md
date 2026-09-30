@@ -464,6 +464,8 @@ claim written in one place with nothing that notices it going stale.
                deterministic control layer (D-C). web_search (D-A) and shell
                (D-B) stay BLOCKED; no expansion authorized
   #88 3d12021  docs: record #86 and #87 in the merge ledger
+  #89 0412c0a  docs: WP-G1 PR-1 -- reconcile PROJECT_STATE.md status sections
+  #90 89028d5  docs: WP-G1 PR-2 -- status lines and S-1 wording corrections
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -485,8 +487,9 @@ Nothing below is a new decision; each line points to the record that holds it.
 
 Agent deterministic control layer: ACCEPTED (scoped) -- ADR-004 Amendment A1,
   owner decision D-C (PR #87). Covers the control layer only.
-  web_search: BLOCKED -- owner decision D-A (risk level) unresolved.
-  shell: BLOCKED -- owner decision D-B (retention) unresolved.
+  web_search: ACCEPTED at HIGH/ASK -- owner decision D-A, ADR-004 A2.
+  shell: ACCEPTED, retained at HIGH/ASK -- owner decision D-B, ADR-004 A2;
+    reaches reserved paths once the owner approves a command.
   Model-driven behaviour: NOT evaluated, NOT accepted.
   Runtime context behaviour: NOT measured, NOT accepted.
   AUTHORIZED FOR FURTHER EXPANSION: NO, for every Agent component.
