@@ -1,13 +1,13 @@
 # ADR-017 — Phase 7: events → feedback → observation → experience → evaluation → promote/reject
 
-**Status:** PROPOSED · Phase 7 design draft · persistence slice implemented
+**Status:** PROPOSED · Phase 7 design draft · persistence slice implemented · Unit 2 (Observation derivation) implemented, owner-authorized 2026-09-30, no production caller (D4)
 **Revision:** 4 — Amendment A1 narrows the Observation contract (§15, 2026-09-30).
 Revision 3 corrected the idempotency mechanism per review point 1 (2026-09-29).
 
 - Phase: 7 (the first unnumbered plan phase, per playbook §8 — "events + feedback
   + learning"; it gains a number when authorised)
-- Implementation: **PARTIALLY IMPLEMENTED** — the persistence slice only, and
-  only verified on SQLite. See §8 for exactly what is verified and what is not.
+- Implementation: **PARTIALLY IMPLEMENTED** — the persistence slice (verified on
+  SQLite only) and Unit 2, the pure `derive_observations` (§15.5). See §8 for exactly what is verified and what is not.
 - Creates no writer, no migration framework, no new table, no new dependency,
   no CI gate. It DOES create one package, `learning/` (`feedback.py`,
   `outcomes.py`), which §12 also lists -- the earlier draft of this line

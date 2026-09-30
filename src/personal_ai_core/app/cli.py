@@ -36,7 +36,7 @@ from ..conversation.factory import (
 from ..core.config import Settings
 from ..core.domain import EventType
 from ..core.errors import ProviderError
-from ..core.feedback import FEEDBACK_EVENT_TYPE, FeedbackOutcome
+from ..core.feedback import CORRECTION_KEY, FEEDBACK_EVENT_TYPE, FeedbackOutcome
 from ..core.knowledge import Document
 
 # What a DIRECTORY given to --documents contributes. A file named explicitly
@@ -319,9 +319,6 @@ def _load_profile(path: Path | None, out: TextIO) -> str | None:
     return text
 
 
-# The one payload key feedback from `pac` may carry, and only on CORRECTION.
-# Anything wider would be a payload schema, and ADR-017 has not designed one.
-CORRECTION_KEY = "correction"
 
 
 def _latest_reply(events, session_id: str):
