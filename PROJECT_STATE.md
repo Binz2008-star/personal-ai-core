@@ -474,6 +474,7 @@ claim written in one place with nothing that notices it going stale.
                real store
   #95 d92813f  feat(learning): ADR-017 Unit 2 -- derive Observations from feedback
   #96 cbcc10e  fix(context): charge each boundary token at its worst case
+  #97 5d6f53b  feat(app): pac --observations -- see what your feedback amounts to
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
