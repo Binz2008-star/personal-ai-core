@@ -475,6 +475,9 @@ claim written in one place with nothing that notices it going stale.
   #95 d92813f  feat(learning): ADR-017 Unit 2 -- derive Observations from feedback
   #96 cbcc10e  fix(context): charge each boundary token at its worst case
   #97 5d6f53b  feat(app): pac --observations -- see what your feedback amounts to
+  #98 93c36a5  docs(adr): ADR-017 A2 (PROPOSED) -- a correction reaches the next
+               turn; design only
+  #99 a2ef4fb  docs(learning): derive_observations now has an authorized consumer
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
