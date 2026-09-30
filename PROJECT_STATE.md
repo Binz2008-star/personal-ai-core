@@ -470,6 +470,9 @@ claim written in one place with nothing that notices it going stale.
   #92 cac0352  tools(eval): read-only context baseline for the rig
   #93 01c1879  fix(agent): D-A -- web_search asks before sending a query; D-B
                recorded (ADR-004 A2)
+  #94 950bf48  test: T-1 -- the Event != Memory behavioural test now observes a
+               real store
+  #96 cbcc10e  fix(context): charge each boundary token at its worst case
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -502,7 +505,8 @@ ADR-017 (events -> feedback -> learning): PROPOSED, not accepted.
   index, read-only audit): IMPLEMENTED, authorized 2026-09-29, verified on
   SQLite only. B1 (PR #79) records feedback from pac.
   PostgreSQL feedback repository and index: NOT built (ADR-017 section 13,
-  open item 4). Observation (Unit 2): NOT authorized.
+  open item 4). Observation (Unit 2): IMPLEMENTED as a pure function,
+  owner-authorized 2026-09-30; no production caller (D4), nothing persisted.
 Evaluation (ADR-013): PROPOSED, nothing built, NOT authorized.
 Context efficiency: no change authorized; agent context is MEASUREMENT
   INSUFFICIENT.

@@ -53,6 +53,13 @@ class FeedbackOutcome(str, Enum):
 # duplicate predicate survives every backend round-trip (review point 1).
 FEEDBACK_IDEMPOTENCY_KEY = "feedback_idempotency_key"
 
+# The one payload key a FeedbackRecord may carry, and only on CORRECTION: the
+# user's corrected text (ADR-017 A1, D5). Defined here rather than in
+# `app/cli.py` so `learning/` can read it without importing the entry point
+# (D6). The value is unchanged, so stored data is unaffected. Anything wider
+# would be a payload schema, which ADR-017 has not designed.
+CORRECTION_KEY = "correction"
+
 # The one EventType member this phase adds, held here so the repositories can
 # filter feedback events without naming the enum member and muddying the
 # "exactly one producer" claim (ADR-017 §3.1): only `as_feedback_event`
