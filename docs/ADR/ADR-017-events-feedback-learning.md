@@ -948,11 +948,11 @@ event, not feedback and not memory (review point 6).
 | `session_id` | the session of the source event |
 | `source_event_id` | the judged `GENERATION_COMPLETED` event |
 | `source_message_id` | that event's `message_id`: the assistant message, or `None` if the event carries none |
-| `feedback_ids` | every feedback record on the source event, in `seq` order |
-| `effective_outcome` | the outcome of the last record in `seq` order (D1) |
+| `feedback_ids` | every feedback record on the source event, in the order supplied, which is the repository's `seq` order (D7) |
+| `effective_outcome` | the outcome of the last such record in the supplied `seq`-ordered feedback input (D1) |
 | `effective_effect` | the effect code **stored** on that last record, carried forward rather than re-derived; `learning.outcomes.effect_for(effective_outcome)` only when the stored code is empty (§3.1 permits an empty code on a directly constructed record) |
 | `conflicted` | `True` iff the records hold more than one distinct outcome (D1) |
-| `conflicts` | every earlier record whose outcome differs from `effective_outcome`, as `(feedback_id, outcome, occurred_at)`, in `seq` order |
+| `conflicts` | every earlier record whose outcome differs from `effective_outcome`, as `(feedback_id, outcome, occurred_at)`, in the order supplied, which is the repository's `seq` order (D7); `occurred_at` is carried as data, never used to order |
 | `correction` | see D5 |
 
 Removed from the §3.3 draft, and why:
@@ -977,7 +977,8 @@ Removed from the §3.3 draft, and why:
 **D1 — Conflict rule (review point 2, kept as written).** Any two distinct
 `FeedbackOutcome` values associated with the same `source_event_id` constitute
 a conflict. The Observation is marked `conflicted=True`. `effective_outcome`
-remains the last feedback record in `seq` order, and the conflicting earlier
+remains the last record for that source in the `seq`-ordered feedback input
+the repository supplied (D7), and the conflicting earlier
 records are retained in `conflicts`. A conflicted Observation is `INSUFFICIENT`
 for downstream promotion and therefore cannot be promoted.
 
@@ -1003,7 +1004,8 @@ enum is introduced.
 
 **D3 — Actor rule (across actors).** Derivation groups all feedback records by
 `source_event_id`, regardless of actor. The effective outcome is the last
-feedback record in `seq` order, and distinct outcomes from different actors
+record for that source in the supplied `seq`-ordered feedback input (D7), and
+distinct outcomes from different actors
 take part in the same conflict rule. This does **not** mean the latest actor is
 trusted: a different outcome from a second actor makes the Observation
 conflicted, and therefore not promotable (D1). A per-actor model would change
@@ -1028,11 +1030,32 @@ only in `app/cli.py` (`CORRECTION_KEY`), which `learning/` may not import. It
 moves to `core/feedback.py`, and `app/cli.py` imports it from there. The value
 is unchanged, so stored data is unaffected.
 
-**D7 — Determinism.** Derivation takes values, not repositories. It performs no
-I/O, reads no clock, calls no model and mints no random id. Order is the event
-store's `seq` order as the read methods return it
-(`EventRepository.list_for_session`, `FeedbackRepository.list_for_session`).
-It is never re-sorted by `occurred_at`.
+**D7 — Determinism and ordering.** Derivation takes values, not repositories.
+It performs no I/O, reads no clock, calls no model, mints no random id, and
+does not mutate its input collections.
+
+Ordering is a **precondition at the read boundary**, not something the function
+computes. Neither `Event` nor `FeedbackRecord` carries `seq`: it is a storage
+column, and this amendment deliberately adds no such field to either value.
+Therefore:
+
+- The repository read methods (`EventRepository.list_for_session`,
+  `FeedbackRepository.list_for_session`) return their collections in storage
+  total order, `seq`. For feedback this is the protocol's documented contract
+  ("in total order"). The `EventRepository` protocol does not state an order;
+  every implementation provides it (SQLite and PostgreSQL `ORDER BY seq`, the
+  in-memory store append order), and this amendment relies on that behaviour
+  without changing the protocol. The derivation's results depend on the
+  feedback order; the events are used to look up each source event's type.
+- The caller passes those collections to `derive_observations(events, feedback)`
+  in the order they were returned.
+- `derive_observations` treats the supplied list order as that established
+  `seq` order, and it is authoritative. The function never re-sorts by
+  `occurred_at` or by any other field, and never invents or reconstructs `seq`.
+
+Determinism is therefore relative to the repository-established order: equal
+input sequences, in the same order, give an equal output. A caller that
+reorders the collections before the call has changed the input.
 
 ### 15.5 Unit 2 boundary, if authorized
 
@@ -1057,7 +1080,11 @@ It is never re-sorted by `occurred_at`.
 **Required tests:**
 - determinism: equal input gives equal output, and the input is not mutated;
 - one Observation per judged source event, several source events in one session;
-- `seq` order, including records whose `occurred_at` disagrees with `seq`;
+- supplied order is authoritative (D7): feedback supplied in an order whose
+  `occurred_at` values disagree with it keeps the supplied order in
+  `feedback_ids` and `conflicts`, and its last supplied record is the
+  effective one. The test builds the input list in the intended `seq` order;
+  it does not require `Event` or `FeedbackRecord` to expose `seq`;
 - D1 with the smoke-data case (GOOD then CORRECTION), a single record, and the
   same outcome recorded by two actors (no conflict);
 - D2: a non-generation source and a missing source event appear in
