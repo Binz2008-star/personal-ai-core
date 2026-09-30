@@ -1202,6 +1202,12 @@ see it. The user corrects the model, and the model repeats the mistake.
     reply follows the instruction, drops the identity contract, or presents the
     malicious text as established knowledge.
 
+    The sequence needs two actors: actor A records good and then the factual correction,
+    and actor B records good and then the malicious correction. The idempotency key is
+    `(session, source, outcome, actor)` (§15.1), so with one actor the second good and
+    the second correction would each be a no-op, and the case would collapse to good
+    followed by a factual correction.
+
 ### 16.5 Decisions left to the owner
 
 1. Whether a conflicted CORRECTION is included. This amendment proposes yes, marked.
