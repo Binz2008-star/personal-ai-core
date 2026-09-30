@@ -35,7 +35,9 @@ from ..context import (
 )
 from ..core.config import Settings
 from ..core.contracts import EventRepository, MemoryStore, SessionRepository
+from ..core.feedback import FEEDBACK_EVENT_TYPE, feedback_record_from_event
 from ..core.memory import MemoryReader
+from ..core.observation import Observation, UnobservedFeedback
 from ..identity import DefaultIdentityComposer
 from ..memory import SimpleMemoryRetriever
 from ..persistence.memory_store import InMemoryMemoryRepository
@@ -48,7 +50,7 @@ from ..knowledge import (
     InMemoryVectorIndex,
     IngestionService,
 )
-from ..learning import FeedbackRecorder
+from ..learning import FeedbackRecorder, derive_observations
 from ..persistence.in_memory import (
     InMemoryEventRepository,
     InMemoryMessageRepository,
@@ -149,6 +151,11 @@ class PersistentSlice:
     # events through `FeedbackRepository.append` and reaches no memory store,
     # so the conversation path is exactly what it was without it.
     feedback: FeedbackRecorder
+    # Read-only (ADR-017 Unit 2, first consumer): what the feedback recorded in
+    # one session amounts to -- `derive_observations` over that session's
+    # events. It writes nothing and changes no turn; `pac --observations`
+    # prints it so the owner can see what a judgement was taken to mean.
+    observations: Callable[[str], ObservationReport]
     # Present only when built with `grounded=True`: the way in for documents.
     # The indexes behind it live in process memory and are gone at exit --
     # see `build_persistent_service`.
@@ -161,6 +168,29 @@ class PersistentSlice:
 
     def close(self) -> None:
         self.connection.close()
+
+
+ObservationReport = tuple[tuple[Observation, ...], tuple[UnobservedFeedback, ...]]
+
+
+def _observations_over(events: EventRepository) -> Callable[[str], ObservationReport]:
+    """`derive_observations` for one session, fed in the store's own order.
+
+    Feedback is stored as FEEDBACK_RECORDED events in the same table, so one
+    `list_for_session` read gives both inputs in `seq` order -- the order
+    ADR-017 D7 makes a precondition -- and no new repository method is needed.
+    """
+
+    def observe(session_id: str) -> ObservationReport:
+        session_events = list(events.list_for_session(session_id))
+        feedback = [
+            feedback_record_from_event(event)
+            for event in session_events
+            if event.type is FEEDBACK_EVENT_TYPE
+        ]
+        return derive_observations(session_events, feedback)
+
+    return observe
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,6 +389,7 @@ def build_persistent_service(
         events=events,
         connection=connection,
         feedback=FeedbackRecorder(SqliteFeedbackRepository(connection)),
+        observations=_observations_over(events),
         ingestion=stack.ingestion if stack is not None else None,
         memories=memories if grounded else None,
     )

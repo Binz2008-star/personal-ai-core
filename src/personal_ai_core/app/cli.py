@@ -174,6 +174,14 @@ def _parser() -> argparse.ArgumentParser:
         metavar="TEXT",
         help="with --feedback correction only: what the reply should have said.",
     )
+    parser.add_argument(
+        "--observations",
+        action="store_true",
+        help=(
+            "show what the feedback recorded in --session amounts to, and exit. "
+            "Reads only; changes nothing and calls no model."
+        ),
+    )
     return parser
 
 
@@ -431,6 +439,61 @@ def _feedback(args, database: Path | None, settings: Settings, transport, out: T
         slice_.close()
 
 
+def _observations(args, database: Path | None, settings: Settings, transport, out: TextIO) -> int:
+    """Print what the feedback in one stored session amounts to (ADR-017 Unit 2).
+
+    Read-only: it derives Observations from what is already stored and
+    prints them. Nothing is written, no turn changes, no model is called.
+    The correction text shown is what the user typed; it is printed as data.
+    """
+    if database is None:
+        print("--observations reads a stored conversation; it cannot be used with --ephemeral", file=out)
+        return 2
+    if (args.feedback is not None or args.correction is not None or args.agent
+            or args.documents is not None or args.remember is not None):
+        print(
+            "--observations reads and exits; it cannot be combined with "
+            "--feedback, --correction, --agent, --documents or --remember",
+            file=out,
+        )
+        return 2
+    if not args.session:
+        print("--observations needs --session ID: the conversation to read", file=out)
+        return 2
+    if not database.is_file():
+        print(f"no stored conversations at {database}", file=out)
+        return 2
+
+    slice_ = build_persistent_service(settings, database=database, transport=transport)
+    try:
+        session_id = args.session
+        if not slice_.service.has_session(session_id):
+            print(f"no such session: {session_id}", file=out)
+            return 2
+        observations, unobserved = slice_.observations(session_id)
+        if not observations and not unobserved:
+            print(f"no feedback recorded in session {session_id} yet", file=out)
+            return 0
+        print(f"observations for session {session_id}: {len(observations)}", file=out)
+        for number, obs in enumerate(observations, start=1):
+            print(
+                f"[{number}] reply {obs.source_event_id}: {obs.effective_outcome.value} "
+                f"-> {obs.effective_effect} ({len(obs.feedback_ids)} judgement(s))",
+                file=out,
+            )
+            if obs.conflicted:
+                earlier = ", ".join(outcome.value for _, outcome, _ in obs.conflicts)
+                print(f"    conflicted: earlier {earlier}; not promotable", file=out)
+            if obs.correction is not None:
+                print(f"    correction: {obs.correction}", file=out)
+        if unobserved:
+            count = sum(len(u.feedback_ids) for u in unobserved)
+            print(f"unobserved: {count} judgement(s) on something other than a reply", file=out)
+        return 0
+    finally:
+        slice_.close()
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -454,6 +517,8 @@ def main(
     lines = iter(stdin if stdin is not None else sys.stdin)
 
     database = None if args.ephemeral else _database_path(args.database, environment)
+    if args.observations:
+        return _observations(args, database, settings, transport, out)
     if args.feedback is not None or args.correction is not None:
         return _feedback(args, database, settings, transport, out)
     profile_path = _profile_path(args.profile, environment, database)
