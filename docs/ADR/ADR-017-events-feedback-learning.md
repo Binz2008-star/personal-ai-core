@@ -1057,6 +1057,12 @@ Determinism is therefore relative to the repository-established order: equal
 input sequences, in the same order, give an equal output. A caller that
 reorders the collections before the call has changed the input.
 
+Output order follows the same traversal of the supplied feedback.
+`observations` are emitted in the order their eligible source events are first
+referenced in the supplied feedback sequence, and `unobserved` entries in the
+order their `source_event_id`s are first referenced there. The order of the
+supplied events does not affect either list.
+
 ### 15.5 Unit 2 boundary, if authorized
 
 **In scope:**
