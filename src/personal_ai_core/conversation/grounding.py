@@ -20,6 +20,7 @@ sources it never received.
 from __future__ import annotations
 
 import hashlib
+import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Sequence
@@ -271,6 +272,25 @@ _ITEM_SLACK = "\n\n9999"
 # Sections are joined by a blank line (`ContextBuilder.build`).
 _SECTION_SLACK = "\n\n"
 
+# The boundary token a single item is measured with is NOT the token the real
+# block carries: the token hashes everything in the block, so it differs as
+# soon as there is a second item. And a token's cost depends on its characters:
+# the estimator charges a digit about 0.76 tokens and a letter about 0.43, so
+# the same 16 hex characters cost anywhere from 7 to 13 tokens. Measuring each
+# item with its own, possibly cheaper, token under-charged the block, found
+# when `test_a_rendered_memory_section_costs_no_more_than_was_charged` failed
+# on a run whose timestamps hashed to a digit-heavy token (1508 > 1503).
+#
+# So every token-shaped run in a measured item is costed as the most expensive
+# token possible: all digits. A 16-hex string inside the item's own text is
+# replaced too, which can only raise the charge, never lower it.
+_TOKEN_SHAPED = re.compile(rf"\b[0-9a-f]{{{BOUNDARY_TOKEN_LENGTH}}}\b")
+_WORST_CASE_TOKEN = "0" * BOUNDARY_TOKEN_LENGTH
+
+
+def _at_worst_case_token(rendered: str) -> str:
+    return _TOKEN_SHAPED.sub(_WORST_CASE_TOKEN, rendered)
+
 
 class RenderedEvidenceCost:
     """`core.contracts.RenderedCost`, measured against the real renderers.
@@ -293,12 +313,12 @@ class RenderedEvidenceCost:
 
     def document(self, result: RetrievalResult) -> int:
         return self._estimator.estimate(
-            render_evidence([result])
+            _at_worst_case_token(render_evidence([result]))
         ) + self._estimator.estimate(_ITEM_SLACK)
 
     def memory(self, evidence: MemoryEvidence) -> int:
         return self._estimator.estimate(
-            render_memories([evidence])
+            _at_worst_case_token(render_memories([evidence]))
         ) + self._estimator.estimate(_ITEM_SLACK)
 
     def document_section(self) -> int:

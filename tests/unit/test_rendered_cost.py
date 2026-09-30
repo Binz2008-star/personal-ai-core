@@ -12,6 +12,9 @@ where positions gain a digit. The second pins how the assembler spends it.
 """
 from __future__ import annotations
 
+import dataclasses
+from datetime import datetime, timezone
+
 from personal_ai_core.context import ReserveBasedBudgetPolicy, ScriptAwareTokenEstimator
 from personal_ai_core.context.assembler import HybridContextAssembler
 from personal_ai_core.core.context import ContextBudget, ExclusionReason
@@ -254,3 +257,47 @@ def test_a_message_with_both_sections_fits_its_budget():
 
     budget = grounding.context.budget.available_tokens
     assert ESTIMATOR.estimate(grounding.message.content) <= budget
+
+
+
+FIXED = datetime(2026, 9, 30, 4, 6, 3, 747615, tzinfo=timezone.utc)
+
+
+def _at_fixed_time(evidence):
+    """Pin every timestamp, so the rendered block -- and its token -- is the
+    same on every run. With live clocks this test would be as flaky as the
+    defect it pins."""
+    record = evidence.record
+    provenance = dataclasses.replace(record.provenance, promoted_at=FIXED)
+    return dataclasses.replace(
+        evidence,
+        record=dataclasses.replace(
+            record, provenance=provenance, created_at=FIXED, updated_at=FIXED
+        ),
+    )
+
+
+def test_the_charge_holds_whatever_the_boundary_token_hashes_to():
+    """The token is a hash of the block, so its digit/letter mix is arbitrary,
+    and the estimator charges a digit nearly twice a letter. Each item used to
+    be measured with its own token, not the block's, so a digit-heavy block
+    token was under-charged -- found in CI as 1508 > 1503.
+
+    Deterministic: fixed timestamps, twelve items, and a content sweep that
+    includes variant 78, which the old per-item measurement under-charged."""
+    for variant in range(100):
+        memories = [
+            _at_fixed_time(
+                recollection(f"prefers answer style {i} v{variant}", memory_id=f"m{i}")
+            )
+            for i in range(12)
+        ]
+        section = f"{MEMORY_PREAMBLE}\n\n{render_memories(memories)}"
+        assert ESTIMATOR.estimate(section) <= charged_for_memories(memories), variant
+
+        results = [
+            passage(f"Passage {i} v{variant} about rank fusion.", chunk_id=f"c{i}")
+            for i in range(12)
+        ]
+        section = f"{GROUNDING_PREAMBLE}\n\n{render_evidence(results)}"
+        assert ESTIMATOR.estimate(section) <= charged_for_documents(results), variant
