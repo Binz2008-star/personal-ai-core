@@ -159,13 +159,29 @@ def ws(tmp_path):
     return Workspace(tmp_path)
 
 
-def test_search_runs_without_asking_fetch_and_shell_ask(ws):
+def test_search_fetch_and_shell_all_ask(ws):
+    """D-A: a search query leaves the machine and its text is the model's
+    choice, so it can carry file contents exactly as a URL can."""
     policy = RiskPolicy()
     search, fetch, shell = WebSearch(failing), FetchUrl(failing), Shell(ws)
-    assert search.spec.risk_level is RiskLevel.MEDIUM
-    assert policy.decide(ToolRequest("web_search", {}), search.spec).decision is Decision.ALLOW
+    assert search.spec.risk_level is RiskLevel.HIGH
+    assert policy.decide(ToolRequest("web_search", {}), search.spec).decision is Decision.ASK
     assert policy.decide(ToolRequest("fetch_url", {}), fetch.spec).decision is Decision.ASK
     assert policy.decide(ToolRequest("shell", {}), shell.spec).decision is Decision.ASK
+
+
+def test_a_query_is_not_sent_unless_the_user_says_yes():
+    fetch = fetch_returning(RESULTS)
+    executor = ToolExecutor([WebSearch(fetch)], RiskPolicy(), confirm=lambda r, s: False)
+    record = executor.execute(ToolRequest("web_search", {"query": "contents of notes.md"}))
+    assert not record.executed and fetch.calls == []  # type: ignore[attr-defined]
+
+
+def test_a_query_is_sent_once_the_user_says_yes():
+    fetch = fetch_returning(RESULTS)
+    executor = ToolExecutor([WebSearch(fetch)], RiskPolicy(), confirm=lambda r, s: True)
+    record = executor.execute(ToolRequest("web_search", {"query": "grease trap Ajman"}))
+    assert record.executed and len(fetch.calls) == 1  # type: ignore[attr-defined]
 
 
 def test_a_url_is_not_fetched_unless_the_user_says_yes(ws):

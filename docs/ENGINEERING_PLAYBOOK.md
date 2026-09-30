@@ -164,7 +164,7 @@ numbers. Their current status:
 - events + feedback + learning. Events are recorded; ADR-017 (PROPOSED) has its feedback
   persistence slice built and authorized; the learning pipeline has no code.
 - agent + tools + policy + verifier. Built; the deterministic control layer is accepted
-  (scoped, ADR-004 A1); `web_search` and `shell` are blocked on D-A and D-B.
+  (scoped, ADR-004 A1); `web_search` and `shell` are decided (HIGH/ASK, ADR-004 A2).
 - controlled training / adapters
 - project connectors
 

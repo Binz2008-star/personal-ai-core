@@ -268,3 +268,35 @@ what enforces Event ≠ Memory (ADR-003). The item should read: "Unchanged.
 refusing contract double, and the Agent path touches neither."
 
 This erratum changes no acceptance boundary, no invariant and no code.
+
+---
+
+## Amendment A2 — Owner decisions D-A and D-B (2026-09-30)
+
+**Amendment status:** ACCEPTED · owner decisions D-A and D-B, 2026-09-30
+
+On 2026-09-30 the owner adopted the recommended options for both decisions §A1.7 left
+open. Each decision applies only to the tool it names.
+
+**D-A: `web_search` is HIGH/ASK.** It was MEDIUM, which `DEFAULT_DECISIONS` resolves to
+ALLOW. That classification rested on the reasoning that a search "sends only the query".
+But the model chooses the query's text, so a query can carry file contents off the
+machine, exactly as a URL can. The code now matches the design rule that network calls
+are HIGH/ASK (`agent/web.py`). Tests pin both halves:
+
+- the query is not sent unless the owner says yes;
+- the query is sent once the owner says yes.
+
+**D-B: `shell` is retained, at HIGH/ASK.** The design's "run command, HIGH, ask" row
+covers it. The owner confirms each command and sees it in full. The following is recorded
+as part of the design, not as a defect: the reserved-database protection applies to the
+file tools, not to a shell command the owner has approved. An approved command can read or
+modify any file the process can reach, including `core.db`. The code is unchanged.
+
+**Effect on A1.** `web_search` and `shell` move from BLOCKED to ACCEPTED, within the same
+boundary as the rest of the deterministic control layer. The following remain as A1 states
+them:
+
+- model-driven behaviour is not accepted;
+- runtime context behaviour is not accepted;
+- AUTHORIZED FOR FURTHER EXPANSION: NO.
