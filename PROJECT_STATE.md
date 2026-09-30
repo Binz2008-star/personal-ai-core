@@ -450,6 +450,10 @@ claim written in one place with nothing that notices it going stale.
   #82 8a4472f  docs(adr): ADR-017 A1 contract correction -- Observation identity,
                ordering precondition, output order (#81 closed as superseded).
                ADR-017 stays PROPOSED; Unit 2 not authorized
+  #83 42dcf53  docs: record #80 and #82 in the merge ledger
+  #84 6f33955  test(grounding): pin the evidence boundary on non-ASCII,
+               near-empty and long input (tests only)
+  #85 26623bc  test(ledger): fail on a PR recorded twice instead of collapsing it
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
