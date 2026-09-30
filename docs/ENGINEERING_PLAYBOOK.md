@@ -153,14 +153,18 @@ What was executed. Status here is copied from `PROJECT_STATE.md`, which is autho
 | 2 | knowledge and context: retrieval, fusion, budgeting | accepted |
 | 3 | memory domain, promotion gate, write path | accepted |
 | 4 | memory-aware context: session-scoped recall, shared budget | accepted |
-| 5 | cross-session memory | **not authorized**, design not started |
+| 5 | memory ownership and cross-session scope (ADR-014, ADR-015) | accepted |
+| 6 | production persistence, server backend (ADR-016) | accepted |
 
 The practical difference: memory was built as Phases 3 and 4, before events, feedback
-and learning. The plan's Phases 3 to 6 are therefore **not started**, and they no longer
-carry numbers:
+and learning. The Phase 0 plan's Phases 3 to 6 (the superseded plan numbering, not the
+executed and accepted Phases 5 and 6 in the table above) therefore no longer carry
+numbers. Their current status:
 
-- events + feedback + learning. Events are recorded; feedback and learning have no code.
-- agent + tools + policy + verifier
+- events + feedback + learning. Events are recorded; ADR-017 (PROPOSED) has its feedback
+  persistence slice built and authorized; the learning pipeline has no code.
+- agent + tools + policy + verifier. Built; the deterministic control layer is accepted
+  (scoped, ADR-004 A1); `web_search` and `shell` are blocked on D-A and D-B.
 - controlled training / adapters
 - project connectors
 

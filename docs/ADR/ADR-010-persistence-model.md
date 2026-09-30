@@ -1,6 +1,8 @@
 # ADR-010 — Persistence model
 
 **Status:** PROPOSED — design only. Not accepted. No implementation authorized.
+*Reconciliation note (WP-G1): the recommended option D+B was since built — SQLite
+(#42, wired #44). Building it did not accept this ADR, which remains PROPOSED.*
 
 This ADR compares alternatives and recommends one. It does not authorize code, a
 schema, a migration, or any dependency. Nothing in `src/` changes on its account.

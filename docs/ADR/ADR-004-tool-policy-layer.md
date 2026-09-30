@@ -256,3 +256,15 @@ This amendment does not cover or authorize any of the following:
 - any change to Agent behaviour;
 - any new tool, risk level, enum, event, schema or memory contract;
 - any expansion of the Agent.
+
+### A1 errata — S-1 wording correction (owner-accepted S-1 ruling)
+
+§A1.6 item 5 reads: "It remains the protected memory-writing boundary on the
+conversation path." That wording is inaccurate and is corrected here; the text above is
+left unchanged as the accepted record. `SealedMemoryStore` has never been on the
+conversation path. `ConversationService` has no memory collaborator, and that absence is
+what enforces Event ≠ Memory (ADR-003). The item should read: "Unchanged.
+`ConversationService` has no memory collaborator, `SealedMemoryStore` remains the
+refusing contract double, and the Agent path touches neither."
+
+This erratum changes no acceptance boundary, no invariant and no code.

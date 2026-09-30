@@ -1,6 +1,6 @@
 # ADR-011 — Identity layer contract
 
-**Status:** PROPOSED · design only · nothing built
+**Status:** PROPOSED · built in #39 · not accepted
 
 - Design questions 1-4: **RESOLVED** (reviewed and accepted)
 - Contract questions 5-8: **DECIDED HERE**, not yet reviewed

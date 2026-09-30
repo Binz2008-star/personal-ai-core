@@ -1,8 +1,9 @@
 # ADR-012 — Identity text
 
-**Status:** PROPOSED · text only · nothing built
+**Status:** PROPOSED · built in #39 · not accepted
 
-- Identity implementation: still **NOT AUTHORIZED**
+- Identity implementation: built in #39 (see `PROJECT_STATE.md`, Phase 1). Building it
+  does not accept this ADR, which remains PROPOSED.
 - This ADR proposes **words**, not classes. It creates no package, no module and no file
   under `src/`, and does not complete Phase 1.
 
@@ -177,6 +178,6 @@ This is a live surface in built code, not a future concern.
 
 **Identity contract (ADR-011):** PROPOSED — not accepted
 
-**Identity implementation:** NOT AUTHORIZED
+**Identity implementation:** built in #39; this ADR remains PROPOSED, not accepted
 
 **Phase 1:** NOT COMPLETE
