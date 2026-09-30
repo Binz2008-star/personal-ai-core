@@ -1,10 +1,13 @@
 # ADR-013 — Evaluation harness
 
-**Status:** PROPOSED · design only · nothing built
+**Status:** PROPOSED · harness v0 built (owner-authorized 2026-09-30) · not yet run against the Boss model · not accepted
 
 - Harness: **PROPOSED**, not accepted
-- Implementation: **NOT AUTHORIZED**
-- It creates no package, no runner and no golden set, and adds no CI gate.
+- Implementation: **AUTHORIZED 2026-09-30** by the owner. The owner decided to move from
+  architecture and governance validation to model-behaviour evidence. Built as v0 in
+  `app/evaluate.py`, with cases in `evals/cases/contract_v0.json`. It adds no CI gate.
+- Verification: its checks and a fake-model run are tested. **Its first real run is the
+  owner's run on the rig.** Until then, nothing here is evidence about the Boss model.
 
 ## Why an ADR and not a harness
 
@@ -131,7 +134,7 @@ file.
 
 **Harness:** PROPOSED — not accepted
 
-**Implementation:** NOT AUTHORIZED
+**Implementation:** AUTHORIZED 2026-09-30; v0 built, awaiting its first run on the rig
 
 **Where it must be built:** an environment with a live model, because the first thing it
 must do is run.
