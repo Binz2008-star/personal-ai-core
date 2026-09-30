@@ -466,6 +466,10 @@ claim written in one place with nothing that notices it going stale.
   #88 3d12021  docs: record #86 and #87 in the merge ledger
   #89 0412c0a  docs: WP-G1 PR-1 -- reconcile PROJECT_STATE.md status sections
   #90 89028d5  docs: WP-G1 PR-2 -- status lines and S-1 wording corrections
+  #91 2a0743d  feat(eval): ADR-013 contract harness v0, to be run on the rig
+  #92 cac0352  tools(eval): read-only context baseline for the rig
+  #93 01c1879  fix(agent): D-A -- web_search asks before sending a query; D-B
+               recorded (ADR-004 A2)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
