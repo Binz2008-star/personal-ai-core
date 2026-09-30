@@ -4,7 +4,7 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 6 (ACCEPTED / MERGED — implementation 7803d2e via PR #72 / merge 1c5042d, wiring via PR #73 / merge 5a5a4fb)
-Main branch head: 5a5a4fb701407da4e25fb834eb0ea48bbba86e3c (short: 5a5a4fb — Merge pull request #73)
+Main branch head (last reconciled): 3d12021058fa5006a8114e4fe96689d6efab5c1e (short: 3d12021 — Merge pull request #88)
   Phase 6 is the accepted phase. Everything between Phase 4 and it -- PRs
   #3-#59 and #64-#67 -- was correction, hardening and design work on top of
   Phase 4, not a new phase: see POST-PHASE-4 MERGES. A few of those exceptions
@@ -32,7 +32,7 @@ Test verification (remote):
 - Phase 2 baseline: 389 passed / 14 skipped
 - Phase 3: 443 passed / 14 skipped
 - Phase 4: 494 passed / 14 skipped
-- Current main (74a2ae2): 691 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
+- Historical figure at 74a2ae2 (not current main): 691 passed / 14 skipped, CONFIRMED ON BOTH PLATFORMS
   (+9 prerequisite B, +10 prerequisite A, +1 the ledger's row-order guard,
    +24 the identity layer -- 19 of them new, the rest from the layering
    check, which is parametrised over src/ and so grew with the package;
@@ -54,11 +54,16 @@ Test verification (remote):
    green: 1094 passed / 48 skipped (14 baseline + 34 accounted server legs).
    ruff 0 errors; pyright 0 errors
 - ruff: 0 errors  |  pyright: 0 errors
+- At 3d12021 (merge of #88): CI run #206 green on static, suite and
+  suite-windows. CI is the authority for the current count; a figure
+  written here goes stale with the next merge.
 
-Synchronization: origin/main is at 5a5a4fb (Phase 4 merged in PR #2, the
+Synchronization: origin/main was last reconciled at 3d12021 (merge of #88);
+  merges after Phase 6 are recorded row by row in POST-PHASE-4 MERGES.
+  Phase history: Phase 4 merged in PR #2, the
   post-Phase-4 record in PRs #3-#59 and #64-#67, Phase 5 via PR #69, ADR-016
   via PR #71, the Phase 6 backend via PR #72, and the Phase 6 wiring via
-  PR #73; Phase 6 ACCEPTED 2026-09-25)
+  PR #73; Phase 6 ACCEPTED 2026-09-25.
 
 PHASE STATUS SUMMARY
 --------------------
@@ -458,6 +463,7 @@ claim written in one place with nothing that notices it going stale.
   #87 cb3ba82  docs(adr): ADR-004 A1 -- scoped acceptance of the Agent
                deterministic control layer (D-C). web_search (D-A) and shell
                (D-B) stay BLOCKED; no expansion authorized
+  #88 3d12021  docs: record #86 and #87 in the merge ledger
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -471,12 +477,38 @@ in the ADR. A proposal to require the `suite` and `static` checks plus review
 is PENDING OWNER DECISION and was deliberately not acted on -- branch
 protection is the owner's to change, not the agent's.
 
+POST-PHASE-6 GOVERNANCE STATUS
+==============================
+
+Recorded here so the status sections say what the ledger rows already do.
+Nothing below is a new decision; each line points to the record that holds it.
+
+Agent deterministic control layer: ACCEPTED (scoped) -- ADR-004 Amendment A1,
+  owner decision D-C (PR #87). Covers the control layer only.
+  web_search: BLOCKED -- owner decision D-A (risk level) unresolved.
+  shell: BLOCKED -- owner decision D-B (retention) unresolved.
+  Model-driven behaviour: NOT evaluated, NOT accepted.
+  Runtime context behaviour: NOT measured, NOT accepted.
+  AUTHORIZED FOR FURTHER EXPANSION: NO, for every Agent component.
+ADR-017 (events -> feedback -> learning): PROPOSED, not accepted.
+  Persistence slice (feedback records, SQLite repository, additive unique
+  index, read-only audit): IMPLEMENTED, authorized 2026-09-29, verified on
+  SQLite only. B1 (PR #79) records feedback from pac.
+  PostgreSQL feedback repository and index: NOT built (ADR-017 section 13,
+  open item 4). Observation (Unit 2): NOT authorized.
+Evaluation (ADR-013): PROPOSED, nothing built, NOT authorized.
+Context efficiency: no change authorized; agent context is MEASUREMENT
+  INSUFFICIENT.
+
 HARD ARCHITECTURAL INVARIANTS
 =============================
 
 1. Event != Memory.
    A conversation turn never writes directly to persistent memory.
-   Enforced by SealedMemoryStore + test_event_not_memory.py.
+   Enforced structurally: ConversationService has no memory collaborator
+   (test_the_conversation_service_has_no_memory_collaborator), and
+   ExperiencePipeline is the sole memory writer. SealedMemoryStore is the
+   refusing contract double (test_the_sealed_store_refuses_writes_loudly).
 
 2. Dependency direction:
    memory → core
@@ -525,10 +557,9 @@ second-brain-kb
 → NOT a dependency
 
 Neon
-→ brownfield persistence substrate
-→ studied read-only
-→ NOT currently used by Core
-→ no pgvector/migration work authorized
+→ production persistence backend for the non-rebuildable stores
+  (ADR-016, Phase 6; opt-in, SQLite remains the default)
+→ no pgvector; no migrations beyond the ADR-016 schema/migration runner
 
 Architecture extraction rule:
 Extract → Characterize → Contract → Implement → Verify → Adapt
@@ -653,8 +684,9 @@ A phase becomes accepted only after:
 Design → Authorization → Implementation → Tests → Invariant review → Git verification → Owner acceptance
 
 Phase 0: HISTORICAL / COMPLETED (evidence freeze ec04071; no separate gate)
-Phase 1: PARTIAL / NOT COMPLETE — identity unbuilt; see PHASE_1_RECONCILIATION.md
-         and the PHASE STATUS SUMMARY above, which this line used to contradict.
+Phase 1: COMPONENTS COMPLETE / NOT ACCEPTED — identity built (PR #39); ADR-011 and
+         ADR-012 PROPOSED. See the PHASE STATUS SUMMARY above and
+         PHASE_1_RECONCILIATION.md.
 Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
 Phase 4: ACCEPTED / MERGED (PR #2 — e8062ff2fa8b6eb5a4471ac8475f29bed76fd369 → bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a)
@@ -725,7 +757,8 @@ Explicitly recorded as BLOCKED / NOT AUTHORIZED:
   contract; further scope change requires authorization)
 - any unapproved Phase 3/4 expansion
 - cross-session recall wider than the opt-in MemoryScope.USER query (ADR-015):
-  the default remains session-scoped, and production persistence stays blocked
+  the default remains session-scoped, and persistence beyond the ADR-016
+  server backend stays blocked
 
 Important:
 Do NOT imply that real embedding adaptation or BM25/stemming is a prerequisite for Phase 3/4 Memory Foundation.
