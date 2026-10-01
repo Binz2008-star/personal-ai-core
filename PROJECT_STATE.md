@@ -575,6 +575,9 @@ claim written in one place with nothing that notices it going stale.
                exists
   #135 d2fd7d0  docs: reconcile PROJECT_STATE and ADR statuses at 8527b7d
   #136 0ea3914  docs: replace ARCHITECTURE.md with the current architecture model
+  #137 380b564  fix(eval): server probes live in their adapters, as ARCHITECTURE.md
+               section 4 states
+  #138 5f1976d  docs: correct eight ARCHITECTURE.md lines the read-only review found
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
