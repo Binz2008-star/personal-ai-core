@@ -1,7 +1,7 @@
 # ADR-019 — A mechanical guard for the reply language
 
 **Status:** PROPOSED · direction approved by the owner 2026-10-01 ("موافق على الاثنين")
-· the decisions in §6 are open · nothing built yet
+· the decisions in §6 are open · unit 1 (the pure check) built; nothing wired
 
 - Contract text this design serves: the language rule, ADR-012 amendment 1: "Reply in
   the language of the user's latest message, and only in that language … Do not change
@@ -61,7 +61,9 @@ A pure function in `conversation/` with no I/O or model call:
    violation.
 3. **Excluded from counting:**
    - fenced code blocks;
-   - text copied word for word from the turn's evidence, which a citation may quote.
+   - any script that appears in the turn's evidence, which a citation may quote.
+     *Unit 1 note:* this is wider than "text copied word for word", and simpler.
+     A script the user's documents contain is never foreign in that turn.
 
 ### 3.2 Action: one retry, then deliver
 
