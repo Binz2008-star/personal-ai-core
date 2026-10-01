@@ -2,6 +2,7 @@
 import io
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -370,3 +371,50 @@ def test_weights_marked_unverified_inside_are_refused_even_without_the_flag(tmp_
     cand.run(CONTRACT, weights={"digest": None, "verified": False, "reason": "x"},
              weights_unverified=False)
     assert "weights_unverified" in _refused(tmp_path)
+
+
+# --- end to end: the harness's own files are what the tool reads -------------------
+
+
+def test_the_harness_output_is_accepted_by_the_comparison(tmp_path):
+    """A self-comparison laid out as evals/README.md says, written by the real
+    harness with a fake model. The tool must compare it, not refuse it: if the
+    two drift apart in format, this fails before a rig run is wasted."""
+    from datetime import timedelta
+
+    from personal_ai_core.app import evaluate as ev
+
+    digest = "e" * 64
+
+    def probe(url, body=None):
+        if url.endswith("/api/show"):
+            return {"modelfile": f"FROM /blobs/sha256-{digest}\n"}
+        return {"models": [{"name": ev.DEFAULT_BOSS_MODEL, "model": ev.DEFAULT_BOSS_MODEL,
+                            "size": 10, "size_vram": 8, "context_length": 8192,
+                            "digest": "f" * 64}]}
+
+    def model(url, payload, timeout):
+        return {"model": payload["model"], "message": {"content": "A plain answer. " * 8},
+                "done_reason": "stop", "prompt_eval_count": 1, "eval_count": 1}
+
+    clock = [FIXED]
+
+    def now():
+        clock[0] += timedelta(minutes=1)
+        return clock[0]
+
+    cases = Path(__file__).resolve().parents[2] / "evals" / "cases"
+    contract = ["--cases", str(cases / "contract_v1.json")]
+    refusal = ["--cases", str(cases / "refusal_v2.json")]
+    plan = [contract] * 5 + [contract + ["--no-language-guard"]] * 5 + [refusal] * 3
+    for side, extra in (("base", []), ("cand", ["--candidate", ev.DEFAULT_BOSS_MODEL])):
+        for argv in plan:
+            code = ev.main([*argv, "--num-ctx", "8192", "--out", str(tmp_path / side), *extra],
+                           transport=model, probe=probe, stdout=io.StringIO(), env={},
+                           now=now, commit="1" * 40)
+            assert code == 0
+    code, output, report = _compare(tmp_path)
+    assert code != 2, output
+    assert report["same_weights"] is True and report["missing_groups"] == []
+    assert sorted((g["refusal_set"], g["key"]["language_guard"]) for g in report["groups"]) == [
+        (False, False), (False, True), (True, True)]
