@@ -136,7 +136,8 @@ def test_only_the_ollama_adapter_knows_about_ollama():
             stripped = line.strip()
             if stripped.startswith("#") or stripped.startswith('"'):
                 continue
-            if "/api/chat" in line or "/api/generate" in line or "import ollama" in line:
+            if ("/api/chat" in line or "/api/generate" in line or "/api/ps" in line
+                    or "import ollama" in line):
                 offenders.append(f"{path.relative_to(SRC)}: {stripped[:60]}")
     assert not offenders, f"Ollama detail leaked outside the adapter: {offenders}"
 
