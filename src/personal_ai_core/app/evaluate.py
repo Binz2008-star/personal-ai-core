@@ -629,8 +629,9 @@ def main(
     settings = Settings.from_env(env)
 
     # Evidence about another model is not evidence about this system. The
-    # Boss model is an invariant (ADR-002); a run against anything else is
-    # refused rather than recorded under the wrong name.
+    # Boss model is configuration (ADR-002): replacing it is a configuration
+    # change behind an evaluation gate, so a run against a different model is
+    # refused here rather than recorded under the Boss model's name.
     if settings.boss_model != DEFAULT_BOSS_MODEL:
         print(
             f"refusing to run: PAC_BOSS_MODEL is {settings.boss_model!r}, "

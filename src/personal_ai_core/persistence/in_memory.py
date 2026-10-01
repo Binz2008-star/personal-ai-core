@@ -164,10 +164,11 @@ class InMemoryFeedbackRepository:
 class SealedMemoryStore:
     """A MemoryStore that refuses every operation.
 
-    The conversation path is given this store rather than the real one so
-    the `Event != Memory` invariant is structural, not aspirational: any
-    memory operation from the conversation flow raises here rather than
-    quietly succeeding (ADR-003).
+    The refusing double for the `Event != Memory` invariant (ADR-003): tests
+    hand it to anything that might reach for memory, and any operation raises
+    rather than quietly succeeding. Production does not construct it -- the
+    conversation path is held to the invariant by having no memory
+    collaborator at all -- so it proves the refusal, not the wiring.
 
     Every method the `MemoryStore` protocol declares is implemented so the
     sealed store still satisfies `isinstance(sealed, MemoryStore)` after

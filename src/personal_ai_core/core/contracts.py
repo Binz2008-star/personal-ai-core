@@ -193,10 +193,12 @@ class MemoryStore(Protocol):
 
     Two implementations coexist by design:
 
-    - `SealedMemoryStore` sits on the conversation path and raises on every
-      write. Its structural presence enforces the `Event != Memory`
-      invariant: a conversation turn that reaches for memory raises rather
-      than quietly succeeds (ADR-003).
+    - `SealedMemoryStore` raises on every write. It is the refusing contract
+      double the `Event != Memory` tests use (ADR-003). The invariant itself
+      is enforced by absence, not by this store: `ConversationService` has
+      no memory collaborator at all, and nothing in `src/` constructs a
+      sealed store on the conversation path
+      (test_the_conversation_service_has_no_memory_collaborator).
     - The real repository, written in Phase 3, sits behind the promotion
       gate and is the only path through which a `MemoryRecord` reaches
       durable storage.
