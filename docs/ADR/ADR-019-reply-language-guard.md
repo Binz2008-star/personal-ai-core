@@ -38,7 +38,9 @@ wording.
 - **Deleting the foreign text.** Removing the Chinese from the `ground-decline-ar` reply
   leaves one Arabic word. A reply edited by the system would also no longer be what the
   model said, which conflicts with the audit trail.
-- **A different Boss model.** The model is an invariant (ADR-002).
+- **A different Boss model.** ADR-002 allows replacing the model through an evaluation gate,
+  and its owner note (2026-10-01) requires keeping the open-response behaviour. That is a
+  separate decision with its own ADR, and not the fix for this.
 
 ## 3. Proposed design
 
@@ -161,6 +163,15 @@ provider is recorded as `GENERATION_FAILED` with `attempt: 2`.
   reply.
 - Fixed by excluding Latin words that the user's message or the evidence already
   contains from the Arabic share. Latin the reply introduces itself still counts.
+
+**Aligned 2026-10-01 after review (at `297f001`).**
+- **Retry accounting.** The first implementation did not record §3.3's
+  `GENERATION_REQUESTED` with `attempt: 2`; it now does. `REPLY_LANGUAGE_GUARD` also carries
+  the rejected draft's token counts, so the turn's full cost is recoverable from its events.
+- **Quoting rule.** The #126 rule matched a bag of words, which also exempted English
+  sentences built from words the evidence happened to contain. It now exempts only a Latin
+  run copied verbatim (case- and whitespace-insensitive) from the user's message or the
+  evidence.
 
 ## 7. Proposed units, if authorized
 

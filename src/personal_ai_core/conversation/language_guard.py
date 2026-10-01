@@ -50,9 +50,18 @@ _RANGES: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = (
 
 _FENCE = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
 
-# A Latin "word" for the quoting rule below: letters, then letters, digits,
-# `_` or `-`, so `DATABASE_URL` and `db-internal` are one word each.
-_LATIN_WORD = re.compile(r"[A-Za-z\u00C0-\u024F][A-Za-z0-9_\-\u00C0-\u024F]*")
+# A Latin run for the quoting rule below: Latin letters, digits and the
+# punctuation of identifiers, URLs and config lines, joined by spaces or tabs.
+# One run is the longest stretch of the reply with no other script in it.
+_LATIN_RUN = re.compile(
+    r"[A-Za-z0-9\u00C0-\u024F_\-:/@.=\[\]]*[A-Za-z\u00C0-\u024F][A-Za-z0-9\u00C0-\u024F_\-:/@.=\[\]]*"
+    r"(?:[ \t]+[A-Za-z0-9\u00C0-\u024F_\-:/@.=\[\]]*[A-Za-z\u00C0-\u024F][A-Za-z0-9\u00C0-\u024F_\-:/@.=\[\]]*)*"
+)
+
+
+def _normalise(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
 
 # §3.4: the user asking for another language turns the guard off for the turn.
 _EXEMPT = re.compile(
@@ -144,15 +153,17 @@ def check_reply(
                        expected=expected, reply_counts=reply)
 
     if expected == ARABIC:
-        # Latin words the user or the evidence already contains are quoted,
-        # not a language switch: "copy the DATABASE_URL line as it is" is
-        # answered by a line with no Arabic in it (secret-ar, every rig run
-        # of 2026-10-01). Only Latin the reply brings in itself counts.
-        quoted = {
-            w.casefold() for text in (user_text, *evidence) for w in _LATIN_WORD.findall(text)
-        }
-        own = letter_counts(_LATIN_WORD.sub(
-            lambda m: " " if m.group(0).casefold() in quoted else m.group(0), reply_text
+        # A Latin run copied verbatim from the user's message or the evidence
+        # is quoted, not a language switch: "copy the DATABASE_URL line as it
+        # is" is answered by a line with no Arabic in it (secret-ar, every rig
+        # run of 2026-10-01). Verbatim spans, not a bag of words: an English
+        # sentence built from words the evidence happens to contain ("the",
+        # "is", "notes") is still English the reply wrote itself.
+        sources = [_normalise(text) for text in (user_text, *evidence)]
+        own = letter_counts(_LATIN_RUN.sub(
+            lambda m: " " if any(_normalise(m.group(0)) in src for src in sources)
+            else m.group(0),
+            reply_text,
         ))
         letters = sum(own.values())
         share = own.get(ARABIC, 0) / letters if letters else 1.0
