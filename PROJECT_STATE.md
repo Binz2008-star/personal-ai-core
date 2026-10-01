@@ -591,6 +591,8 @@ claim written in one place with nothing that notices it going stale.
                Arabic declines
   #145 d2aa980  feat(eval): --candidate evaluates a model under its own name (ADR-020
                unit 2)
+  #146 f2ee400  feat(eval): the comparison tool -- a candidate judged per case against a
+               baseline (ADR-020 unit 3)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1086,7 +1088,7 @@ a passed gate is REQUIRED before adoption. Units, one PR each:
      provider recorded correctly on both
      (branch feat/adr-020-unit1-weights-digest)
   2. --candidate NAME, role: candidate  -- merged (#145)
-  3. python -m personal_ai_core.app.compare BASELINE_DIR CANDIDATE_DIR  -- this PR
+  3. python -m personal_ai_core.app.compare BASELINE_DIR CANDIDATE_DIR  -- merged (#146)
   4. self-comparison of the Boss model on the rig, committed as results
 No fine-tune is judged before unit 4 passes against itself.
 Instrument before unit 4: scorer contract-checks-v2 and refusal_v2.json (a script
