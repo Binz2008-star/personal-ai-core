@@ -504,6 +504,11 @@ claim written in one place with nothing that notices it going stale.
                sentence
   #115 30ef40e  feat(eval): record the context Ollama actually loaded
   #116 4fd6d80  feat(eval): --sampling profiles, starting with the model card's config
+  #117 f953828  docs: ledger #113 #114 #115 #116
+  #118 f412408  eval: contract_v1 at d65f4f7, default variant B, num_ctx 8192, two
+               runs
+  #119 70b9698  eval: contract_v1 at f953828, --sampling model-card, num_ctx 8192,
+               two runs
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped

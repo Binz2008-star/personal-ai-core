@@ -492,28 +492,44 @@ def test_a_test_transport_does_not_reach_a_real_server(tmp_path):
 # --- sampling profiles (eval only) ------------------------------------------------
 
 
-def test_the_default_profile_sends_no_sampling_options(tmp_path):
-    """Default is what pac sends today: only the budget's num_predict."""
+def test_the_production_profile_sends_what_pac_sends(tmp_path):
+    """The default run goes through the composition root with no override, so
+    it carries the Boss model's configured sampling beside the budget."""
+    from personal_ai_core.core.config import DEFAULT_BOSS_SAMPLING
+
     model = FakeModel("A thread shares memory.")
     _run(tmp_path, model, "--only", "lang-en-1")
-    options = model.payloads[-1].get("options", {})
-    assert set(options) == {"num_predict"}
-    assert _header(tmp_path)["sampling"] == "default"
+    options = model.payloads[-1]["options"]
+    assert {k: options[k] for k in DEFAULT_BOSS_SAMPLING} == dict(DEFAULT_BOSS_SAMPLING)
+    assert "num_predict" in options
+    assert _header(tmp_path)["sampling"] == "production"
+    assert _header(tmp_path)["sampling_options"] == dict(DEFAULT_BOSS_SAMPLING)
+
+
+def test_the_none_profile_is_what_runs_before_the_adoption_measured(tmp_path):
+    """Their headers say "default" with no options: only num_predict was sent."""
+    model = FakeModel("A thread shares memory.")
+    _run(tmp_path, model, "--only", "lang-en-1", "--sampling", "none")
+    assert set(model.payloads[-1]["options"]) == {"num_predict"}
     assert _header(tmp_path)["sampling_options"] == {}
 
 
-def test_the_model_card_profile_reaches_the_model_beside_the_budget(tmp_path):
+def test_the_model_card_profile_is_frozen_and_matches_production_today(tmp_path):
+    from personal_ai_core.core.config import DEFAULT_BOSS_SAMPLING
+
+    assert ev.SAMPLING_PROFILES["model-card"] == {
+        "temperature": 0.7, "top_p": 0.8, "top_k": 20, "repeat_penalty": 1.05
+    }
+    assert dict(DEFAULT_BOSS_SAMPLING) == ev.SAMPLING_PROFILES["model-card"]
     model = FakeModel("A thread shares memory.")
     _run(tmp_path, model, "--only", "lang-en-1", "--sampling", "model-card")
     options = model.payloads[-1]["options"]
-    for key, value in ev.SAMPLING_PROFILES["model-card"].items():
+    for key, value in ev.SAMPLING_PROFILES["model-card"].items():  # type: ignore[union-attr]
         assert options[key] == value
-    assert "num_predict" in options  # the budget still owns the output limit
-    assert _header(tmp_path)["sampling_options"] == dict(ev.SAMPLING_PROFILES["model-card"])
 
 
 def test_a_sampling_profile_never_changes_the_identity(tmp_path):
     plain, tuned = FakeModel("x"), FakeModel("x")
-    _run(tmp_path, plain, "--only", "lang-en-1")
+    _run(tmp_path, plain, "--only", "lang-en-1", "--sampling", "none")
     _run(tmp_path / "t", tuned, "--only", "lang-en-1", "--sampling", "model-card")
     assert _system_text(plain) == _system_text(tuned)

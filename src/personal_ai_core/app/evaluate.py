@@ -100,15 +100,17 @@ PRODUCTION_VARIANT = "B"
 
 # Experiment: sampling settings, ONE more knob beside the language rule.
 # Every failure in the two runs on d65f4f7 was Chinese text inside an Arabic
-# reply, including ungrounded cases no prompt change of that day touched, so
-# the next suspect is the sampler rather than the wording. Core sends no
-# sampling options, so the model runs on Ollama's defaults. `model-card` is the
-# generation config the Qwen2.5 model card publishes; its narrower top_k and
-# top_p cut the low-probability tail where a stray script lives. Like the
-# identity variants, a profile exists only inside an evaluation run, and
-# adopting one is a separate owner decision.
-SAMPLING_PROFILES: Mapping[str, Mapping[str, Any]] = {
-    "default": {},
+# reply, so the sampler was tested next, and the model card's config was
+# adopted as the Boss model's default (core/config.py, 2026-10-01). Profiles
+# replace `Settings.boss_sampling` for the run, so a run measures the same
+# path pac takes. Each name means the same options in every result file:
+#   production  whatever pac sends now (the default)
+#   none        no sampling options: Ollama's own defaults. Every run before
+#               the adoption measured this; their headers call it "default".
+#   model-card  the model card's config, frozen, as the 2026-10-01 runs had it
+SAMPLING_PROFILES: Mapping[str, Mapping[str, Any] | None] = {
+    "production": None,
+    "none": {},
     "model-card": {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "repeat_penalty": 1.05},
 }
 
@@ -394,8 +396,7 @@ def _event_record(event) -> dict[str, Any]:
 
 
 def run_case(
-    case: Case, settings: Settings, transport, workdir: Path, policy=None,
-    sampling: Mapping[str, Any] | None = None,
+    case: Case, settings: Settings, transport, workdir: Path, policy=None
 ) -> dict[str, Any]:
     """One case, in a fresh in-memory system, through the pac builders."""
     if case.path == GROUNDED:
@@ -419,9 +420,7 @@ def run_case(
     record: dict[str, Any] = {"id": case.id, "rule": case.rule, "path": case.path,
                               "prompt": case.prompt}
     try:
-        reply = service.send(
-            session_id=session.id, content=case.prompt, options=dict(sampling or {}) or None
-        )
+        reply = service.send(session_id=session.id, content=case.prompt)
         record["reply"] = reply.content
     except ProviderError as exc:
         record["error"] = str(exc)
@@ -511,8 +510,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sampling",
         choices=sorted(SAMPLING_PROFILES),
-        default="default",
-        help="experiment: sampling options to send (default = none, Ollama's own)",
+        default="production",
+        help="experiment: sampling options to run with (production = what pac sends)",
     )
     parser.add_argument(
         "--rescore",
@@ -556,6 +555,9 @@ def main(
     # No profile: the owner's profile.md would make every result depend on
     # what it says today. The contract is what is under test.
     settings = dataclasses.replace(settings, profile="")
+    profile_options = SAMPLING_PROFILES[args.sampling]
+    if profile_options is not None:
+        settings = dataclasses.replace(settings, boss_sampling=dict(profile_options))
 
     version, cases = load_cases(args.cases)
     if args.only:
@@ -584,7 +586,7 @@ def main(
         "identity_variant": args.identity_variant,
         "language_rule": IDENTITY_VARIANTS[args.identity_variant],
         "sampling": args.sampling,
-        "sampling_options": dict(SAMPLING_PROFILES[args.sampling]),
+        "sampling_options": dict(settings.boss_sampling),
     }
 
     variant_rule = IDENTITY_VARIANTS[args.identity_variant]
@@ -597,10 +599,7 @@ def main(
     with tempfile.TemporaryDirectory(prefix="pac-eval-") as tmp:
         for case in cases:
             print(f"running {case.id} ...", file=out)
-            records.append(
-                run_case(case, settings, transport, Path(tmp), policy,
-                         SAMPLING_PROFILES[args.sampling])
-            )
+            records.append(run_case(case, settings, transport, Path(tmp), policy))
 
     # Asked after the cases, while the model is still loaded. A real run
     # (no injected transport) probes the real server unless told otherwise.

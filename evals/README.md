@@ -75,19 +75,24 @@ Each run records `identity_variant` and the exact `language_rule` in its header.
 always means the same text, so results from before and after the adoption compare
 directly. Changing the production rule again is a change to ADR-012 and an owner decision.
 
-## Sampling experiment
+## Sampling
 
-Core sends no sampling options, so the Boss model runs on Ollama's defaults. In the two
-runs on `d65f4f7` every failure was Chinese text inside an Arabic reply. `--sampling model-card`
-sends the generation config published on the Qwen2.5 model card (temperature 0.7, top_p
-0.8, top_k 20, repeat_penalty 1.05) in an evaluation run only:
+Core sends the Boss model's configured sampling (`DEFAULT_BOSS_SAMPLING` in
+`core/config.py`: temperature 0.7, top_p 0.8, top_k 20, repeat_penalty 1.05, the model
+card's generation config) on every turn, adopted 2026-10-01. `--sampling` replaces it for
+one run:
+
+| Profile | Options |
+|---|---|
+| `production` | what `pac` sends (the default) |
+| `none` | no sampling options, Ollama's defaults. Runs before the adoption measured this; their headers call it `default` |
+| `model-card` | the model card's config, frozen as the 2026-10-01 runs had it |
 
 ```bat
-python -m personal_ai_core.app.evaluate --num-ctx 8192 --sampling model-card
+python -m personal_ai_core.app.evaluate --num-ctx 8192 --sampling none
 ```
 
-The header records `sampling` and the exact `sampling_options`. Adopting a profile in
-`pac` is a separate owner decision.
+The header records `sampling` and the exact `sampling_options` sent.
 
 ## Loaded context
 
