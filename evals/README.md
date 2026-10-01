@@ -75,6 +75,14 @@ Each run records `identity_variant` and the exact `language_rule` in its header.
 always means the same text, so results from before and after the adoption compare
 directly. Changing the production rule again is a change to ADR-012 and an owner decision.
 
+## Loaded context
+
+`--num-ctx` is what you say the server uses. After the cases, the harness asks Ollama
+(`/api/ps`) what it actually loaded, and records `ollama_loaded` (context length and GPU
+share) and `context_mismatch` in the header. If the two disagree, it prints a warning and
+exits with 3. The files are still written, marked as mismatched. A run through the Ollama
+desktop app at 4096 while the shell said 8192 is how this was found.
+
 ## Verdicts
 
 | Verdict | Meaning |
