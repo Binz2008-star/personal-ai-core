@@ -876,3 +876,53 @@ def test_a_rescore_names_the_cases_file_it_used(tmp_path):
     )
     assert data["rescored_with"]["cases_version"] == "refusal-v2"
     assert data["header"]["cases_version"] == "refusal-v1"  # what the run used, unchanged
+
+
+# --- ADR-020 section 3.6: evaluating a candidate is not adopting it -----------------
+
+CANDIDATE = "owner/boss-lora:7b"
+
+
+def test_a_candidate_is_evaluated_under_its_own_name(tmp_path):
+    model = FakeModel("A thread shares memory with its process.")
+    code, output = _run(tmp_path, model, "--only", "lang-en-1", "--candidate", CANDIDATE)
+    assert code == 0
+    assert {p["model"] for p in model.payloads} == {CANDIDATE}
+    header = _header(tmp_path)
+    assert header["model"] == CANDIDATE and header["role"] == "candidate"
+    assert f"model: {CANDIDATE}  role: candidate" in output
+
+
+def test_an_ordinary_run_is_the_boss_models(tmp_path):
+    model = FakeModel("A thread shares memory with its process.")
+    _run(tmp_path, model, "--only", "lang-en-1")
+    header = _header(tmp_path)
+    assert header["model"] == ev.DEFAULT_BOSS_MODEL and header["role"] == "boss"
+    assert {p["model"] for p in model.payloads} == {ev.DEFAULT_BOSS_MODEL}
+
+
+def test_the_boss_model_can_be_its_own_candidate_for_a_self_comparison(tmp_path):
+    _run(tmp_path, FakeModel("x" * 100), "--only", "lang-en-1",
+         "--candidate", ev.DEFAULT_BOSS_MODEL)
+    header = _header(tmp_path)
+    assert header["model"] == ev.DEFAULT_BOSS_MODEL and header["role"] == "candidate"
+
+
+def test_a_mistyped_boss_model_is_still_refused_and_points_to_candidate(tmp_path):
+    code, output = _run(tmp_path, FakeModel("x"), env={"PAC_BOSS_MODEL": CANDIDATE})
+    assert code == 2
+    assert "--candidate" in output
+    assert not (tmp_path / "results").exists()
+
+
+def test_a_candidate_with_another_boss_model_set_is_refused(tmp_path):
+    # Two names for one run: which one was evaluated would be ambiguous.
+    code, output = _run(tmp_path, FakeModel("x"), "--candidate", CANDIDATE,
+                        env={"PAC_BOSS_MODEL": "someone/else:1b"})
+    assert code == 2 and "refusing to run" in output
+
+
+@pytest.mark.parametrize("name", ["", "   "])
+def test_an_empty_candidate_name_is_refused(tmp_path, name):
+    code, output = _run(tmp_path, FakeModel("x"), "--candidate", name)
+    assert code == 2 and "--candidate needs a model name" in output

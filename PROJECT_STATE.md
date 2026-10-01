@@ -587,6 +587,8 @@ claim written in one place with nothing that notices it going stale.
                unit 1)
   #143 074337c  eval: first GPU (Vulkan) baseline at 6565dd3 -- contract_v1 x5 guard on,
                x5 guard off, refusal_v1 x3, plus the d2fd7d0 check run
+  #144 62b2520  eval: instrument v2 -- refusal_v2 checks the reply's language; two
+               Arabic declines
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1076,9 +1078,12 @@ ADR-020 (evaluating a candidate model): D1-D4 approved by the owner
 at +2 failures in 5 runs or failing every candidate run, and any new refusal
 regresses; 5 contract + 3 refusal runs per side plus one unguarded pair of 5;
 a passed gate is REQUIRED before adoption. Units, one PR each:
-  1. weights digest and provider label in headers and events  -- merged (#142)
+  1. weights digest and provider label in headers and events  -- merged (#142);
+     verified live on the rig at 62b2520: weights.verified true, the digest equal
+     to the modelfile's FROM blob, the same digest on Ollama and llama.cpp, and
+     provider recorded correctly on both
      (branch feat/adr-020-unit1-weights-digest)
-  2. --candidate NAME, role: candidate
+  2. --candidate NAME, role: candidate  -- this PR
   3. python -m personal_ai_core.app.compare BASELINE_DIR CANDIDATE_DIR
   4. self-comparison of the Boss model on the rig, committed as results
 No fine-tune is judged before unit 4 passes against itself.
