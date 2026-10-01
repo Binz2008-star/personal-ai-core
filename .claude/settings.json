@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && (python3 tools/session_state.py 2>/dev/null || python tools/session_state.py)"
+          }
+        ]
+      }
+    ]
+  }
+}
