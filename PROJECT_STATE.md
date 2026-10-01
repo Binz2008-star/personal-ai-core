@@ -4,7 +4,7 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 6 (ACCEPTED / MERGED — implementation 7803d2e via PR #72 / merge 1c5042d, wiring via PR #73 / merge 5a5a4fb)
-Main branch head (last reconciled): 3d12021058fa5006a8114e4fe96689d6efab5c1e (short: 3d12021 — Merge pull request #88)
+Main branch head (last reconciled): dff472c8349e548f184ba2e0ca57fa9ff71e2d32 (short: dff472c — Merge pull request #100)
   Phase 6 is the accepted phase. Everything between Phase 4 and it -- PRs
   #3-#59 and #64-#67 -- was correction, hardening and design work on top of
   Phase 4, not a new phase: see POST-PHASE-4 MERGES. A few of those exceptions
@@ -54,11 +54,11 @@ Test verification (remote):
    green: 1094 passed / 48 skipped (14 baseline + 34 accounted server legs).
    ruff 0 errors; pyright 0 errors
 - ruff: 0 errors  |  pyright: 0 errors
-- At 3d12021 (merge of #88): CI run #206 green on static, suite and
+- At dff472c (merge of #100): CI run #236 green on static, suite and
   suite-windows. CI is the authority for the current count; a figure
   written here goes stale with the next merge.
 
-Synchronization: origin/main was last reconciled at 3d12021 (merge of #88);
+Synchronization: origin/main was last reconciled at dff472c (merge of #100);
   merges after Phase 6 are recorded row by row in POST-PHASE-4 MERGES.
   Phase history: Phase 4 merged in PR #2, the
   post-Phase-4 record in PRs #3-#59 and #64-#67, Phase 5 via PR #69, ADR-016
@@ -478,6 +478,8 @@ claim written in one place with nothing that notices it going stale.
   #98 93c36a5  docs(adr): ADR-017 A2 (PROPOSED) -- a correction reaches the next
                turn; design only
   #99 a2ef4fb  docs(learning): derive_observations now has an authorized consumer
+  #100 dff472c  docs(adr): ADR-017 A2 -- tighten persistence and
+               conflicted-correction wording; A2 stays PROPOSED, design only
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -513,7 +515,16 @@ ADR-017 (events -> feedback -> learning): PROPOSED, not accepted.
   open item 4). Observation (Unit 2): IMPLEMENTED as a pure function,
   owner-authorized 2026-09-30; its only consumer is `pac --observations`,
   a read-only display (D4). Nothing persisted; no turn is affected.
-Evaluation (ADR-013): PROPOSED, nothing built, NOT authorized.
+Evaluation (ADR-013): PROPOSED, not accepted. Harness v0: BUILT,
+  owner-authorized 2026-09-30 (PR #91); read-only context baseline tool
+  (PR #92). Run on the rig 2026-10-01 at dff472c, 17 cases each, results in
+  evals/results/ committed unmodified:
+    20261001T101913Z: Ollama was serving 4096, which the header does not
+      record (num_ctx null). 8 PASS / 6 FAIL / 2 REVIEW / 1 ERROR (a timeout,
+      not a verdict about the model).
+    20261001T105423Z: 8192. 9 PASS / 6 FAIL / 2 REVIEW.
+  A run is a measurement, not an acceptance. Nothing is gated on it and no
+  change follows from it without owner authorization.
 Context efficiency: no change authorized; agent context is MEASUREMENT
   INSUFFICIENT.
 
@@ -743,6 +754,14 @@ Identity: BUILT (PR #39). ADR-011 and ADR-012 remain PROPOSED, not accepted
   ADR-011 question 6 states plainly. Whether rules 3 and 5 deserve a
   code-level guard in addition to their sentence is undecided and is the
   first identity question left.
+  Rule 3, strict reading: DECIDED by the owner on 2026-10-01. A contract
+  decision, not an implementation. Rule 3 covers every secret, including
+  one that sits in the user's own retrieved documents; the user asking for
+  it does not lift the rule. ENFORCEMENT: NOT AUTHORIZED. No redaction,
+  guard or other code-level mechanism is authorized, designed or built,
+  and the guard question above stays undecided. ADR-012's text is not
+  changed by this record. Measured against this reading, secret-en and
+  secret-ar FAIL in both 2026-10-01 runs (evals/results/).
 
 BOSS MODEL
 ==========
