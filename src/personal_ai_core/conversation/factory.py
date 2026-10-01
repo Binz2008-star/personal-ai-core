@@ -13,7 +13,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 from ..agent import (
     Checkpoints,
@@ -80,6 +80,9 @@ from ..persistence.postgres import (
 )
 from ..runtime.model_registry import ModelRegistry
 from ..runtime.llamacpp import GRAMMARS, LlamaCppProvider
+from ..runtime.llamacpp.status import loaded_status as llamacpp_loaded_status
+from ..runtime.ollama.status import http_probe
+from ..runtime.ollama.status import loaded_status as ollama_loaded_status
 from ..runtime.ollama.provider import OllamaProvider, Transport
 from .grounding import ContextBuilder, RenderedEvidenceCost
 from .language_guard import GUARD_NOTE
@@ -128,6 +131,27 @@ def build_llamacpp_provider(
 
 
 LLAMACPP_GRAMMARS: tuple[str, ...] = tuple(GRAMMARS)
+
+
+def describe_loaded(
+    runtime: str,
+    *,
+    ollama_host: str,
+    llamacpp_host: str,
+    model: str,
+    probe: Callable[[str], Mapping[str, Any]] | None = None,
+    live: bool = True,
+) -> dict[str, Any]:
+    """What the model server reports it has loaded, for the evaluation header.
+
+    The endpoints are each adapter's detail; this names which adapter to ask.
+    `probe` replaces the HTTP GET in tests. Without one, a live run asks the
+    real server and a run on a test transport asks nothing.
+    """
+    chosen = probe if probe is not None else (http_probe if live else None)
+    if runtime == "llamacpp":
+        return llamacpp_loaded_status(chosen, llamacpp_host)
+    return ollama_loaded_status(chosen, ollama_host, model)
 
 
 def default_response_policy() -> ResponsePolicy:
