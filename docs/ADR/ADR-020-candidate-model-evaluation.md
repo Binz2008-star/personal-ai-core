@@ -193,8 +193,12 @@ the tool takes the stricter one:
 - **The settings key** is §3.4's list plus the commit, the machine and the profile. A
   candidate run at a later commit is compared only with a baseline re-run at that commit,
   because a code change can move a result as much as weights can.
-- **GPU share** is compared at one decimal. The probe reports 0.84 or 0.85 for the same
-  load, and one decimal still separates CPU, partial and full offload.
+- **GPU share** must lie within 0.05 across every run of a group, on both sides. It is
+  not part of the grouping key. *Corrected 2026-10-01:* the first build rounded it to one
+  decimal, which puts 0.85 and 0.86 on either side of a boundary (0.8 and 0.9). The rig
+  records 0.85, so a one-point drift would have refused a sound comparison. Found by the
+  rig's code sweep; no committed comparison was affected (all 26 runs of #148 read 0.85).
+  0.05 still separates CPU, partial and full offload.
 - **Run counts** must be equal on both sides; D2's "2 more failures in 5" is defined for
   equal counts.
 - **Refused inputs:** a run scored by another scorer than the current one (rescore it

@@ -594,6 +594,8 @@ claim written in one place with nothing that notices it going stale.
   #146 f2ee400  feat(eval): the comparison tool -- a candidate judged per case against a
                baseline (ADR-020 unit 3)
   #147 5a88b0c  test: the harness's own output is accepted by the comparison tool
+  #149 ee30f82  feat(eval): ADR-020 amendment 1 -- the gate recalibrated from alpha and
+               effect size
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
