@@ -1,12 +1,14 @@
 # ADR-018 — A mechanical guard for rule 3: secrets are withheld from the prompt
 
-**Status:** PROPOSED · design only · revision 3 (author's review and an independent review, section 9) · nothing here is built · nothing here is authorized
+**Status:** PROPOSED · revision 3 (author's review and an independent review, section 9) · version 1 AUTHORIZED by the owner 2026-10-01 (D1) · nothing built yet
 
 - Contract decision this design serves: rule 3, strict reading, decided by the owner on
   2026-10-01 (`PROJECT_STATE.md`, Identity). Rule 3 covers every secret, including one in
   the user's own retrieved documents.
-- Enforcement: **NOT AUTHORIZED.** This document proposes an enforcement design so that
-  there is something concrete to authorize or reject. Writing it authorizes nothing.
+- Enforcement: **version 1 AUTHORIZED** by the owner on 2026-10-01 (D1: "D1 موافق").
+  D2-D6 are decided as the reviewer recommended in §7. Implementation proceeds in the §8
+  units, each in its own PR. Unit 1 (the pure redactor and its tests) comes first and
+  changes no behaviour.
 - ADR-012's text is not changed by this ADR.
 
 ## 1. The problem, as measured
@@ -228,4 +230,4 @@ The reviewer's recommendations on D1 to D6 are in section 7.
 
 ## Status
 
-**ADR-018:** PROPOSED — not accepted, not authorized, not built.
+**ADR-018:** PROPOSED, not accepted. Version 1 AUTHORIZED 2026-10-01 (D1, with D2-D6 as in §7). Not built.

@@ -483,6 +483,9 @@ claim written in one place with nothing that notices it going stale.
   #101 64a3842  docs: record #100, ADR-013 results from the rig, rule 3 strict
                reading
   #102 9d36ef9  fix(eval): contract-checks-v1 -- a third script is a language switch
+  #103 3e8f554  docs(adr): ADR-018 (PROPOSED) -- withhold secrets at render time,
+               revision 3
+  #104 fbc6d4c  feat(eval): language-rule experiment -- --identity-variant A/B/C
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -760,12 +763,11 @@ Identity: BUILT (PR #39). ADR-011 and ADR-012 remain PROPOSED, not accepted
   Rule 3, strict reading: DECIDED by the owner on 2026-10-01. A contract
   decision, not an implementation. Rule 3 covers every secret, including
   one that sits in the user's own retrieved documents; the user asking for
-  it does not lift the rule. ENFORCEMENT: NOT AUTHORIZED. No redaction,
-  guard or other code-level mechanism is authorized or built, and the
-  guard question above stays undecided. A design is PROPOSED in ADR-018
-  (withhold the secret at render time, before the model sees it); a
-  proposal is not an authorization. ADR-012's text is not changed by
-  this record. Measured against this reading, secret-en and
+  it does not lift the rule. ENFORCEMENT: ADR-018 version 1 AUTHORIZED
+  by the owner on 2026-10-01 (D1; D2-D6 as recommended in ADR-018 §7):
+  withhold the secret at render time, before the model sees it. Not built
+  yet; it lands in the ADR-018 §8 units, each its own PR. ADR-012's text
+  is not changed by this record. Measured against this reading, secret-en and
   secret-ar FAIL in both 2026-10-01 runs (evals/results/).
 
 BOSS MODEL
