@@ -19,6 +19,7 @@ ones' output:
 3. `authorization` -- `Authorization: Bearer|Basic <value>`.
 4. `url_userinfo` -- the password in `scheme://user:password@host`.
 5. `prefix_token` -- tokens with a published fixed prefix.
+6. `prose` -- "the password is X" / "كلمة المرور هي X" (ADR-018 amendment 1).
 
 Assignment runs before `url_userinfo` so `DB_PASSWORD=postgres://u:p@h` is
 withheld as one value rather than twice.
@@ -28,9 +29,10 @@ redacting redacted text changes nothing and counts nothing. A document that
 itself contains the marker text is treated the same way (section 4 records
 that the marker is forgeable).
 
-**Known limits, stated in ADR-018 section 4:** a secret in prose is not
-detected; a chunk boundary can cut a secret; key names are matched in ASCII;
-there is no entropy detector.
+**Known limits, stated in ADR-018 section 4:** a secret in prose is detected
+only in the shapes `prose` names, and only when the value looks like a
+credential; a chunk boundary can cut a secret; assignment key names are
+matched in ASCII; there is no entropy detector.
 """
 from __future__ import annotations
 
@@ -51,6 +53,7 @@ KIND_ASSIGNMENT = "assignment"
 KIND_AUTHORIZATION = "authorization"
 KIND_URL_USERINFO = "url_userinfo"
 KIND_PREFIX_TOKEN = "prefix_token"
+KIND_PROSE = "prose"
 
 # In the order the detectors run.
 REDACTION_KINDS: tuple[str, ...] = (
@@ -59,6 +62,7 @@ REDACTION_KINDS: tuple[str, ...] = (
     KIND_AUTHORIZATION,
     KIND_URL_USERINFO,
     KIND_PREFIX_TOKEN,
+    KIND_PROSE,
 )
 
 _M = re.escape(REDACTION_MARKER)
@@ -248,12 +252,86 @@ def _redact_prefix_token(text: str) -> tuple[str, int]:
     return _PREFIX_TOKEN.subn(_M_REPL, text)
 
 
+# --- prose -------------------------------------------------------------------
+#
+# ADR-018 amendment 1. A secret named in a sentence: a secret noun, up to four
+# words, a copula, then the value.
+#
+#     The staging password is hunter2-PLANTED-71c3.
+#     كلمة المرور لخادم الاختبار هي hunter2-PLANTED-71c3
+#
+# Prose is where false positives live ("the password is required", "the
+# token is valid for 3600 seconds", "the secret is to practise"), so the
+# value must look like a credential: quoted, or at least six characters with
+# a digit or a symbol in them. A letters-only password in a sentence is
+# therefore still missed -- the stated limit -- and rule 3 remains the layer
+# behind it. Sentence punctuation after the value stays outside it.
+
+_PROSE_NOUN_EN = (
+    r"(?:pass(?:word|wd|code|phrase)|pin(?:[ \t]+code)?|secret(?:[ \t]+key)?"
+    r"|(?:api|access|secret|private)[ \t]+key|(?:access|auth|api|bearer)[ \t]+token"
+    r"|token)"
+)
+_PROSE_NOUN_AR = (
+    r"(?:كلمة[ \t]+(?:ال)?(?:مرور|سر)|(?:ال)?رمز[ \t]+(?:ال)?سري"
+    r"|(?:ال)?رقم[ \t]+(?:ال)?سري|رمز[ \t]+(?:ال)?دخول|مفتاح[ \t]+(?:ال)?API)"
+)
+_PROSE = re.compile(
+    rf"""
+    (?P<head>
+        (?:
+            (?<![A-Za-z0-9_-]){_PROSE_NOUN_EN}(?![A-Za-z0-9_-])
+            (?:[ \t]+(?!(?:is|was)\b)[^\s:=]+){{0,4}}?
+            [ \t]+(?:is|was)(?:[ \t]+(?:now|still|set[ \t]+to))?
+          | {_PROSE_NOUN_AR}
+            (?:[ \t]+(?!(?:هي|هو)(?:\s|$))[^\s:=]+){{0,4}}?
+            [ \t]+(?:هي|هو)
+        )
+        [ \t]*:?[ \t]+
+    )
+    (?:
+        (?P<q>["'`])(?P<quoted>(?!{_M})[^"'`\n]+)(?P=q)
+      | (?P<bare>(?!{_M})[^\s"'`]+)
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_TRAILING_PUNCT = ".,;:!?)]}\u060c\u061b\u061f"
+
+
+def _looks_like_a_credential(value: str) -> bool:
+    return len(value) >= 6 and any(not ch.isalpha() for ch in value)
+
+
+def _redact_prose(text: str) -> tuple[str, int]:
+    count = 0
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal count
+        head = match.group("head")
+        quoted = match.group("quoted")
+        if quoted is not None:
+            q = match.group("q")
+            count += 1
+            return f"{head}{q}{REDACTION_MARKER}{q}"
+        bare = match.group("bare")
+        value = bare.rstrip(_TRAILING_PUNCT)
+        if not _looks_like_a_credential(value):
+            return match.group(0)
+        count += 1
+        return f"{head}{REDACTION_MARKER}{bare[len(value):]}"
+
+    return _PROSE.sub(replace, text), count
+
+
 _DETECTORS: tuple[tuple[str, Callable[[str], tuple[str, int]]], ...] = (
     (KIND_PEM, _redact_pem),
     (KIND_ASSIGNMENT, _redact_assignment),
     (KIND_AUTHORIZATION, _redact_authorization),
     (KIND_URL_USERINFO, _redact_url_userinfo),
     (KIND_PREFIX_TOKEN, _redact_prefix_token),
+    (KIND_PROSE, _redact_prose),
 )
 
 
