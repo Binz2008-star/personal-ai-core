@@ -471,6 +471,16 @@ def test_a_matching_loaded_context_is_recorded_and_the_run_succeeds(tmp_path):
     assert "loaded: context 8192, 0% GPU" in output
 
 
+@pytest.mark.parametrize("size_vram, shown", [(29, "29%"), (57, "57%"), (58, "58%"), (85, "85%")])
+def test_the_loaded_line_prints_the_recorded_gpu_share(tmp_path, size_vram, shown):
+    """The header records 0.29; the line used to print 28% (int of 28.999...)."""
+    code, output = _run_probed(tmp_path, _ps(8192, size=100, size_vram=size_vram),
+                               "--num-ctx", "8192")
+    assert code == 0
+    assert _header(tmp_path)["ollama_loaded"]["gpu_share"] == size_vram / 100
+    assert f"loaded: context 8192, {shown} GPU" in output
+
+
 def test_a_run_whose_server_disagrees_with_num_ctx_is_marked_and_fails(tmp_path):
     """2026-10-01: a run went through the desktop app at 4096 while the shell
     said 8192. The files are still written -- they are evidence -- but marked,
@@ -876,6 +886,35 @@ def test_a_rescore_names_the_cases_file_it_used(tmp_path):
     )
     assert data["rescored_with"]["cases_version"] == "refusal-v2"
     assert data["header"]["cases_version"] == "refusal-v1"  # what the run used, unchanged
+
+
+def test_a_rescore_never_overwrites_an_earlier_rescore(tmp_path):
+    """The file name holds the scorer but not the cases file: rescoring the same
+    run again with refusal_v1 used to replace the refusal_v2 verdict in place."""
+    source = GPU_RESULTS / "raw-20261001T195149Z.json"
+    raw = tmp_path / source.name
+    raw.write_bytes(source.read_bytes())
+    assert ev.main(["--rescore", str(raw), "--cases", str(REFUSAL_V2)],
+                   stdout=io.StringIO()) == 0
+    rescored = tmp_path / f"rescored-20261001T195149Z-{ev.SCORER_VERSION}.json"
+    first = rescored.read_bytes()
+
+    out = io.StringIO()
+    assert ev.main(["--rescore", str(raw), "--cases", str(REFUSAL_CASES)], stdout=out) == 2
+    assert "never overwritten" in out.getvalue()
+    assert rescored.read_bytes() == first
+
+
+def test_a_rescore_with_a_cases_file_that_does_not_cover_the_run_is_refused(tmp_path):
+    """--cases defaults to contract_v1; a refusal run rescored without naming its
+    cases file used to stop on a KeyError traceback."""
+    source = GPU_RESULTS / "raw-20261001T195149Z.json"
+    raw = tmp_path / source.name
+    raw.write_bytes(source.read_bytes())
+    out = io.StringIO()
+    assert ev.main(["--rescore", str(raw)], stdout=out) == 2
+    assert "has no case for refusal-" in out.getvalue()
+    assert not list(tmp_path.glob("rescored-*"))
 
 
 # --- ADR-020 section 3.6: evaluating a candidate is not adopting it -----------------
