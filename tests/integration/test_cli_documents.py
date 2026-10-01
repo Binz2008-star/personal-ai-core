@@ -230,12 +230,15 @@ def test_the_evidence_pac_sends_fits_the_budget_it_recorded(tmp_path):
     # A window small enough that the budget binds. At the default window
     # everything fits, and "fits" would prove nothing. Re-tuned from 2000 on
     # 2026-09-25: the estimator calibration raised the per-character cost, and
-    # at 2000 no passage fit at all. Re-tuned from 2370 on 2026-10-01: the
-    # ADR-018 marker sentence lengthened the preamble, and below 2400 no
-    # passage fit; 2420 keeps a small margin above that.
+    # at 2000 no passage fit at all. Re-tuned again on 2026-10-01, twice: the
+    # ADR-018 marker sentence lengthened the preamble, and then 2420 failed on
+    # the Windows runner only. Every passage label carries its source's
+    # absolute path, so the threshold moves with the length of tmp_path.
+    # 3400 was measured to admit at least one passage and drop at least one
+    # for tmp_path lengths from 6 to 209 characters.
     code, output, transport = run(
         ["--database", str(database), "--documents", str(folder)],
-        env={"PAC_BOSS_CONTEXT_WINDOW": "2420"},
+        env={"PAC_BOSS_CONTEXT_WINDOW": "3400"},
     )
     assert code == 0
 
