@@ -31,3 +31,17 @@ and that is a bug.
 
 The refusal measurement is scoped: 0/15 on benign-to-borderline lawful prompts means the
 model does not over-refuse that set. It is not a general claim about restriction.
+
+## Owner note (2026-10-01): the open-response behaviour is intended
+
+The abliterated model was chosen for how it behaves, not as "the best model". It does
+not refuse a question for being sensitive or uncomfortable, and it answers directly.
+Where a limit is needed, it lives in Core, as policy and guards that can be read,
+tested and turned off: the identity contract, ADR-018's secret redaction and ADR-019's
+language guard. It is not buried in the weights.
+
+Consequence for any model change, including a fine-tune of this model: keeping the
+open-response behaviour is an evaluation requirement, not a regression to fix. A
+candidate must be measured on the false-refusal set (0/15 today) alongside the contract
+evaluation, and is not adopted if it refuses more.
+
