@@ -578,6 +578,7 @@ claim written in one place with nothing that notices it going stale.
   #137 380b564  fix(eval): server probes live in their adapters, as ARCHITECTURE.md
                section 4 states
   #138 5f1976d  docs: correct eight ARCHITECTURE.md lines the read-only review found
+  #139 6565dd3  test: the skip audit allows a machine that cannot create symlinks
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
