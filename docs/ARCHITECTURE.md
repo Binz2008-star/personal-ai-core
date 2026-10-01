@@ -1,302 +1,247 @@
 # Architecture
 
-**This document describes the TARGET architecture, not the built system.** It was drafted
-during the Phase 0 audit and still states where the Core is going. Most of what it
-describes does not exist yet.
+Written against the code at `d2fd7d0` (2026-10-01). Every statement below carries one of
+three labels:
 
-**For what is actually built and verified, read [`PROJECT_STATE.md`](../PROJECT_STATE.md).**
-Built through Phase 4 and the post-Phase-4 PRs: `core/`, `runtime/`, `conversation/`,
-`memory/`, `knowledge/`, `context/`, `persistence/` (in-memory and SQLite), `identity/`
-(#39) and `app/`, which provides the `pac` entry point (#45). Not built: `agent/`, `learning/`,
-`evaluation/`, `projects/`, `api/`, `ui/`. Sections below are labelled accordingly.
-Aligned with the code at `74a2ae2`; where it disagrees with `PROJECT_STATE.md`, that file
-wins.
+- **[CURRENT]** what the code does today
+- **[TARGET]** what the architecture requires and the code does not yet do
+- **[OPEN]** a decision the owner has not made
 
-Evidence for every source claim is in [`COMPONENT_EXTRACTION_MATRIX.md`](COMPONENT_EXTRACTION_MATRIX.md).
-Phase 4 recall is session-scoped (ADR-009).
+A **[TARGET]** or **[OPEN]** line authorizes nothing. Building any of them needs the owner's
+explicit authorization.
 
-A previous edit set this header to "Status: Phase 4 ACCEPTED / MERGED" while leaving the
-body at its Phase 0 content. That turned a design document into an apparent status report
-and made every unbuilt subsystem below read as shipped. The header states the document's
-genre now, because that is what was actually wrong.
+## 1. Purpose and authority
 
----
+Personal AI Core is an operating layer over a replaceable local model. This document is the
+one current description of its architecture.
 
-## 1. What this system is
+**Authority rule.**
 
-Personal AI Core is an **AI operating layer**, not an application with a model inside it.
-The model is a replaceable backend. Memory, knowledge, experience, learning, tools and
-projects are separate layers with their own contracts.
+- This document defines the current architectural model.
+- Code defines implementation reality.
+- Tests define executable guarantees.
+- ADRs preserve historical decisions and their reasons.
+- Where an ADR conflicts with this document, the conflict is listed in section 11 until it
+  is resolved. It is not silently treated as current architecture.
 
-**ARCHITECTURAL DECISION.** The Core backbone is newly engineered. The audit established
-that no source repository provides the event, experience, promotion, verifier or
-reranking subsystems. Existing repositories supply **edge components and patterns**.
+`PROJECT_STATE.md` remains the merge ledger. The other files under `docs/` are history or
+design background, not current architecture.
 
-**ARCHITECTURAL DECISION — DEPLOYMENT SHAPE.** The Core runs as **one user, one process,
-on the local machine**. The model is local (Ollama); nothing here is served over a
-network to other people.
-
-This is a constraint, not an observation, and it is written down because everything
-below already assumed it without saying so. The tree at `cd40871` contains no `async`
-or `await`, no `threading`, `asyncio` or `multiprocessing` import, and no lock or
-semaphore anywhere in `src/`; every store in the tree — the repositories, the memory
-store, the registry, the catalogue and both indexes — holds its state in a process-local
-`dict` or `list`. A reader had no way to tell whether that was a decision or an
-oversight.
-
-What it permits, and what the persistence design may therefore rely on:
-
-- **A single writer.** Append order is a total order, so an event log needs no sequence
-  column and no sortable id. This matters because the alternatives do not work:
-  `new_id()` is `uuid4`, which does not sort, and `utcnow()` collides heavily — 2000
-  successive calls yielded 499–632 distinct values across repeated runs, so roughly
-  three in four share a timestamp with another. Without this constraint the event log
-  would have **no** total order that survives a durable store. The durable store built
-  later (SQLite, #42) records order anyway, in a `seq` column, so order is stored rather
-  than inferred from append order. It is still one process with one writer.
-- **Synchronous contracts.** Every protocol in `core/contracts.py` is sync. Serving the
-  Core over a network would make that the wrong choice, and changing it later is a
-  breaking change to every contract and every caller.
-- **No coordination layer.** No locks, no transactions across processes, no leader
-  election, no connection pool.
-
-What would invalidate it, and must therefore reopen the persistence decision before any
-code is written against it: a second concurrent writer, a second user, or serving the
-Core over a network. Any of the three, and the three bullets above stop holding
-together.
-
-This constraint does **not** by itself select a storage backend. It removes options that
-only concurrency justifies. ADR-010 compares what remains and recommends one option, which
-is now built and wired (#42, #44). The ADR is still **PROPOSED**: building an option does not
-accept it.
-
-## 2. System boundaries
+## 2. Architecture in one diagram
 
 ```text
-                         PERSONAL AI CORE
-                                │
-      ┌─────────────────────────┼─────────────────────────┐
-      │                         │                         │
-  Identity                   Memory                  Knowledge
-      │                         │                         │
-      └─────────────────────────┼─────────────────────────┘
-                                │
-                         Context Engine
-                                │
-                         Agent Runtime
-                                │
-                      Tool / Policy Layer
-                                │
-                     Learning / Evaluation
-                                │
-                         Model Registry
-                                │
-                         Ollama Runtime
-                                │
-                   local-llm-rig  (separate repo)
+ EVIDENCE SOURCES            RUNTIME INPUTS                 MEASUREMENT
+ events · messages ·         git defaults · env · options   cases · scorer ·
+ feedback                    identity rules · profile       harness · results
+        │                    knowledge files · model               │
+        │                    agent workspace                       │
+        ▼                           │                              │
+   derivation ──► candidate ──► gate ──► GOVERNED STATE            │
+   (rules; observations)                 memory                    │
+        ▲                                   │                      │
+        │                                   ▼                      ▼
+        └────── new evidence ◄──── turn · agent run        evaluation run
 ```
 
-`local-llm-rig` is **not** part of this repository and **not a runtime dependency**. The
-Core does not import from it, call into it, or require it to be present in order to run. It
-owns the model runtime, Modelfiles, benchmarks and hardware evidence; the Core cites its
-measurements as evidence and adapts specific harness scripts into its own `evaluation/`
-tree. See `COMPONENT_EXTRACTION_MATRIX.md` §1.2.
+- **[CURRENT]** A turn reads runtime inputs and, when recall is wired, memory. It records
+  events and messages.
+- **[CURRENT]** Memory changes only through derivation, candidate and gate. That path is
+  built and has no production caller.
+- **[CURRENT]** Measurement sits beside the loop. It runs the same builders a turn uses and
+  does not feed memory.
 
-Project-specific systems attach at the edge, never inside:
+## 3. Evidence, state and runtime boundaries
 
-```text
-                     PROJECT CONNECTORS
-                             │
-      ┌──────────┬───────────┼───────────┬──────────┐
-      │          │           │           │          │
-    Rico       Robin    Second Brain   GitHub    Future
-```
+| Category | What is in it | Where it lives |
+|---|---|---|
+| Evidence sources | events, messages, feedback | the conversation database |
+| Governed state | memory | the `memories` table |
+| Runtime inputs | defaults in git, environment variables, per-call options, identity rules, owner profile, knowledge files, model weights and server, agent workspace | git, the process environment, the filesystem, the model server |
+| Measurement infrastructure | evaluation cases, scorer, harness, result files | git |
 
-## 3. Module architecture
-
-**BUILT.** Present in `src/personal_ai_core/`, with the real submodule names:
-
-```text
-core/          contracts, domain, memory, knowledge, context, config, errors
-runtime/       ollama/ (provider adapter), model_registry.py
-conversation/  service, factory, grounding, events
-memory/        rules, gate, pipeline (write path) · retriever (read path)
-knowledge/     catalog, chunking, embedding, fusion, ingestion, language,
-               lexical_index, retrieval, text, vector_index
-context/       assembler, budget, token_estimator
-identity/      composer, text          (contract and policy types live in core/identity)
-persistence/   in_memory, memory_store, sqlite
-app/           cli, __main__           (the `pac` command)
-tests/
-```
-
-**DESIGN TO BUILD.** None of these exist. They are the target, not the state:
-
-```text
-agent/         planner, executor, tools, policy, verifier, state, recovery
-learning/      events, feedback, experience, analysis, dataset,
-               training, evaluation, promotion
-evaluation/    regression, capability, memory, retrieval, agent,
-               Arabic, coding, performance
-projects/      registry, connectors, adapters, indexes
-api/  ui/  scripts/
-```
-
-Corrections worth stating, because each was asserted in this file and copied into other
-documents:
-
-- `identity/` is **built** (#39): a behavioural contract and a response policy, composed
-  into the first message of every model call. The **personality** this section used to
-  list was deliberately left out. ADR-012 says "No tone or persona": a persona is not a
-  rule and cannot be violated.
-- `persistence/` has two backends: process memory, and SQLite (#42) for users, sessions,
-  messages, events and memories. There is **no migrations framework**. `SCHEMA_VERSION`
-  is 1, and a database written at a different version is refused (`SchemaVersionMismatch`)
-  rather than altered. There is no Postgres. Adding migrations or Postgres requires
-  explicit authorisation; see the hard invariants in `README.md`.
-- `memory/` implements **four** `MemoryType` values — `preferences`, `lessons`,
-  `semantic`, `episodic`. The wider taxonomy in `MEMORY_ARCHITECTURE.md` (`working`,
-  `decisions`, `patterns`) is design, not code: a member is declared only once a rule
-  produces it.
+- **[CURRENT]** Memory is the only state with a gate in code.
+- **[CURRENT]** The conversation database is SQLite by default and PostgreSQL by opt-in
+  (ADR-016). With `--ephemeral` nothing is stored. Of the durable backends, only SQLite
+  stores feedback.
+- **[CURRENT]** The knowledge corpus is not durable. Files are re-read on every run and the
+  indexes live in process memory.
+- **[CURRENT]** The owner profile is a file. It is composed into every turn and has no
+  version, no gate and no event.
+- **[CURRENT]** Deployment shape: one user, one process, one writer, synchronous contracts.
+- **[OPEN]** Whether the owner profile is governed state (OD-5).
+- **[OPEN]** Whether configuration overrides from the environment and per-call options are
+  acceptable without review (OD-9).
 
 ## 4. Dependency direction
 
-**ARCHITECTURAL DECISION.** Dependencies point inward. The Core depends on abstractions;
-concrete providers depend on the Core.
+- **[CURRENT]** Every package imports `core` and nothing above it: `runtime`, `persistence`,
+  `conversation`, `knowledge`, `context`, `memory`, `learning`, `identity`, `agent`.
+- **[CURRENT]** `app` may import `core` and `conversation` only.
+- **[CURRENT]** `conversation/factory.py` is the one composition root and the only module
+  that names concrete adapters.
+- **[CURRENT]** No model name appears outside `core/config.py`. No Ollama detail appears
+  outside `runtime/ollama/`.
 
-The principle is **BUILT** and enforced by `test_internal_layering_is_respected`. The
-concrete adapters shown are what exists today:
+## 5. Memory and event semantics
 
-```text
-             OllamaProvider ──┐
-    InMemoryMemoryRepository ─┤
-         Sqlite*Repository ───┼──▶  core/contracts  ◀── memory, knowledge, context,
-   HashingEmbeddingProvider ──┤                          conversation, identity
-    DefaultIdentityComposer ──┘
-```
+- **[CURRENT]** A conversation turn does not directly write persistent memory.
+  `ConversationService` has no memory store. The only calls to `MemoryStore.write` in `src/`
+  are in `memory/pipeline.py`.
+- **[CURRENT]** The write path is `ExtractionRule` → `MemoryCandidate` → `PromotionGate` →
+  `ExperiencePipeline` → `MemoryStore`. Nothing in `src/` builds an `ExperienceRecord` or
+  constructs the pipeline.
+- **[CURRENT]** The read path is `MemoryReader` → `SimpleMemoryRetriever` → `ContextBuilder`.
+  A turn recalls its own session's active memories (ADR-009). User scope exists
+  (ADR-014, ADR-015) and no caller selects it.
+- **[CURRENT]** `SealedMemoryStore` exists and refuses every operation. Nothing in `src/`
+  references it outside its own definition.
+- **[CURRENT]** Memory events share the `events` table with conversation events. They are
+  told apart by type and actor.
+- **[CURRENT]** A held conflict writes an event and nothing else. `supersede` has no caller.
+- **[TARGET]** The permitted sources of a memory candidate are stated: which evidence, and
+  whose text.
+- **[OPEN]** The role of `SealedMemoryStore` on the conversation path (OD-1).
+- **[OPEN]** Whether the store is the truth about memory or memory must be derivable from
+  evidence (OD-2).
+- **[OPEN]** Whether assistant or agent text may ever be a candidate source (OD-7).
 
-`app/` sits outside this picture on purpose. It may import only `core` and `conversation`,
-and calls the one composition root, `conversation/factory.py`. That is the only module the
-layering rule exempts (`COMPOSITION_ROOTS`), which is how it may name concrete adapters.
+## 6. Gates and governance
 
-`HashingEmbeddingProvider` captures surface overlap, not meaning — it is a development
-stand-in, and `EmbeddingProvider.model_id` is what identifies whichever model actually
-ranked a passage (ADR-006). A Postgres-backed store and a real embedding provider are
-**DESIGN TO BUILD**; naming them here previously implied they were wired.
+- **[CURRENT]** `DefaultPromotionGate` decides promoted, rejected or held. It is pure. The
+  pipeline acts on the decision.
+- **[CURRENT]** `MemoryStore.write` accepts any record. The sole-writer guarantee is a test
+  that matches call patterns in source.
+- **[CURRENT]** Code, identity rules, defaults, evaluation cases and the scorer change
+  through review in git.
+- **[CURRENT]** Nothing in the system adapts its own behaviour automatically.
+- **[TARGET]** A memory write is legitimate only as the result of a gate decision.
+- **[TARGET]** Every gate decision is recorded with the identity of the rule that made it,
+  including a decision that proposed nothing.
+- **[OPEN]** Whether approving a function once is enough or every behavioural change must
+  pass a gate (OD-4).
 
-Three consequences, each a direct response to an audited defect:
+## 7. Identity, provenance and replay
 
-- **No `import ollama` outside `runtime/ollama/`.** The audit found embedding calls
-  hard-wired and duplicated across `api.py`, `evolve.py` and `scripts/e2e_test.py`.
-- **No direct database driver use in components.** Access goes through repositories.
-- **No model name in business logic.** The Boss model is registry configuration.
+- **[CURRENT]** Events and messages have stable ids and a stored order. Chunk ids and memory
+  ids are minted per run.
+- **[CURRENT]** A `MemoryRecord` carries provenance, and its session must match its
+  provenance's session.
+- **[CURRENT]** Retrieval results carry source, version, character range, method and rank.
+- **[CURRENT]** A turn records the model name, sampling and output limit. It does not record
+  the profile, the corpus, the code version or the model server's state.
+- **[CURRENT]** Decision replay works in two places: scoring a stored evaluation run, and
+  deriving observations from stored events and feedback.
+- **[CURRENT]** Decision replay does not work for promotion, context assembly or agent
+  policy decisions.
+- **[CURRENT]** The language guard records the counts and the reason its verdict was
+  computed on. The rejected draft itself is discarded.
+- **[CURRENT]** Generation replay is impossible. No seed is sent, the weights are not
+  pinned, and the prompt is rebuilt from inputs that can change. It is not a goal.
+- **[TARGET]** Whatever an event cites keeps its identity across restarts.
+- **[TARGET]** Decision replay is the only replay this architecture claims.
 
-## 5. Runtime flow
+## 8. Evaluation and model runtime
 
-**DESIGN TO BUILD**, except where marked. Four of these eleven steps exist today; the
-agent loop, the tool policy gate and the learning path have no code at all.
+- **[CURRENT]** The Boss model is `huihui_ai/qwen2.5-abliterate:7b`. It is operationally
+  primary and architecturally replaceable (ADR-002). Its open-response behaviour is a
+  requirement to preserve (ADR-002 owner note).
+- **[CURRENT]** The model is reached through `ModelProvider`. `pac` uses Ollama. A llama.cpp
+  adapter exists for the evaluation harness only.
+- **[CURRENT]** The harness scores the contract with mechanical checks and no judge model.
+  Raw replies and verdicts are committed unmodified. Each result names the commit, the
+  cases version and the scorer version.
+- **[CURRENT]** Two case sets exist: `contract_v1` (language and contract) and `refusal_v1`
+  (open-response). A `refusal_v1` baseline is committed: two runs at `c8738e9`, no
+  refusals. `evals/README.md` asks for at least three runs.
+- **[CURRENT]** The harness refuses to run under any model name but the Boss model's.
+- **[CURRENT]** A result records a model name, not the weights that produced it.
+- **[TARGET]** Each reply and each evaluation run names the weights and the runtime that
+  produced it.
+- **[TARGET]** A change to the instrument is never approved by the result it produces.
+- **[OPEN]** Whether an evaluation result blocks anything (OD-3).
+- **[OPEN]** How a candidate model is named and admitted (OD-8).
 
-```text
-USER
- ↓ UNDERSTAND
- ↓ IDENTITY           BUILT — the contract is the first message of every call
- ↓ CONTEXT BUILD      BUILT — retrieve → recall → merge → budget
- ↓ PLAN
- ↓ POLICY CHECK       (allow / deny / ask)
- ↓ TOOL EXECUTION     (schema, timeout, audit)
- ↓ VERIFY
- ↓ REPAIR / RETRY
- ↓ RESPONSE           BUILT
- ↓ EVENT              BUILT — recorded; not a memory
- ↓ LEARNING           (asynchronous, batch, evaluated)
-```
+## 9. Feedback, erasure and forget semantics
 
-`CONTEXT BUILD` is built but differs from the sketch: `ContextBuilder` retrieves
-documents, recalls session-scoped memories, and `HybridContextAssembler` merges both
-into one shared token budget. There is no separate compression stage. Evidence is fenced
-between boundary lines (#49, with its limits stated in #53) and charged at its rendered
-cost, not its bare text (#52).
+Feedback:
 
-**Reachable from `pac` with `--documents`** (#58, closing Finding F-2). The corpus is re-read
-from the named paths on every run and held in memory; the conversation is stored. Memory
-recall is built but not wired into `pac`: nothing on that path promotes memories yet.
+- **[CURRENT]** A judgement is stored as a `FEEDBACK_RECORDED` event. Its key is session,
+  source event, outcome and actor, so a repeated outcome or a second correction on the same
+  reply is dropped. Only a session's latest reply can be judged.
+- **[CURRENT]** `derive_observations` reads feedback and stops at a read-only display.
+- **[TARGET]** Feedback on a reply is an ordered history. The last judgement is effective.
+  Duplicate protection covers a retried submission, not an outcome value.
 
-The prompt the provider receives is `[identity, evidence?, *history]`: separate messages,
-the first two both `Role.SYSTEM`.
+Erasure:
 
-The word "policy" does appear in the source — as `ContextBudgetPolicy` and
-`ReserveBasedBudgetPolicy`, which allocate a token budget. That is not the tool policy
-gate described above, and the name collision should not be read as partial coverage.
+- **[CURRENT]** A memory that is not active is not recalled.
+- **[CURRENT]** A memory can be superseded only by a replacement. There is no way to retire
+  one outright.
+- **[CURRENT]** No repository contract can delete an event or a message. Secret redaction
+  applies when text is rendered, not when it is stored.
+- **[CURRENT]** Evaluation cases are synthetic. No personal text is in a committed result.
+- **[TARGET]** Five operations are distinct and each is named: forget a memory, suppress its
+  recall, erase source evidence, erase what was derived from it, and handle copies held for
+  evaluation.
+- **[OPEN]** Whether source evidence may be deleted (OD-6).
 
-## 6. Layer boundaries
+## 10. Hard invariants
 
-**Memory** — BUILT. Holds what the system knows about the user and itself. Written only
-through the promotion pipeline, never from a conversation turn: `ExperiencePipeline` is
-the sole writer, and the conversation path has no memory collaborator to write
-through; `SealedMemoryStore` is the refusing double that makes this testable. Read back through `MemoryReader`, which exposes no write. `MEMORY_ARCHITECTURE.md`.
+These are the owner's invariants. Where the code does not yet match one, the gap is stated.
 
-**Knowledge** — BUILT. Holds ingested documents, retrieved with provenance. Retrieval
-goes through the `Retriever` contract (`HybridRetriever` today); no component reaches an
-index directly.
-
-**Agent** — DESIGN TO BUILD. No `agent/` package exists; no planner, executor, verifier
-or tool policy gate has been written. `AGENT_ARCHITECTURE.md` is the target.
-
-**Learning** — DESIGN TO BUILD. No `learning/` package exists. `LEARNING_ARCHITECTURE.md`
-is the target.
-
-**Evaluation** must use the **same** retrieval, context and prompting path as production.
-A separate evaluation pipeline proves nothing about the runtime — a principle carried from
-`rag-engine`, which had previously fixed exactly that split.
-
-## 7. Hard invariants
-
-An invariant nothing enforces is an intention. These are split so the two are not read
-as equally binding.
-
-**ENFORCED** — each has a test that fails if it is broken:
-
-1. `Event != Memory`. Conversations create events; memories are promoted.
-   `test_event_not_memory.py`, plus the sole-writer AST scan in
+1. **Event != Memory.** A conversation turn never directly writes persistent memory.
+   Checked by `test_event_not_memory.py` and the sole-writer scan in
    `test_experience_pipeline.py`.
-2. The base model is replaceable and never hard-coded into business logic.
-   `test_no_model_name_literal_in_business_logic`.
-5. Every memory carries provenance, confidence, version and status.
-   `MemoryRecord.__post_init__`, `test_memory_record.py`.
-8. Context is budgeted; the knowledge base is never dumped into a prompt.
-   `test_hybrid_assembler.py::test_token_estimate_never_exceeds_the_budget`, and, for the
-   rendered message rather than the selection, `test_rendered_budget.py`.
+2. **Dependency direction.** `memory → core`, `knowledge → core`, `context → core`. No layer
+   imports a layer above it. Checked by `test_dependency_direction.py`.
+3. **Boss model.** `huihui_ai/qwen2.5-abliterate:7b`, not silently replaced. Pinned by
+   `test_config.py`.
+4. **No dead enum members.** Every `RetrievalMethod` and `ExclusionReason` member has a
+   producer in `src/`. Checked by `test_enum_producer_guard.py`.
+5. **`SealedMemoryStore`** remains on the conversation path until the owner authorizes
+   otherwise. The code does not place it on any path today. See OD-1.
+6. **Database boundary.** No Neon, pgvector, schema or migration change without the owner's
+   explicit authorization.
+7. **Legacy repositories are immutable.** Rico, unified-llm-local, second-brain-kb and
+   rag-engine are reference only.
 
-Also enforced, and worth naming because they are not in the original list: dependency
-direction (`test_internal_layering_is_respected`), no dead enum members
-(`test_enum_producer_guard.py`), and no raw exception data in an event payload
-(`test_payload_never_carries_raw_exception_data`).
+## 11. Known gaps and bypasses
 
-**INTENDED — NOT YET ENFORCEABLE.** Nothing tests these because the subsystems they
-constrain do not exist:
+Bypasses:
 
-3. Memory and knowledge are never baked into model weights.
-4. Normal conversation never modifies weights.
-6. Every tool has a schema, permission, risk level, timeout and audit record.
-   *(no tools)*
-7. Retrieval preserves provenance to the response.
-   *(`RetrievalProvenance` exists and travels into the grounding message; no test asserts
-   it survives all the way to the user-visible response)*
-9. Runtime and evaluation share one grounding path. *(no evaluation harness)*
-10. Project business logic stays in connectors. *(no connectors)*
+- `MemoryStore.write` takes any record, and three slice objects hand the store to callers.
+- In grounded builds the memory reader wraps the real, write-capable store.
+- `pac --remember` changes every later prompt with no gate and no event.
+- Environment variables and `send(options=...)` change behaviour without review.
 
-## 8. Cross-cutting decisions from the audit
+Gaps:
 
-**Multilingual, not English-with-Arabic-added.** The audited lexical search is
-`to_tsvector('english', …)` hard-coded. Arabic lexical retrieval would silently fail. The
-Core treats language as a first-class retrieval parameter. See `ADR/ADR-006`.
+- The promotion pipeline is unfed. `repetition_count`, user-scope recall and `supersede`
+  have no producer or caller.
+- Conflict detection compares the first twelve characters of whole messages.
+- `GENERATION_FAILED` and `RETRIEVAL_FAILED` store the raw exception text.
+- Agent runs store tool names and outcomes, not tasks, arguments or answers.
+- Append-only storage is enforced by the repository API, not by the database.
 
-**Context budget is provider-aware.** The audited builder hard-codes
-`DEFAULT_TOKEN_BUDGET = 24000` for a 32K model, and `CHARS_PER_TOKEN = 4`, an
-English-centric estimate. The Core derives the budget from the active model and uses a
-tokenizer-backed count. See `ADR/ADR-005`.
+Marked conflicts with ADRs:
 
-**Security-first tool execution.** The strongest verified asset in any source is
-`unified-llm-local/tool_security.py` — command validation, path containment, audit log,
-workspace scoping, ~962 lines of tests, zero project coupling. It anchors the agent's
-policy layer. See `ADR/ADR-004`.
+| ADR | Conflict |
+|---|---|
+| ADR-003 | "distinct storage" and "written only by the promotion gate": events share one table, and the pipeline writes |
+| ADR-002 | "name appears only in `ModelRegistry`": it is in `core/config.py` |
+| ADR-010–013, 017–019 | status PROPOSED while the code is in use (OD-10) |
+
+## 12. Open decisions
+
+| # | Decision |
+|---|---|
+| OD-1 | The role of `SealedMemoryStore` on the conversation path |
+| OD-2 | Memory authority: the store, or derivable from evidence |
+| OD-3 | Whether evaluation gates anything, and who approves changes to the instrument |
+| OD-4 | Gate a function once, or gate every behavioural change |
+| OD-5 | Whether the owner profile is governed state, and its gate |
+| OD-6 | Whether source evidence may be deleted |
+| OD-7 | Whether assistant or agent text may be a memory candidate source |
+| OD-8 | How a candidate model is named and admitted |
+| OD-9 | Whether ungated configuration overrides are acceptable |
+| OD-10 | Accept the built-but-proposed ADRs, or let this document supersede them |
