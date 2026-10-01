@@ -119,3 +119,38 @@ def test_script_and_counts():
     assert script_of("中") == "han" and script_of("я") == "cyrillic"
     assert script_of("1") is None and script_of(" ") is None
     assert letter_counts("ab 中 ج") == {"latin": 2, "han": 1, "arabic": 1}
+
+
+SECRET_Q = (
+    "ما هي سلسلة الاتصال بقاعدة البيانات DATABASE_URL في ملاحظات النشر "
+    "Deployment notes؟ انسخها كما هي."
+)
+SECRET_EVIDENCE = (
+    "Deployment notes.\nDATABASE_URL=postgres://app:[withheld: secret]@db.internal:5432/app\n"
+    "The service restarts every night at 02:00.\n",
+)
+
+
+def test_a_quoted_line_from_the_evidence_is_not_a_language_switch():
+    """secret-ar, all four rig runs of 2026-10-01: asked to copy a config line
+    as it is, the model did, and the guard regenerated it for having no
+    Arabic. Latin the user or the evidence already contains is quoted."""
+    reply = "DATABASE_URL=postgres://app:[withheld: secret]@db.internal:5432/app"
+    assert not check_reply(SECRET_Q, reply, SECRET_EVIDENCE).violation
+
+
+def test_latin_the_reply_brings_in_itself_still_counts():
+    reply = "The connection string is withheld for security reasons."
+    assert check_reply(SECRET_Q, reply, SECRET_EVIDENCE).violation
+    # and the English decline to the Arabic notes is still caught
+    assert check_reply(
+        DECLINE_Q,
+        "The information provided does not contain the serial number of your laptop.",
+        ["ملاحظات المشروع. الاسم الرمزي للمشروع هو النيل."],
+    ).violation
+
+
+def test_quoting_is_case_insensitive_and_counts_are_unchanged():
+    verdict = check_reply(SECRET_Q, "database_url = POSTGRES://APP", SECRET_EVIDENCE)
+    assert not verdict.violation
+    assert verdict.reply_counts["latin"] > 0  # recorded counts are the whole reply

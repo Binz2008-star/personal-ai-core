@@ -154,6 +154,14 @@ engineering choice to the lead, who took the recommendations above. Each is reve
 Folding them into `identity` would have mislabelled that share. A retry that fails at the
 provider is recorded as `GENERATION_FAILED` with `attempt: 2`.
 
+**Measured 2026-10-01 (PR #125, four runs).**
+- The guard fired 10 times, and 5 of those retries delivered a passing reply.
+- One false positive repeated in every run: `secret-ar`, where the user asks for a config
+  line copied as it is. The reply contained no Arabic, so the guard rejected a correct
+  reply.
+- Fixed by excluding Latin words that the user's message or the evidence already
+  contains from the Arabic share. Latin the reply introduces itself still counts.
+
 ## 7. Proposed units, if authorized
 
 1. `check_reply` as a pure function with its tests. No wiring and no behaviour change.
