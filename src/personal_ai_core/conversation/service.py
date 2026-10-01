@@ -54,6 +54,7 @@ class ConversationService:
         budget_policy: ContextBudgetPolicy,
         identity: IdentityComposer,
         context_builder: ContextBuilder | None = None,
+        sampling: Mapping[str, Any] | None = None,
     ) -> None:
         self._users = users
         self._sessions = sessions
@@ -66,6 +67,8 @@ class ConversationService:
         # that can be constructed without one can make a call without one.
         self._identity = identity
         self._context_builder = context_builder
+        # Sent on every generation, beneath any option the caller names.
+        self._sampling = dict(sampling or {})
         self._recorder = EventRecorder(events)
 
     @property
@@ -164,6 +167,7 @@ class ConversationService:
                 "grounded": grounding is not None and grounding.message is not None,
                 "evidence_chunks": grounding.used if grounding is not None else 0,
                 "generation_limit": self._generation_limit(spec=spec, grounding=grounding),
+                "sampling": dict(self._sampling),
             },
             message_id=user_message.id,
         )
@@ -237,14 +241,15 @@ class ConversationService:
         grounding: Grounding | None,
         options: Mapping[str, Any] | None,
     ) -> Mapping[str, Any]:
-        """Caller options plus the budget's output limit.
+        """The configured sampling, then caller options, plus the output limit.
 
-        An explicit caller value wins: a caller that names `num_predict` has
-        said something more specific than the default policy, and silently
-        overriding it would make the parameter a lie. The limit is recorded on
-        `GENERATION_REQUESTED` either way, so what was sent is recoverable.
+        An explicit caller value wins: a caller that names `num_predict` or
+        `temperature` has said something more specific than the default
+        policy, and silently overriding it would make the parameter a lie. The
+        limit and the sampling are recorded on `GENERATION_REQUESTED` either
+        way, so what was sent is recoverable.
         """
-        merged = dict(options or {})
+        merged = {**self._sampling, **dict(options or {})}
         merged.setdefault(
             "num_predict", self._generation_limit(spec=spec, grounding=grounding)
         )

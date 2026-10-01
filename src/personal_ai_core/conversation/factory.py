@@ -146,6 +146,7 @@ def build_in_memory_service(
         registry=registry,
         budget_policy=budget_policy,
         identity=identity,
+        sampling=settings.boss_sampling,
     )
     return service, events
 
@@ -404,6 +405,7 @@ def build_persistent_service(
         budget_policy=budget_policy,
         identity=identity,
         context_builder=stack.context_builder if stack is not None else None,
+        sampling=settings.boss_sampling,
     )
     return PersistentSlice(
         service=service,
@@ -523,6 +525,7 @@ def build_server_service(
         budget_policy=budget_policy,
         identity=identity_composer,
         context_builder=stack.context_builder if stack is not None else None,
+        sampling=settings.boss_sampling,
     )
     return ServerSlice(
         service=service,
@@ -624,6 +627,7 @@ def build_grounded_in_memory_service(
         budget_policy=budget_policy,
         identity=identity,
         context_builder=stack.context_builder,
+        sampling=settings.boss_sampling,
     )
     return GroundedSlice(
         service=service,
