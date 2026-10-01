@@ -272,6 +272,7 @@ def test_the_summary_records_the_whole_allocation(make_chunk):
         "generation_reserve",
         "overhead",
         "identity_reserve",
+        "guard_reserve",
         "budget_tokens",
         "budget_source",
         "overcommitted",

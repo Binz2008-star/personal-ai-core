@@ -514,6 +514,11 @@ def _parser() -> argparse.ArgumentParser:
         help="experiment: sampling options to run with (production = what pac sends)",
     )
     parser.add_argument(
+        "--no-language-guard",
+        action="store_true",
+        help="experiment: run with ADR-019's reply-language guard off",
+    )
+    parser.add_argument(
         "--rescore",
         type=Path,
         default=None,
@@ -555,6 +560,8 @@ def main(
     # No profile: the owner's profile.md would make every result depend on
     # what it says today. The contract is what is under test.
     settings = dataclasses.replace(settings, profile="")
+    if args.no_language_guard:
+        settings = dataclasses.replace(settings, language_guard=False)
     profile_options = SAMPLING_PROFILES[args.sampling]
     if profile_options is not None:
         settings = dataclasses.replace(settings, boss_sampling=dict(profile_options))
@@ -587,6 +594,7 @@ def main(
         "language_rule": IDENTITY_VARIANTS[args.identity_variant],
         "sampling": args.sampling,
         "sampling_options": dict(settings.boss_sampling),
+        "language_guard": settings.language_guard,
     }
 
     variant_rule = IDENTITY_VARIANTS[args.identity_variant]

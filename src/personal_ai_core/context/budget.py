@@ -56,6 +56,7 @@ class ReserveBasedBudgetPolicy:
         generation_reserve: int = DEFAULT_GENERATION_RESERVE,
         overhead: int = DEFAULT_OVERHEAD,
         identity_reserve: int = DEFAULT_IDENTITY_RESERVE,
+        guard_reserve: int = 0,
     ) -> None:
         if generation_reserve < 0:
             raise ValueError("generation_reserve must be non-negative")
@@ -63,9 +64,12 @@ class ReserveBasedBudgetPolicy:
             raise ValueError("overhead must be non-negative")
         if identity_reserve < 0:
             raise ValueError("identity_reserve must be non-negative")
+        if guard_reserve < 0:
+            raise ValueError("guard_reserve must be non-negative")
         self._generation_reserve = generation_reserve
         self._overhead = overhead
         self._identity_reserve = identity_reserve
+        self._guard_reserve = guard_reserve
 
     @property
     def source(self) -> str:
@@ -77,7 +81,8 @@ class ReserveBasedBudgetPolicy:
         return (
             f"reserve-based(generation={self._generation_reserve},"
             f"overhead={self._overhead},"
-            f"identity={self._identity_reserve})"
+            f"identity={self._identity_reserve}"
+            + (f",guard={self._guard_reserve})" if self._guard_reserve else ")")
         )
 
     def allocate(
@@ -91,4 +96,5 @@ class ReserveBasedBudgetPolicy:
             overhead=self._overhead,
             history=history_tokens,
             identity=self._identity_reserve,
+            guard=self._guard_reserve,
         )

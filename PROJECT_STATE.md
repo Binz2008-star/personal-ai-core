@@ -510,6 +510,10 @@ claim written in one place with nothing that notices it going stale.
   #119 70b9698  eval: contract_v1 at f953828, --sampling model-card, num_ctx 8192,
                two runs
   #120 1cd892b  feat(config): send the Boss model's sampling on every turn
+  #121 b5e18ec  docs(adr): ADR-019 (PROPOSED) -- a mechanical guard for the reply
+               language
+  #122 7af61eb  feat(conversation): ADR-019 unit 1 -- check_reply, the pure
+               reply-language check
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped

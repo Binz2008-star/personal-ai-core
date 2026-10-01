@@ -47,6 +47,10 @@ class Settings:
     )
     ollama_host: str = DEFAULT_OLLAMA_HOST
     request_timeout_seconds: int = DEFAULT_REQUEST_TIMEOUT_SECONDS
+    # ADR-019: check each reply's script against the user's message and
+    # generate once more on a mismatch. On by default (owner, 2026-10-01);
+    # PAC_LANGUAGE_GUARD=0 turns it off.
+    language_guard: bool = True
     # The owner's profile TEXT, composed into every turn's identity message.
     # Not read from the environment here: where the file lives is the entry
     # point's decision (app/cli.py), as the database path is.
@@ -64,4 +68,5 @@ class Settings:
             request_timeout_seconds=int(
                 source.get("PAC_REQUEST_TIMEOUT_SECONDS", DEFAULT_REQUEST_TIMEOUT_SECONDS)
             ),
+            language_guard=source.get("PAC_LANGUAGE_GUARD", "1").strip() not in ("0", "false", "no", "off"),
         )

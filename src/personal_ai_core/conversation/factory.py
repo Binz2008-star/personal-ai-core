@@ -81,6 +81,7 @@ from ..persistence.postgres import (
 from ..runtime.model_registry import ModelRegistry
 from ..runtime.ollama.provider import OllamaProvider, Transport
 from .grounding import ContextBuilder, RenderedEvidenceCost
+from .language_guard import GUARD_NOTE
 from .service import ConversationService
 
 if TYPE_CHECKING:
@@ -88,6 +89,21 @@ if TYPE_CHECKING:
     # the dependency-direction gate only counts absolute imports, and the
     # composition root may name adapters but must not name psycopg itself.
     from ..persistence.postgres import Connection as ServerConnection
+
+
+def _budget_policy(identity: DefaultIdentityComposer, settings: Settings) -> ReserveBasedBudgetPolicy:
+    """Reserves funded from measured text: the identity, and ADR-019's note.
+
+    The note is sent only on a retry, but a retry reuses the turn's prompt, so
+    its tokens are reserved on every turn while the guard is on, as their own
+    named share: a retry can then never overflow the window the turn was
+    assembled against, and the record says what the reserve is for.
+    """
+    estimator = ScriptAwareTokenEstimator()
+    return ReserveBasedBudgetPolicy(
+        identity_reserve=identity.tokens(estimator),
+        guard_reserve=estimator.estimate(GUARD_NOTE) if settings.language_guard else 0,
+    )
 
 
 def default_response_policy() -> ResponsePolicy:
@@ -130,9 +146,7 @@ def build_in_memory_service(
     identity = DefaultIdentityComposer(
         profile=settings.profile, policy=response_policy or RESPONSE_POLICY
     )
-    budget_policy = ReserveBasedBudgetPolicy(
-        identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
-    )
+    budget_policy = _budget_policy(identity, settings)
     # ADR-011 prerequisite B: this slice retrieves nothing, so it has no
     # allocation to read the reserve from. It still gets the policy, because
     # an output limit that applies only where retrieval is wired is not a
@@ -147,6 +161,7 @@ def build_in_memory_service(
         budget_policy=budget_policy,
         identity=identity,
         sampling=settings.boss_sampling,
+        language_guard=settings.language_guard,
     )
     return service, events
 
@@ -386,9 +401,7 @@ def build_persistent_service(
     # that builds one over the same database.
     memories = SqliteMemoryRepository(connection)
     identity = DefaultIdentityComposer(profile=settings.profile)
-    budget_policy = ReserveBasedBudgetPolicy(
-        identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
-    )
+    budget_policy = _budget_policy(identity, settings)
     stack = _grounding_for_durable(
         budget_policy,
         evidence_limit=evidence_limit,
@@ -406,6 +419,7 @@ def build_persistent_service(
         identity=identity,
         context_builder=stack.context_builder if stack is not None else None,
         sampling=settings.boss_sampling,
+        language_guard=settings.language_guard,
     )
     return PersistentSlice(
         service=service,
@@ -506,9 +520,7 @@ def build_server_service(
     # first -- which is exactly the kind of accident that stops being harmless
     # the moment someone moves a line.
     identity_composer = DefaultIdentityComposer(profile=settings.profile)
-    budget_policy = ReserveBasedBudgetPolicy(
-        identity_reserve=identity_composer.tokens(ScriptAwareTokenEstimator())
-    )
+    budget_policy = _budget_policy(identity_composer, settings)
     stack = _grounding_for_durable(
         budget_policy,
         evidence_limit=evidence_limit,
@@ -526,6 +538,7 @@ def build_server_service(
         identity=identity_composer,
         context_builder=stack.context_builder if stack is not None else None,
         sampling=settings.boss_sampling,
+        language_guard=settings.language_guard,
     )
     return ServerSlice(
         service=service,
@@ -591,9 +604,7 @@ def build_grounded_in_memory_service(
     identity = DefaultIdentityComposer(
         profile=settings.profile, policy=response_policy or RESPONSE_POLICY
     )
-    budget_policy = ReserveBasedBudgetPolicy(
-        identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
-    )
+    budget_policy = _budget_policy(identity, settings)
 
     # Recall is opt-in. When it is off, no repository exists and no reader
     # is constructed, so there is nothing for the conversation path to
@@ -628,6 +639,7 @@ def build_grounded_in_memory_service(
         identity=identity,
         context_builder=stack.context_builder,
         sampling=settings.boss_sampling,
+        language_guard=settings.language_guard,
     )
     return GroundedSlice(
         service=service,

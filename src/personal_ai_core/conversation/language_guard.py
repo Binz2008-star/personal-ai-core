@@ -20,6 +20,13 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
+# ADR-019 §3.2: appended once, as a system message, when a draft fails the
+# check. Names no language, as ADR-012 amendment 1 requires of the rule itself.
+GUARD_NOTE = (
+    "Your previous draft was not written in the language of the user's message. "
+    "Write the whole reply again in the language of the user's message."
+)
+
 ARABIC = "arabic"
 LATIN = "latin"
 HAN = "han"

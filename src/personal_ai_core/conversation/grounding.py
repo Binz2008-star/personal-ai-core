@@ -596,6 +596,7 @@ def summarize(grounding: Grounding) -> dict:
         "generation_reserve": allocation.generation_reserve,
         "overhead": allocation.overhead,
         "identity_reserve": allocation.identity,
+        "guard_reserve": allocation.guard,
         "overcommitted": allocation.overcommitted,
         "chunk_ids": [r.chunk.id for r in context.document_context.selected],
         # Recall accounting. `memory_enabled` is wiring, not outcome: it
