@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from personal_ai_core.context import ScriptAwareTokenEstimator
 from personal_ai_core.conversation.factory import build_grounded_in_memory_service
+from personal_ai_core.conversation.grounding import GROUNDING_PREAMBLE
 from personal_ai_core.core.config import Settings
 from personal_ai_core.core.domain import EventType
 from personal_ai_core.core.knowledge import Document
@@ -30,14 +31,12 @@ from personal_ai_core.core.knowledge import Document
 from .test_grounded_conversation import Recorder, evidence_message
 
 # Small enough that the budget binds: some passages must be left out.
-# Re-tuned from 2000 on 2026-09-25: the estimator calibration raised the
-# per-character cost, so at 2000 nothing fit and there was no message to
-# test. 2250 is the smallest window where the budget still binds (four of
-# five passages dropped) while one passage and its rendering are admitted.
-# Re-tuned from 2250 on 2026-10-01: the ADR-018 marker sentence lengthened
-# the preamble, and below 2280 no passage fits. At 2300 one passage is
-# admitted and four are dropped, as before.
-WINDOW = 2300
+# Re-tuned by hand twice (2026-09-25 for the estimator calibration, 2026-10-01
+# for the ADR-018 marker sentence), because every word added to the preamble
+# moved the threshold. Now the window is the preamble's own cost plus a fixed
+# allowance: one passage and its rendering are admitted, four of five are
+# dropped, whatever the preamble says. The assertions below still check both.
+WINDOW = 1975 + ScriptAwareTokenEstimator().estimate(GROUNDING_PREAMBLE)
 
 
 def grounded_turn():

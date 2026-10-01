@@ -238,7 +238,8 @@ def test_a_message_with_both_sections_fits_its_budget():
     them. Tight enough that something is left out. The model window was
     re-tuned from 1900 on 2026-09-25: the estimator calibration raised the
     per-character cost, and at 1900 the memory section no longer fit next to
-    the passages, so no memory was admitted at all."""
+    the passages, so no memory was admitted at all. Now the preamble's own
+    cost plus a fixed allowance, so a wording change cannot move it."""
     builder = ContextBuilder(
         retriever=Returns(ENGLISH[:6]),
         assembler=HybridContextAssembler(
@@ -250,7 +251,7 @@ def test_a_message_with_both_sections_fits_its_budget():
         limit=6, redactor=NullRedactor()
     )
     grounding = builder.build(
-        session_id="s1", query="style", language="en", model=Spec(2000), history=[]
+        session_id="s1", query="style", language="en", model=Spec(1675 + ESTIMATOR.estimate(GROUNDING_PREAMBLE)), history=[]
     )
     assert grounding.message is not None
     assert grounding.memories_used >= 1 and grounding.used >= 1
