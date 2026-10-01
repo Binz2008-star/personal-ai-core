@@ -1,6 +1,6 @@
 # ADR-018 — A mechanical guard for rule 3: secrets are withheld from the prompt
 
-**Status:** PROPOSED · design only · revision 2 (reviewed against the code, section 9) · nothing here is built · nothing here is authorized
+**Status:** PROPOSED · design only · revision 3 (author's review and an independent review, section 9) · nothing here is built · nothing here is authorized
 
 - Contract decision this design serves: rule 3, strict reading, decided by the owner on
   2026-10-01 (`PROJECT_STATE.md`, Identity). Rule 3 covers every secret, including one in
@@ -56,6 +56,10 @@ A model that never receives the secret cannot disclose it. That is the whole des
    `render_memories` therefore take the redactor as a parameter. Wiring it into the
    builder only would charge the raw text and send the redacted text, which is finding
    F-4 again.
+   **The parameter is required and has no default.** A default of `None` would leave a
+   path that renders raw text without anyone having chosen it. A test that needs no
+   redaction passes an explicit `NullRedactor`, so the choice is visible where it is
+   made.
 3. **Applied to both evidence sections:** passage text in `render_evidence` and
    recollection text in `render_memories`. A memory can hold a secret for the same reason
    a document can.
@@ -64,6 +68,12 @@ A model that never receives the secret cannot disclose it. That is the whole des
    Redaction must therefore happen inside those renderers, so the token, the cost and the
    message all describe the same text. A marker can be longer than the secret it
    replaces; measuring the redacted text is what keeps the budget honest.
+   **The order is fixed: redact, then derive the boundary token, then price.** PR #96
+   prices every 16-hex run in a measured item as the all-digit worst case
+   (`_at_worst_case_token` in `conversation/grounding.py`). That substitution runs on
+   the already-redacted render. The marker text, kind names included, must never
+   contain a 16-hex run: it would be repriced as a token it is not, and it would be
+   indistinguishable from a boundary token to that pass.
    `HybridContextAssembler` built without a `rendered_cost` charges `chunk.text`
    directly (`context/assembler.py`). That path stays as it is and is not a supported
    way to run with a redactor; the factory never builds it.
@@ -73,9 +83,11 @@ A model that never receives the secret cannot disclose it. That is the whole des
    and every other fact in the passage stays usable.
 6. **Detectors, version 1.** Deterministic patterns only:
    - the password in a URL's userinfo (`scheme://user:password@host`);
-   - the value of an assignment whose key names a secret (`PASSWORD`, `SECRET`, `TOKEN`,
-     `API_KEY`, `PRIVATE_KEY`, and their common variants), in `KEY=value` and
-     `key: value` forms;
+   - the value of an assignment whose key names a secret, in `KEY=value` and
+     `key: value` forms. A key matches only if it **ends with** one of `PASSWORD`,
+     `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `ACCESS_KEY`, `SECRET_KEY`, `PRIVATE_KEY`,
+     and that word is at the start of the name or follows `_` or `-`. Case is ignored.
+     A bare `KEY` never matches;
    - `Authorization` header values (`Bearer`, `Basic`);
    - PEM private-key blocks. A chunk holds at most 1000 characters, so a block is
      usually cut: a `BEGIN` line with no `END` is withheld to the end of the chunk, and
@@ -122,7 +134,10 @@ A model that never receives the secret cannot disclose it. That is the whole des
 ## 5. How it would be verified
 
 - Unit tests per detector, each proved non-vacuous by mutation, plus negative cases
-  (a URL without a password, a key named `TOKEN_COUNT`, the boundary token itself).
+  (a URL without a password, the boundary token itself, and the keys `MAX_TOKENS=512`,
+  `TOKEN_COUNT=3`, `PASSWORD_MIN_LENGTH=8`, `SORT_KEY=id`, `PRIMARY_KEY=id`).
+- A test that the renderers cannot be called without a redactor, and that the marker
+  text contains no 16-hex run.
 - A property test: for any planted secret a detector covers, no rendered grounding
   message contains it, under NFKC and case folding.
 - `test_the_grounding_message_fits_the_budget_it_was_assembled_against` still passes,
@@ -155,6 +170,18 @@ A model that never receives the secret cannot disclose it. That is the whole des
   (proposed: yes, stated and measured by an evaluation case), or must wait for a
   design that sees the whole document.
 
+**The independent reviewer's recommendations (section 9).** They are recommendations;
+the owner still decides, and none of them is an authorization.
+
+| | Recommendation |
+|---|---|
+| D1 | Authorize version 1, with I1, I2 and I3 applied |
+| D2 | The list as written, plus the I2 key-name rule |
+| D3 | `[withheld: secret]`, plus one preamble sentence |
+| D4 | Memory section in scope |
+| D5 | Fail the turn, as proposed |
+| D6 | Yes: ship with the chunk-boundary limit stated and measured by an evaluation case |
+
 ## 8. Proposed units, if authorized
 
 1. The redactor as a pure function with its tests. No wiring; no behaviour changes.
@@ -182,6 +209,22 @@ listed with the code they rest on so the owner can check them.
 - **Checked, no change needed:** the payload field is a string-to-count mapping like
   `excluded_by_reason`; rendering stays deterministic; nothing is persisted; the
   evaluation harness uses the same builders, so it measures the redacted path.
+
+**Revision 3, 2026-10-01. Independent review.** These three findings are not the
+author's. They came from a reviewer other than the author and were relayed by the
+owner; the author applied them.
+
+- **I1, fixed in 3.2.** The redactor parameter of `render_evidence` and
+  `render_memories` is required, with no default. A default of `None` would leave a
+  silent raw-text path. Tests that need no redaction pass an explicit `NullRedactor`.
+- **I2, fixed in 3.6 and 5.** "Key names a secret" was not a rule. It is now: the key
+  ends with one of eight listed words, at the start of the name or after `_` or `-`,
+  and a bare `KEY` never matches. Five negative cases are named in section 5.
+- **I3, fixed in 3.4.** The order against PR #96's worst-case pricing is stated:
+  redact, then boundary token, then pricing. The marker must never contain a 16-hex
+  run.
+
+The reviewer's recommendations on D1 to D6 are in section 7.
 
 ## Status
 

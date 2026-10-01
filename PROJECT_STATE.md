@@ -480,6 +480,9 @@ claim written in one place with nothing that notices it going stale.
   #99 a2ef4fb  docs(learning): derive_observations now has an authorized consumer
   #100 dff472c  docs(adr): ADR-017 A2 -- tighten persistence and
                conflicted-correction wording; A2 stays PROPOSED, design only
+  #101 64a3842  docs: record #100, ADR-013 results from the rig, rule 3 strict
+               reading
+  #102 9d36ef9  fix(eval): contract-checks-v1 -- a third script is a language switch
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
