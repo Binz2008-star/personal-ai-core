@@ -185,3 +185,23 @@ required before a candidate is adopted.
 4. The self-comparison on the rig (§5), committed as results.
 
 Each unit is its own PR.
+
+**Unit 3 notes (the comparison tool, as built).** Where the text above left a choice,
+the tool takes the stricter one:
+
+- **The settings key** is §3.4's list plus the commit, the machine and the profile. A
+  candidate run at a later commit is compared only with a baseline re-run at that commit,
+  because a code change can move a result as much as weights can.
+- **GPU share** is compared at one decimal. The probe reports 0.84 or 0.85 for the same
+  load, and one decimal still separates CPU, partial and full offload.
+- **Run counts** must be equal on both sides; D2's "2 more failures in 5" is defined for
+  equal counts.
+- **Refused inputs:** a run scored by another scorer than the current one (rescore it
+  first), a run with an ERROR verdict, unconfirmed loaded context or a context mismatch, a
+  baseline run whose `role` is not `boss`, or a candidate run whose `role` is not
+  `candidate`, a side with more than one set of weights or model name, and a group
+  whose runs do not share one set of cases.
+- **Unknown adapters.** llama.cpp does not report a `--lora` adapter. The report then
+  says `adapters_known: false`, since equal digests there do not prove equal weights.
+- **Exit codes:** 0 PASS, 1 FAIL, 2 refused, 3 INCOMPLETE (a required group is missing:
+  guarded contract, refusal, or the unguarded contract pair).

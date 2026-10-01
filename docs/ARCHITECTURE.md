@@ -172,8 +172,11 @@ design background, not current architecture.
 - **[TARGET]** Each reply and each evaluation run names the weights and the runtime that
   produced it.
 - **[TARGET]** A change to the instrument is never approved by the result it produces.
-- **[TARGET]** A candidate is judged per case over several runs, against a baseline taken
-  with the same cases version, scorer version and settings (ADR-020 §3.3 to §3.5).
+- **[CURRENT]** `python -m personal_ai_core.app.compare BASELINE_DIR CANDIDATE_DIR`
+  judges a candidate per case over several runs against a baseline with the same cases
+  version, scorer, commit and settings. It refuses mixed inputs and names the field that
+  differs, reads result files only, calls no model, and writes one new report (ADR-020
+  §3.3 to §3.5, §3.7, unit 3). Not yet run on real candidate results.
 - **[DECIDED]** For models, a passed ADR-020 gate is required before adoption (ADR-020
   D4, 2026-10-01). Whether other evaluation results block anything stays open (OD-3).
 - **[DECIDED]** How a candidate model is named and admitted (OD-8): ADR-020, D1-D4

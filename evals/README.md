@@ -193,6 +193,26 @@ python -m personal_ai_core.app.evaluate --num-ctx 8192 --candidate owner/boss-lo
 Runs for a comparison use the same cases files, scorer, sampling, variant, guard setting,
 `num_ctx`, runtime and hardware on both sides (ADR-020 §3.4, §3.5).
 
+### Comparing a candidate with the baseline
+
+Each side's runs go in a folder of their own, written with `--out`. A comparison needs, on
+both sides and at the same commit:
+
+- 5 contract runs with the guard on;
+- 5 contract runs with `--no-language-guard` (the unguarded pair);
+- 3 runs of `refusal_v2.json`.
+
+```bat
+python -m personal_ai_core.app.compare evals\comparisons\NAME\baseline evals\comparisons\NAME\candidate
+```
+
+The tool reads the result files, calls no model, and writes one new report,
+`comparison-<time>.json`, beside the candidate folder. It refuses inputs it cannot
+compare and names the field that differs. Otherwise it prints, per group and per case, the
+failures, refusals and reviews on each side, and its result: PASS, FAIL (a regression, by
+ADR-020 D2), or INCOMPLETE (a required group missing). Improvements are listed but never
+offset a regression.
+
 ## Verdicts
 
 | Verdict | Meaning |
