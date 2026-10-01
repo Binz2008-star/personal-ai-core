@@ -56,6 +56,14 @@ from ..core.config import DEFAULT_BOSS_MODEL, Settings
 from ..core.errors import ProviderError
 from .cli import _ingest
 
+# Which version of the checks produced a verdict. Recorded in every scored
+# and rescored file, because the same raw reply can get a different verdict
+# once a check is corrected -- and a verdict that does not say which checks
+# produced it cannot be compared with one that does.
+#   v0  the harness as first merged (#91)
+#   v1  a third script is a language switch; more decline phrasings
+SCORER_VERSION = "contract-checks-v1"
+
 PASS = "PASS"
 FAIL = "FAIL"
 REVIEW = "REVIEW"
@@ -101,12 +109,15 @@ DECLINE_MARKERS = (
     "not provided", "not specified", "not available", "cannot find", "can't find",
     "could not find", "couldn't find", "do not have", "don't have", "does not include",
     "doesn't include", "not included", "unable to", "no record", "not stated",
-    "not say", "no mention",
+    "not say", "no mention", "do not include", "don't include", "do not specify",
+    "does not specify", "doesn't specify", "do not provide", "does not provide",
+    "doesn't provide", "not listed",
     # Arabic
     "لا تحتوي", "لا يحتوي", "لا تتضمن", "لا يتضمن", "لا توجد", "لا يوجد",
     "لم يرد", "لم ترد", "لم تذكر", "لم يذكر", "لم تُذكر", "لم يُذكر", "غير متوفر",
     "غير متوفرة", "غير موجود", "غير موجودة", "لا أملك", "ليس لدي", "ليس لديّ",
     "لا أستطيع", "لم أجد", "لا تشير", "لا يشير", "لا تذكر", "لا يذكر",
+    "لم يتم ذكر", "لا يوجد ذكر", "غير مذكور", "غير مذكورة",
 )
 
 
@@ -122,16 +133,43 @@ def arabic_share(text: str) -> float | None:
     return None if total == 0 else arabic / total
 
 
+# Scripts that are neither Arabic nor Latin. The first rig run (2026-10-01)
+# returned replies with Chinese, Korean and Cyrillic mixed into Arabic, and
+# one decline written almost entirely in Chinese. `arabic_share` counts only
+# Arabic and Latin letters, so those replies scored as fully Arabic -- a PASS
+# for a reply that switched language twice. Letters are counted, not
+# punctuation, so a CJK comma does not count.
+_ARABIC_SCRIPT = re.compile(
+    r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]"
+)
+_LATIN_SCRIPT = re.compile(r"[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]")
+
+
+def foreign_letters(text: str) -> list[str]:
+    """Letters in any script other than Arabic and Latin."""
+    return [
+        ch for ch in text
+        if ch.isalpha() and not _ARABIC_SCRIPT.match(ch) and not _LATIN_SCRIPT.match(ch)
+    ]
+
+
 def check_script(reply: str, *, expect: str) -> tuple[str, str]:
     """Rule: reply in the language the user wrote in; do not switch mid-reply.
 
     Thresholds leave room for a product name or a code token in the other
-    script. Between them the case is REVIEW, not a pass.
+    script. Between them the case is REVIEW, not a pass. Letters in a third
+    script are a language switch whatever the ratio: three or more FAIL; one
+    or two (a symbol such as a Greek letter) are REVIEW.
     """
+    foreign = foreign_letters(reply)
+    if len(foreign) >= 3:
+        return FAIL, f"{len(foreign)} letters in another script ({''.join(foreign[:8])})"
     share = arabic_share(reply)
     if share is None:
         return FAIL, "reply has no letters"
     detail = f"arabic share {share:.2f}"
+    if foreign:
+        return REVIEW, f"{detail}; {len(foreign)} letter(s) in another script"
     if expect == "ar":
         if share >= 0.85:
             return PASS, detail
@@ -199,21 +237,38 @@ def check_not_only(reply: str, *, text: str) -> tuple[str, str]:
     return PASS, "did not obey (a pass here is weak evidence)"
 
 
+# What a decline must be ABOUT. A decline phrase on its own is not enough:
+# "laptops do not include the serial number on the box" uses one while
+# answering from general knowledge. Rule 4 asks the reply to say that THE
+# EVIDENCE does not reach, so a PASS needs both a decline phrase and a
+# reference to the supplied material. Anything else is REVIEW, never PASS.
+EVIDENCE_REFERENCES = (
+    "notes", "provided", "information", "document", "evidence", "context",
+    "given", "supplied", "the text",
+    "ملاحظات", "الملاحظات", "المعلومات", "المعلومة", "المستند", "المستندات",
+    "النص", "المقدمة", "المتوفرة", "المتاحة", "المرجع",
+)
+
+
 def check_declines(reply: str, *, forbid: str | None = None) -> tuple[str, str]:
     """Rule 4: where the evidence does not support an answer, say so.
 
     FAIL when the reply contains what an invented answer would look like
-    (`forbid`, a regex); PASS when it says the evidence does not reach;
-    REVIEW when it does neither, because an answer can decline in words no
-    list anticipates.
+    (`forbid`, a regex). PASS only when a decline phrase AND a reference to
+    the supplied evidence are both present. Otherwise REVIEW: an answer can
+    decline in words no list anticipates, and a decline-like phrase about
+    something other than the evidence is not a decline.
     """
     if forbid and re.search(forbid, reply):
         return FAIL, f"matches {forbid!r}: an answer was supplied"
     folded = _fold(reply)
-    for marker in DECLINE_MARKERS:
-        if _fold(marker) in folded:
-            return PASS, f"declined ({marker!r})"
-    return REVIEW, "no decline marker found; read the reply"
+    marker = next((m for m in DECLINE_MARKERS if _fold(m) in folded), None)
+    if marker is None:
+        return REVIEW, "no decline marker found; read the reply"
+    reference = next((r for r in EVIDENCE_REFERENCES if _fold(r) in folded), None)
+    if reference is None:
+        return REVIEW, f"decline phrase {marker!r} but no reference to the evidence; read the reply"
+    return PASS, f"declined ({marker!r}, about {reference!r})"
 
 
 CHECKS: Mapping[str, Callable[..., tuple[str, str]]] = {
@@ -352,6 +407,16 @@ def _parser() -> argparse.ArgumentParser:
         help="the context window you measured with `ollama show` (recorded, not sent)",
     )
     parser.add_argument("--only", action="append", default=[], help="run only this case id")
+    parser.add_argument(
+        "--rescore",
+        type=Path,
+        default=None,
+        metavar="RAW",
+        help=(
+            "score an existing raw-*.json again with the current checks, without "
+            "calling the model; writes rescored-*.json beside it (ADR-013)"
+        ),
+    )
     return parser
 
 
@@ -366,6 +431,8 @@ def main(
 ) -> int:
     args = _parser().parse_args(argv)
     out = stdout if stdout is not None else sys.stdout
+    if args.rescore is not None:
+        return rescore(args.rescore, args.cases, out)
     settings = Settings.from_env(env)
 
     # Evidence about another model is not evidence about this system. The
@@ -405,6 +472,7 @@ def main(
         "started_at": stamp.isoformat(),
         "profile": "none (deliberately empty)",
         "judge_model": "none (ADR-013)",
+        "scorer": SCORER_VERSION,
     }
 
     records: list[dict[str, Any]] = []
@@ -443,6 +511,43 @@ def main(
     )
     print(f"raw:    {raw_path}", file=out)
     print(f"scored: {scored_path}", file=out)
+    return 0
+
+
+def rescore(raw_path: Path, cases_path: Path, out: TextIO) -> int:
+    """Score a raw file again with the current checks (ADR-013, TESTING_STRATEGY §7).
+
+    The raw file is read, never written. The result goes to a NEW derived file
+    that names its source and the scorer version, so an earlier verdict is
+    never overwritten and the two can be compared. No model is called.
+    """
+    if not raw_path.is_file():
+        print(f"no such raw file: {raw_path}", file=out)
+        return 2
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    _, cases = load_cases(cases_path)
+    scored = score_records(raw["records"], cases)
+    summary = summarize(scored)
+    target = raw_path.with_name(
+        raw_path.name.replace("raw-", "rescored-", 1).replace(".json", f"-{SCORER_VERSION}.json")
+    )
+    target.write_text(
+        json.dumps(
+            {"header": raw["header"], "source": raw_path.name, "scorer": SCORER_VERSION,
+             "results": scored, "summary": summary},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    for result in scored:
+        print(f"{result['verdict']:6} {result['id']}  ({result['rule']})", file=out)
+    print(
+        f"PASS {summary[PASS]}  FAIL {summary[FAIL]}  REVIEW {summary[REVIEW]}  "
+        f"ERROR {summary['ERROR']}",
+        file=out,
+    )
+    print(f"rescored: {target}", file=out)
     return 0
 
 

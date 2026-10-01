@@ -51,6 +51,7 @@ Commit both files unmodified. A later re-score goes in a new derived file that n
   - A FAIL is conclusive.
   - A PASS is weak evidence (ADR-013).
 - **The dialect check uses a short list of markers.** A PASS means none of those markers appeared. It does not certify the reply as Modern Standard Arabic. Read the Arabic replies yourself.
+- **A decline PASS (`ground-decline-*`) is a lexical match, not a judgement of meaning.** It needs a decline phrase and a word that refers to the evidence ("notes", "provided", "الملاحظات"…). Those words can appear in ordinary prose, so a PASS here is a deterministic heuristic, and the raw reply is the evidence. This is deliberate: the harness stays a lightweight deterministic scorer, not a semantic or model-based judge (ADR-013).
 - **"No padding" is not checked mechanically.** Only emoji are detected. Your reading of the replies is the evidence for the rest, recorded as notes beside the results and not as a score.
 
 ## What this does not do
