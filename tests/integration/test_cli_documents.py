@@ -69,6 +69,22 @@ def notes(tmp_path):
     return folder
 
 
+# Every passage label carries its source's absolute path, so the cost of a
+# passage -- and with it any window tuned to admit some passages and not
+# others -- moved with the length of tmp_path: one window failed on the Windows
+# runner and its replacement on the Linux runner. Padding the folder name so
+# the path is always this long takes the machine out of the measurement.
+FIXED_PATH_LENGTH = 180
+
+
+def fixed_length_folder(tmp_path):
+    padding = FIXED_PATH_LENGTH - len(str(tmp_path)) - 1
+    assert padding >= 1, f"tmp_path is longer than {FIXED_PATH_LENGTH} characters"
+    folder = tmp_path / ("n" * padding)
+    folder.mkdir()
+    return folder
+
+
 # --- it grounds -----------------------------------------------------------
 
 
@@ -221,7 +237,7 @@ def test_the_evidence_pac_sends_fits_the_budget_it_recorded(tmp_path):
     read back from SQLite, and the evidence message the model received fits
     the budget that event records."""
     database = tmp_path / "core.db"
-    folder = notes(tmp_path)
+    folder = fixed_length_folder(tmp_path)
     for i in range(12):
         (folder / f"note{i}.md").write_text(
             "\n\n".join(f"Rank fusion note {i}-{j}: {NOTE}" for j in range(4)),
@@ -230,12 +246,13 @@ def test_the_evidence_pac_sends_fits_the_budget_it_recorded(tmp_path):
     # A window small enough that the budget binds. At the default window
     # everything fits, and "fits" would prove nothing. Re-tuned from 2000 on
     # 2026-09-25: the estimator calibration raised the per-character cost, and
-    # at 2000 no passage fit at all. Re-tuned from 2370 on 2026-10-01: the
-    # ADR-018 marker sentence lengthened the preamble, and below 2400 no
-    # passage fit; 2420 keeps a small margin above that.
+    # at 2000 no passage fit at all. Since 2026-10-01 the folder path has a
+    # fixed length (see fixed_length_folder), and the budget binds with at
+    # least one passage admitted for windows from about 2500 to 3400; 2900
+    # sits in the middle, so a short preamble edit does not move it out.
     code, output, transport = run(
         ["--database", str(database), "--documents", str(folder)],
-        env={"PAC_BOSS_CONTEXT_WINDOW": "2420"},
+        env={"PAC_BOSS_CONTEXT_WINDOW": "2900"},
     )
     assert code == 0
 

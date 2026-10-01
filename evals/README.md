@@ -55,25 +55,25 @@ python -m personal_ai_core.app.evaluate --num-ctx 8192 --only secret-chunk-bound
 ## Language-rule experiment
 
 The first rig run answered English questions in Arabic and mixed Chinese, Korean and
-Cyrillic into replies. The hypothesis is that the production language rule, which names
-Arabic, pulls the model towards Arabic. `--identity-variant` swaps that one rule inside an
-evaluation run only. `pac` and the product identity are unchanged.
+Cyrillic into replies. The hypothesis was that the production language rule, which named
+Arabic, pulled the model towards Arabic; variant B confirmed it and was adopted.
+`--identity-variant` swaps that one rule inside an evaluation run only; it never changes
+what `pac` sends.
 
 | Variant | Language rule |
 |---|---|
-| A | production text, unchanged |
-| B | names no language: reply in the language of the user's latest message, standard form, no switching |
+| A | the first production text (names Arabic), kept for comparison |
+| B | names no language: reply in the language of the user's latest message, standard form, no switching. **Production since ADR-012 amendment 1**, and the default |
 | C | B, plus: write every word in that language's own script, with no words from another language |
 
 ```bat
+python -m personal_ai_core.app.evaluate --num-ctx 8192
 python -m personal_ai_core.app.evaluate --num-ctx 8192 --identity-variant A
-python -m personal_ai_core.app.evaluate --num-ctx 8192 --identity-variant B
-python -m personal_ai_core.app.evaluate --num-ctx 8192 --identity-variant C
 ```
 
-Each run records `identity_variant` and the exact `language_rule` in its header. Adopting a
-variant would be a change to ADR-012's text, which is a separate owner decision. A
-better score is evidence for that decision, not the decision.
+Each run records `identity_variant` and the exact `language_rule` in its header. A letter
+always means the same text, so results from before and after the adoption compare
+directly. Changing the production rule again is a change to ADR-012 and an owner decision.
 
 ## Verdicts
 
