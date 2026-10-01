@@ -161,9 +161,10 @@ design background, not current architecture.
 - **[CURRENT]** The harness refuses to run under any model name but the Boss model's.
 - **[CURRENT]** An evaluation run records the weights' digest (`weights`, or
   `weights_unverified` when no digest can be confirmed) and the adapter that served it
-  (`provider`, read from the turns' `GENERATION_REQUESTED`). Ollama's digest is the
-  manifest's; llama.cpp's is the GGUF file's SHA-256 or its Ollama blob name (ADR-020 §3.1,
-  §3.2, unit 1). A `pac` turn records the provider, not the digest.
+  (`provider`, read from the turns' `GENERATION_REQUESTED`). Both runtimes name the same
+  weights by the same digest: the Ollama blob the modelfile's `FROM` names (with any
+  `ADAPTER` blobs), or the GGUF file's SHA-256, computed every run (ADR-020 §3.1, §3.2,
+  unit 1). A `pac` turn records the provider, not the digest.
 - **[TARGET]** Each reply and each evaluation run names the weights and the runtime that
   produced it.
 - **[TARGET]** A change to the instrument is never approved by the result it produces.

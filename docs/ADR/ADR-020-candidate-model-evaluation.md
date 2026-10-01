@@ -44,10 +44,19 @@ decided by this ADR, but no fine-tune can be judged until this gate exists.
 Every evaluation run records the **digest of the weights** that produced it, alongside the
 name. A name or file name alone is not trusted.
 
-- **Ollama:** the model's digest as Ollama reports it (`/api/show` or `/api/tags`). For a
-  blob path, the `sha256-…` blob name *is* the content digest.
-- **llama.cpp:** the SHA-256 of the GGUF file named by `/props` `model_path`, computed once
-  per file and cached by path, size and modification time.
+- **Ollama:** the digest of the weights blob that the modelfile's `FROM` line names
+  (`/api/show`). Ollama stores blobs under their content's SHA-256, so the `sha256-…` blob
+  name *is* the content digest. `ADAPTER` lines (a LoRA) change the weights, so their blob
+  digests are recorded with it. The manifest digest from `/api/ps` is kept as a second
+  field; it is not the weights' identity, because it also changes with the template or
+  parameters and does not match what llama.cpp sees for the same file.
+- **llama.cpp:** the SHA-256 of the GGUF file named by `/props` `model_path`, or the blob
+  name when that file is an Ollama blob. A non-blob file is hashed on every run.
+- **Amended in unit 1 (review, 2026-10-01).** The first draft read the manifest digest
+  from `/api/ps`, and cached a file's hash by path, size and modification time. The cache
+  was removed: a file whose bytes change while its size and modification time are kept
+  would have kept its old digest. An identity record that can be stale is worse than a
+  slow one. llama.cpp `--lora` adapters are not reported by `/props` and are not recorded.
 - **Unconfirmed digest:** if the digest cannot be confirmed, the run is recorded as
   `weights_unverified`. The comparison in §3.5 refuses it.
 

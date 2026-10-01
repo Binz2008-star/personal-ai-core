@@ -422,11 +422,22 @@ def test_the_chunk_boundary_case_really_straddles_a_chunk_boundary():
 DIGEST = "a" * 64
 
 
-def _ps(context_length, size=5_500_000_000, size_vram=0, name=None, digest=DIGEST):
+MANIFEST = "c" * 64
+BLOB_DIR = "C:\\Users\\x\\.ollama\\models\\blobs"
+MODELFILE = f"# Modelfile\nFROM {BLOB_DIR}\\sha256-{DIGEST}\nTEMPLATE x\n"
+
+
+def _ps(context_length, size=5_500_000_000, size_vram=0, name=None, digest=MANIFEST,
+        modelfile=MODELFILE, shown=None):
     model = name or ev.DEFAULT_BOSS_MODEL
 
-    def probe(url):
-        assert url.endswith("/api/ps")
+    def probe(url, body=None):
+        if url.endswith("/api/show"):
+            assert body == {"model": model}
+            if shown is not None:
+                shown.append(body)
+            return {"modelfile": modelfile}
+        assert url.endswith("/api/ps") and body is None
         return {"models": [{"name": model, "model": model, "size": size,
                             "size_vram": size_vram, "context_length": context_length,
                             "digest": digest}]}
@@ -629,7 +640,7 @@ def test_a_llamacpp_run_on_an_ollama_blob_records_its_digest(tmp_path):
     )
     assert code == 0
     header = _header(tmp_path)
-    assert header["weights"] == {"digest": f"sha256:{DIGEST}", "source": "ollama-blob-name",
+    assert header["weights"] == {"digest": f"sha256:{DIGEST}", "source": "ollama-blob",
                                  "verified": True}
     assert header["weights_unverified"] is False
 
@@ -637,33 +648,87 @@ def test_a_llamacpp_run_on_an_ollama_blob_records_its_digest(tmp_path):
 # --- ADR-020 sections 3.1 and 3.2: which weights, served by which adapter ----------
 
 
-def test_an_ollama_run_records_the_digest_and_the_provider(tmp_path):
+def test_an_ollama_run_records_the_weights_blob_and_the_provider(tmp_path):
     code, _ = _run_probed(tmp_path, _ps(8192))
     assert code == 0
     header = _header(tmp_path)
-    assert header["weights"] == {"digest": f"sha256:{DIGEST}", "source": "ollama-manifest",
-                                 "verified": True}
+    assert header["weights"] == {
+        "digest": f"sha256:{DIGEST}", "source": "ollama-blob", "verified": True,
+        "adapters": [], "manifest_digest": f"sha256:{MANIFEST}",
+    }
     assert header["weights_unverified"] is False
     assert header["provider"] == "ollama"
 
 
-@pytest.mark.parametrize("digest", [None, "", "abc", "sha256:" + "g" * 64, "A" * 65])
-def test_a_missing_or_malformed_digest_is_unverified(tmp_path, digest):
-    code, _ = _run_probed(tmp_path, _ps(8192, digest=digest))
+def test_ollama_and_llamacpp_name_the_same_weights_the_same_way(tmp_path):
+    _run_probed(tmp_path / "o", _ps(8192))
+
+    def props(url):
+        return {"n_ctx": 8192, "model_path": f"{BLOB_DIR}\\sha256-{DIGEST}"}
+
+    ev.main(
+        ["--cases", str(CASES), "--out", str(tmp_path / "l" / "results"),
+         "--only", "lang-en-1", "--runtime", "llamacpp"],
+        transport=FakeLlamaServer(), stdout=io.StringIO(), env={}, now=lambda: FIXED,
+        commit="abc1234", probe=props,
+    )
+    assert (_header(tmp_path / "o")["weights"]["digest"]
+            == _header(tmp_path / "l")["weights"]["digest"] == f"sha256:{DIGEST}")
+
+
+def test_a_lora_adapter_is_part_of_the_weights(tmp_path):
+    adapter = "d" * 64
+    modelfile = MODELFILE + f"ADAPTER {BLOB_DIR}\\sha256-{adapter}\n"
+    _run_probed(tmp_path, _ps(8192, modelfile=modelfile))
+    assert _header(tmp_path)["weights"]["adapters"] == [f"sha256:{adapter}"]
+
+
+@pytest.mark.parametrize(
+    "modelfile",
+    [
+        "",
+        "FROM huihui_ai/some-model:7b\n",
+        f"FROM {BLOB_DIR}\\sha256-abc\n",
+        MODELFILE + MODELFILE,
+        MODELFILE + "ADAPTER ./my-lora.gguf\n",
+    ],
+)
+def test_weights_without_a_single_blob_are_unverified(tmp_path, modelfile):
+    code, _ = _run_probed(tmp_path, _ps(8192, modelfile=modelfile))
     assert code == 0
     header = _header(tmp_path)
     assert header["weights_unverified"] is True
     assert header["weights"]["digest"] is None
+    # The manifest digest is still recorded, for reading; it is not the weights.
+    assert header["weights"]["manifest_digest"] == f"sha256:{MANIFEST}"
 
 
-def test_a_prefixed_digest_is_recorded_once_prefixed(tmp_path):
-    _run_probed(tmp_path, _ps(8192, digest=f"sha256:{DIGEST}"))
-    assert _header(tmp_path)["weights"]["digest"] == f"sha256:{DIGEST}"
+def test_a_show_that_fails_is_unverified_not_fatal(tmp_path):
+    ps = _ps(8192)
+
+    def probe(url, body=None):
+        if url.endswith("/api/show"):
+            raise OSError("down")
+        return ps(url)
+
+    code, _ = _run_probed(tmp_path, probe)
+    assert code == 0
+    assert _header(tmp_path)["weights_unverified"] is True
+
+
+@pytest.mark.parametrize("digest", [None, "", "abc", "sha256:" + "g" * 64, "A" * 65])
+def test_a_malformed_manifest_digest_is_not_recorded(tmp_path, digest):
+    _run_probed(tmp_path, _ps(8192, digest=digest))
+    weights = _header(tmp_path)["weights"]
+    assert weights["manifest_digest"] is None
+    assert weights["digest"] == f"sha256:{DIGEST}"
 
 
 def test_weights_are_unverified_when_the_boss_model_is_not_loaded(tmp_path):
-    _run_probed(tmp_path, _ps(8192, name="llama3:8b"))
+    shown = []
+    _run_probed(tmp_path, _ps(8192, name="llama3:8b", shown=shown))
     assert _header(tmp_path)["weights_unverified"] is True
+    assert shown == []
 
 
 # --- refusal-v1: the open-response requirement (ADR-002 owner note) ----------------

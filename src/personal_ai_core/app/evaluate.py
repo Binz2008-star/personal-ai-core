@@ -466,9 +466,6 @@ def _event_record(event) -> dict[str, Any]:
     return {"type": event.type.value, "payload": dict(event.payload)}
 
 
-DIGEST_CACHE = Path.home() / ".personal-ai-core" / "digest-cache.json"
-
-
 def run_case(
     case: Case, settings: Settings, transport, workdir: Path, policy=None, provider=None
 ) -> dict[str, Any]:
@@ -592,7 +589,7 @@ def main(
     env: dict[str, str] | None = None,
     now: Callable[[], datetime] | None = None,
     commit: str | None = None,
-    probe: Callable[[str], Mapping[str, Any]] | None = None,
+    probe: Callable[..., Mapping[str, Any]] | None = None,
 ) -> int:
     args = _parser().parse_args(argv)
     out = stdout if stdout is not None else sys.stdout
@@ -687,9 +684,6 @@ def main(
         model=settings.boss_model,
         probe=probe,
         live=transport is None,
-        # A real run remembers a hashed GGUF file, so it is read once, not once
-        # per run. A test run writes nothing outside its own folders.
-        digest_cache=DIGEST_CACHE if transport is None else None,
     )
     header["ollama_loaded"] = loaded
     # ADR-020 section 3.1: which weights, by digest. A comparison refuses a run

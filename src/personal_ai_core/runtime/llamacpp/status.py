@@ -6,7 +6,6 @@ Never fails: a server that cannot answer is recorded as not confirmed.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .digest import gguf_weights, unverified
@@ -15,9 +14,7 @@ from .digest import gguf_weights, unverified
 Probe = Callable[[str], Mapping[str, Any]]
 
 
-def loaded_status(
-    probe: Probe | None, host: str, digest_cache: Path | None = None
-) -> dict[str, Any]:
+def loaded_status(probe: Probe | None, host: str) -> dict[str, Any]:
     """llama-server's own report, from `/props`: context size and model file.
 
     `weights` is the file's digest (ADR-020 section 3.1). The file name is kept
@@ -39,5 +36,5 @@ def loaded_status(
         "context_length": n_ctx if isinstance(n_ctx, int) else None,
         "gpu_share": None,
         "model_file": path.replace("\\", "/").rsplit("/", 1)[-1] or None,
-        "weights": gguf_weights(path, digest_cache),
+        "weights": gguf_weights(path),
     }

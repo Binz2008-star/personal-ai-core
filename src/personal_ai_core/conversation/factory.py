@@ -139,20 +139,18 @@ def describe_loaded(
     ollama_host: str,
     llamacpp_host: str,
     model: str,
-    probe: Callable[[str], Mapping[str, Any]] | None = None,
+    probe: Callable[..., Mapping[str, Any]] | None = None,
     live: bool = True,
-    digest_cache: Path | None = None,
 ) -> dict[str, Any]:
     """What the model server reports it has loaded, for the evaluation header.
 
     The endpoints are each adapter's detail; this names which adapter to ask.
     `probe` replaces the HTTP GET in tests. Without one, a live run asks the
-    real server and a run on a test transport asks nothing. `digest_cache` is
-    where a hashed GGUF file's digest is remembered (llama.cpp only).
+    real server and a run on a test transport asks nothing.
     """
     chosen = probe if probe is not None else (http_probe if live else None)
     if runtime == "llamacpp":
-        return llamacpp_loaded_status(chosen, llamacpp_host, digest_cache)
+        return llamacpp_loaded_status(chosen, llamacpp_host)
     return ollama_loaded_status(chosen, ollama_host, model)
 
 
