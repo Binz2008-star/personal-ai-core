@@ -163,8 +163,14 @@ design background, not current architecture.
 - **[TARGET]** Each reply and each evaluation run names the weights and the runtime that
   produced it.
 - **[TARGET]** A change to the instrument is never approved by the result it produces.
-- **[OPEN]** Whether an evaluation result blocks anything (OD-3).
-- **[OPEN]** How a candidate model is named and admitted (OD-8).
+- **[TARGET]** Weights are identified by digest. The provider is recorded from the adapter
+  that served the turn, not as a constant (ADR-020 §3.1, §3.2).
+- **[TARGET]** A candidate is evaluated under its own name and digest, without changing
+  what `pac` runs. It is judged per case over several runs, against a baseline taken with
+  the same cases version, scorer version and settings (ADR-020 §3.3 to §3.6).
+- **[OPEN]** Whether an evaluation result blocks anything (OD-3); for models, ADR-020 D4.
+- **[OPEN]** How a candidate model is named and admitted (OD-8). Proposed in ADR-020,
+  which is not yet authorized.
 
 ## 9. Feedback, erasure and forget semantics
 
@@ -248,6 +254,6 @@ Marked conflicts with ADRs:
 | OD-5 | Whether the owner profile is governed state, and its gate |
 | OD-6 | Whether source evidence may be deleted |
 | OD-7 | Whether assistant or agent text may be a memory candidate source |
-| OD-8 | How a candidate model is named and admitted |
+| OD-8 | How a candidate model is named and admitted. Proposed: ADR-020 |
 | OD-9 | Whether ungated configuration overrides are acceptable |
 | OD-10 | Accept the built-but-proposed ADRs, or let this document supersede them |
