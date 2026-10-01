@@ -593,6 +593,7 @@ claim written in one place with nothing that notices it going stale.
                unit 2)
   #146 f2ee400  feat(eval): the comparison tool -- a candidate judged per case against a
                baseline (ADR-020 unit 3)
+  #147 5a88b0c  test: the harness's own output is accepted by the comparison tool
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1090,6 +1091,11 @@ a passed gate is REQUIRED before adoption. Units, one PR each:
   2. --candidate NAME, role: candidate  -- merged (#145)
   3. python -m personal_ai_core.app.compare BASELINE_DIR CANDIDATE_DIR  -- merged (#146)
   4. self-comparison of the Boss model on the rig, committed as results
+     -- run at 5a88b0c (#148, held): FAILED under the first rule on identical
+     weights; D2/D3 recalibrated by ADR-020 amendment 1 (this PR). Next: one
+     acceptance self-comparison at the amended counts (15 contract, 9 refusal
+     per side), read once. pac experiments use --database to a temporary file,
+     never the owner's ~/.personal-ai-core/core.db.
 No fine-tune is judged before unit 4 passes against itself.
 Instrument before unit 4: scorer contract-checks-v2 and refusal_v2.json (a script
 check on every refusal case). The self-comparison's runs use these; results scored
