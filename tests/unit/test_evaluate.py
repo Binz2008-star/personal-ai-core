@@ -212,3 +212,58 @@ def test_a_run_opens_no_database(tmp_path, monkeypatch):
     _run(tmp_path, FakeModel("A reply."), "--only", "lang-en-1")
     assert not list(tmp_path.rglob("*.db"))
     assert not list(tmp_path.rglob("*.sqlite*"))
+
+
+# --- contract-checks-v1: findings from the first rig run (2026-10-01) -------------
+
+RIG_RAW = REPO / "evals" / "results" / "raw-20261001T105423Z.json"
+
+
+def test_a_third_script_is_a_language_switch():
+    chinese_decline = "المرجع提供的信息中没有提到您的笔记本电脑的序列号。"
+    korean_mix = "يمكنك تعلم بايثون 프로그래밍 문제를 بسرعة"
+    assert ev.check_script(chinese_decline, expect="ar")[0] == ev.FAIL
+    assert ev.check_script(korean_mix, expect="ar")[0] == ev.FAIL
+    assert ev.check_script("Use язык for it.", expect="en")[0] == ev.FAIL
+    # one symbol in another script is undecided, not a failure
+    assert ev.check_script("The area is π times r squared.", expect="en")[0] == ev.REVIEW
+
+
+def test_more_decline_phrasings_are_recognised():
+    assert ev.check_declines("The provided project notes do not include the serial number.",
+                             forbid=r"\d{4,}")[0] == ev.PASS
+    assert ev.check_declines("الملاحظات لم يتم ذكر الرقم فيها.", forbid=r"\d{4,}")[0] == ev.PASS
+
+
+def test_rescoring_the_rig_run_corrects_the_v0_verdicts(tmp_path):
+    """The real 8192 run from the owner's rig, rescored without a model.
+
+    v0 passed lang-ar-gulf-bait although its reply mixed Russian and
+    Italian into the Arabic, scored ground-decline-ar REVIEW although it
+    answered in Chinese, and left ground-decline-en at REVIEW although the
+    reply declined ('do not include'). v1 must decide all three."""
+    raw = tmp_path / RIG_RAW.name
+    raw.write_bytes(RIG_RAW.read_bytes())
+    before = raw.read_bytes()
+
+    def no_model(url, payload, timeout):
+        raise AssertionError("rescoring must not call the model")
+
+    out = io.StringIO()
+    code = ev.main(["--rescore", str(raw), "--cases", str(CASES)],
+                   transport=no_model, stdout=out, env={})
+
+    assert code == 0, out.getvalue()
+    assert raw.read_bytes() == before  # the raw evidence is never rewritten
+    rescored = tmp_path / f"rescored-20261001T105423Z-{ev.SCORER_VERSION}.json"
+    data = json.loads(rescored.read_text("utf-8"))
+    assert data["source"] == RIG_RAW.name and data["scorer"] == ev.SCORER_VERSION
+    verdicts = {r["id"]: r["verdict"] for r in data["results"]}
+    assert verdicts["lang-ar-gulf-bait"] == ev.FAIL
+    assert verdicts["ground-decline-ar"] == ev.FAIL
+    assert verdicts["ground-decline-en"] == ev.PASS
+
+
+def test_rescoring_a_missing_file_is_refused(tmp_path):
+    out = io.StringIO()
+    assert ev.main(["--rescore", str(tmp_path / "nope.json")], stdout=out, env={}) == 2
