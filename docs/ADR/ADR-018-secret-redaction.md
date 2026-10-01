@@ -1,6 +1,6 @@
 # ADR-018 — A mechanical guard for rule 3: secrets are withheld from the prompt
 
-**Status:** PROPOSED · design only · nothing here is built · nothing here is authorized
+**Status:** PROPOSED · design only · revision 2 (reviewed against the code, section 9) · nothing here is built · nothing here is authorized
 
 - Contract decision this design serves: rule 3, strict reading, decided by the owner on
   2026-10-01 (`PROJECT_STATE.md`, Identity). Rule 3 covers every secret, including one in
@@ -46,10 +46,16 @@ A model that never receives the secret cannot disclose it. That is the whole des
 1. **Where.** At render time, in the grounding path, before the evidence message is
    built. The stored chunk, the index and the conversation history are not touched.
 2. **A protocol in `core.contracts`**, `SecretRedactor`, with one method that takes text
-   and returns the redacted text and a count per kind. The implementation lives outside
-   `core` and is injected into `ContextBuilder`, the same way the estimator is.
-   Dependency direction is unchanged: the implementation depends on `core`, never the
-   reverse.
+   and returns the redacted text and a count per kind. The implementation lives in
+   `context/redaction.py`: an existing layer that may import `core` only, so
+   `LAYER_MAY_IMPORT` gains no entry. `conversation/grounding.py` sees the protocol and
+   never the implementation.
+   The composition root, `conversation/factory.py`, hands **the same instance** to both
+   `ContextBuilder` and `RenderedEvidenceCost`. Today `RenderedEvidenceCost` is built
+   from the estimator alone and calls the module-level renderers; `render_evidence` and
+   `render_memories` therefore take the redactor as a parameter. Wiring it into the
+   builder only would charge the raw text and send the redacted text, which is finding
+   F-4 again.
 3. **Applied to both evidence sections:** passage text in `render_evidence` and
    recollection text in `render_memories`. A memory can hold a secret for the same reason
    a document can.
@@ -58,6 +64,9 @@ A model that never receives the secret cannot disclose it. That is the whole des
    Redaction must therefore happen inside those renderers, so the token, the cost and the
    message all describe the same text. A marker can be longer than the secret it
    replaces; measuring the redacted text is what keeps the budget honest.
+   `HybridContextAssembler` built without a `rendered_cost` charges `chunk.text`
+   directly (`context/assembler.py`). That path stays as it is and is not a supported
+   way to run with a redactor; the factory never builds it.
 5. **What is replaced.** The secret value only, not the line. The example becomes
    `DATABASE_URL=postgres://app:[withheld: secret]@db.internal:5432/app`. The model can
    still say that the notes hold a connection string and that its password was withheld,
@@ -68,18 +77,37 @@ A model that never receives the secret cannot disclose it. That is the whole des
      `API_KEY`, `PRIVATE_KEY`, and their common variants), in `KEY=value` and
      `key: value` forms;
    - `Authorization` header values (`Bearer`, `Basic`);
-   - PEM private-key blocks;
+   - PEM private-key blocks. A chunk holds at most 1000 characters, so a block is
+     usually cut: a `BEGIN` line with no `END` is withheld to the end of the chunk, and
+     an `END` line with no `BEGIN` from the start of the chunk. See section 4 for the
+     chunks in between;
    - tokens with a published fixed prefix (for example `sk-`, `ghp_`, `AKIA`, `xoxb-`).
 7. **Audit.** The `CONTEXT_ASSEMBLED` payload gains `redactions`: a count per kind.
    Never the value, never its length.
 8. **Failure.** If the redactor raises, the turn fails the way a retrieval failure does.
-   It never falls back to rendering the raw text.
+   It never falls back to rendering the raw text. The exception carries a stable
+   classification and no text: an error message that quotes the passage would put the
+   secret in an event payload, which is the defect PR #5 fixed.
 
 ## 4. What this does not give
 
 - **It finds what it has a pattern for.** A password written in a sentence
   ("the password is hunter2") is not detected. Rule 3 stays in the contract as the
   second layer for exactly that case, and the evaluation keeps measuring it.
+- **A secret cut by a chunk boundary can get through.** Redaction sees one chunk at a
+  time. `FixedSizeChunker` cuts at 1000 characters with 100 of overlap, so:
+  - the middle chunks of a PEM block hold neither marker line and are not detected;
+  - a `KEY=value` cut inside the value leaves a tail in the next chunk with no key in
+    front of it, unless the overlap happens to carry the key.
+  Closing this needs the detector to see the whole document, at ingestion or through
+  the catalog. Both reach into the knowledge layer and are not proposed here (D6).
+- **Key names are matched in ASCII.** A secret labelled in Arabic, or in fullwidth
+  characters, is not detected by the assignment detector. The URL, header and prefix
+  detectors do not depend on the label.
+- **The marker can be written by a document.** A passage may contain the literal
+  marker text where nothing was withheld. The model would then report a withheld secret
+  that never existed. This is a rule 5 surface, small, and it grows if D3 adds a
+  preamble sentence that gives the marker meaning.
 - **No entropy detector in version 1.** High-entropy matching flags hashes, ids and this
   module's own 16-hex boundary token. It is left out rather than tuned by guesswork.
 - **The user's own message is not redacted.** A secret the user types into the
@@ -123,6 +151,9 @@ A model that never receives the secret cannot disclose it. That is the whole des
   what a marker means. That sentence is prompt text and costs budget.
 - **D4.** Whether the memory section is in scope for version 1 or follows later.
 - **D5.** Whether a redactor failure fails the turn (proposed) or drops the passage.
+- **D6.** Whether version 1 may ship with the chunk-boundary limit in section 4
+  (proposed: yes, stated and measured by an evaluation case), or must wait for a
+  design that sees the whole document.
 
 ## 8. Proposed units, if authorized
 
@@ -131,6 +162,26 @@ A model that never receives the secret cannot disclose it. That is the whole des
 3. The two new evaluation cases, then a run on the rig.
 
 Each unit is its own PR and its own authorization.
+
+## 9. Review record
+
+**Revision 2, 2026-10-01.** The draft was checked against the code at `dff472c`. The
+reviewer is the draft's author, so this is not an independent review; the findings are
+listed with the code they rest on so the owner can check them.
+
+- **R1, fixed in 3.2.** The draft injected the redactor into `ContextBuilder` only.
+  `RenderedEvidenceCost` is built separately (`conversation/factory.py`) and calls the
+  module-level renderers, so cost and message would have described different text.
+- **R2, stated in 4 and D6.** Redaction per chunk misses a secret cut by a chunk
+  boundary (`knowledge/chunking.py`: 1000 characters, 100 overlap). The draft's PEM
+  detector could not have worked as written.
+- **R3, fixed in 3.2.** The draft did not name a layer. `test_dependency_direction`
+  fails on an unlisted layer, and `conversation` may import `core` only.
+- **R4, fixed in 3.8.** A redactor error must not quote the text it failed on.
+- **R5, stated in 4.** ASCII-only key names; a forgeable marker.
+- **Checked, no change needed:** the payload field is a string-to-count mapping like
+  `excluded_by_reason`; rendering stays deterministic; nothing is persisted; the
+  evaluation harness uses the same builders, so it measures the redacted path.
 
 ## Status
 
