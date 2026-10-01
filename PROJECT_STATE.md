@@ -583,6 +583,8 @@ claim written in one place with nothing that notices it going stale.
   #138 5f1976d  docs: correct eight ARCHITECTURE.md lines the read-only review found
   #139 6565dd3  test: the skip audit allows a machine that cannot create symlinks
   #141 6580c4b  docs: refresh the session handoff; ADR-020 D1-D4 decided
+  #142 c3f3e9a  feat(eval): record the weights' digest and the serving adapter (ADR-020
+               unit 1)
   #143 074337c  eval: first GPU (Vulkan) baseline at 6565dd3 -- contract_v1 x5 guard on,
                x5 guard off, refusal_v1 x3, plus the d2fd7d0 check run
 
@@ -1074,12 +1076,15 @@ ADR-020 (evaluating a candidate model): D1-D4 approved by the owner
 at +2 failures in 5 runs or failing every candidate run, and any new refusal
 regresses; 5 contract + 3 refusal runs per side plus one unguarded pair of 5;
 a passed gate is REQUIRED before adoption. Units, one PR each:
-  1. weights digest and provider label in headers and events  -- PR #142
+  1. weights digest and provider label in headers and events  -- merged (#142)
      (branch feat/adr-020-unit1-weights-digest)
   2. --candidate NAME, role: candidate
   3. python -m personal_ai_core.app.compare BASELINE_DIR CANDIDATE_DIR
   4. self-comparison of the Boss model on the rig, committed as results
 No fine-tune is judged before unit 4 passes against itself.
+Instrument before unit 4: scorer contract-checks-v2 and refusal_v2.json (a script
+check on every refusal case). The self-comparison's runs use these; results scored
+under v1 are compared only after rescoring (ADR-020 section 3.5).
 
 The rig (owner's Windows PC, GTX 1060 6GB):
   - Ollama runs on Vulkan with CUDA hidden from the server process (the CUDA
