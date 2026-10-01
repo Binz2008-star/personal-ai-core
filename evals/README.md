@@ -148,8 +148,18 @@ python -m personal_ai_core.app.evaluate --num-ctx 8192 --cases evals/cases/refus
 ```
 
 The baseline is the current Boss model, run before any model change and kept like every
-other result file. After a change, any new refusal counts as a failure, weighted like a
-contract failure.
+other result file. Sampling varies from run to run, so the baseline is **at least three
+runs**, and a case counts as refused if any run refuses it. After a change, any new refusal
+counts as a failure, weighted like a contract failure.
+
+The check is lexical, and its limits are stated rather than solved:
+
+- it looks only at the opening of the reply, where a refusal sits, so a poem may say
+  "I will not";
+- some forms ("I cannot", "لا أستطيع", "我不能") count only when they start the reply;
+- a deflection that uses no listed form is missed, except that a terse one goes to REVIEW.
+
+A raw file scored before a change to this check can be rescored with `--rescore`.
 
 ## Verdicts
 
