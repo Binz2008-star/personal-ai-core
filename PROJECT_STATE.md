@@ -593,6 +593,14 @@ claim written in one place with nothing that notices it going stale.
                unit 2)
   #146 f2ee400  feat(eval): the comparison tool -- a candidate judged per case against a
                baseline (ADR-020 unit 3)
+  #147 5a88b0c  test: the harness's own output is accepted by the comparison tool
+  #149 ee30f82  feat(eval): ADR-020 amendment 1 -- the gate recalibrated from alpha and
+               effect size
+  #150 e8d69ec  fix(eval): compare GPU share by a tolerance, not one-decimal rounding
+  #151 31446bd  fix(agent): refuse Windows alias spellings of .git and protected
+               files in the sandbox
+  #152 f363df1  fix(eval): rescore never overwrites, refuses a cases file that
+               misses the run; exact GPU percentage
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1058,78 +1066,92 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-01, main at 5d2b2a3)
+NEXT SESSION HANDOFF (updated 2026-10-01, main at f363df1)
 ==========================================================
 
-Who decides: the owner delegated engineering direction to the lead session
-("you got the all authority u need"). The lead merges on green CI. Owner
-decisions are still needed for: architecture and product direction, the Boss
-model, schema / migration / Neon / pgvector, branch protection, and anything
-on the rig's system settings.
+Start here: `python tools/session_state.py`. It runs by itself at session start
+(.claude/settings.json) and prints what git knows -- HEAD, the latest merges,
+unrecorded ledger rows, and how far this section is behind main. This section
+holds only what git cannot know. tests/unit/test_handoff_freshness.py fails CI
+when the header above is more than 3 merges behind main: update it in the next
+PR, as with the ledger.
 
-State at 5d2b2a3:
-  - CI green on static, suite and suite-windows. Locally about 1640 passed.
-  - pac runs the Boss model with: ADR-018 redaction, ADR-012 rule B, model-card
-    sampling, and the ADR-019 language guard on (PAC_LANGUAGE_GUARD=0 turns it
-    off). See "SINCE dff472c, LIVE IN pac" above.
-  - #140 (ADR-020) was squash-merged as 5d2b2a3, by mistake: this repository
-    merges with merge commits, and the ledger reads only `Merge pull request`
-    commits, so #140 cannot have a ledger row. It is recorded in this sentence
-    instead. Merge with merge commits from here on.
+Who decides
+  - The owner delegated engineering direction to the lead session. In practice
+    the owner approves each merge; the lead reviews, tests and merges on the
+    owner's word, with merge commits (never squash: the ledger reads only
+    "Merge pull request" commits; #140 was squashed by mistake and has no row).
+  - Owner decisions: architecture and product direction, the Boss model,
+    schema / migration / Neon / pgvector, branch protection, the rig's system
+    settings, deleting anything from the owner's real data.
 
-ADR-020 (evaluating a candidate model): D1-D4 approved by the owner
-2026-10-01 ("موافق على الأربعة"): build the units; a contract case regresses
-at +2 failures in 5 runs or failing every candidate run, and any new refusal
-regresses; 5 contract + 3 refusal runs per side plus one unguarded pair of 5;
-a passed gate is REQUIRED before adoption. Units, one PR each:
-  1. weights digest and provider label in headers and events  -- merged (#142);
-     verified live on the rig at 62b2520: weights.verified true, the digest equal
-     to the modelfile's FROM blob, the same digest on Ollama and llama.cpp, and
-     provider recorded correctly on both
-     (branch feat/adr-020-unit1-weights-digest)
-  2. --candidate NAME, role: candidate  -- merged (#145)
-  3. python -m personal_ai_core.app.compare BASELINE_DIR CANDIDATE_DIR  -- merged (#146)
-  4. self-comparison of the Boss model on the rig, committed as results
-No fine-tune is judged before unit 4 passes against itself.
-Instrument before unit 4: scorer contract-checks-v2 and refusal_v2.json (a script
-check on every refusal case). The self-comparison's runs use these; results scored
-under v1 are compared only after rescoring (ADR-020 section 3.5).
+ADR-020 (evaluating a candidate model) -- where it stands
+  - Units 1-3 built: weights digest + provider (#142, verified live on the rig),
+    --candidate (#145), the comparison tool (#146).
+  - Unit 4, Boss vs itself at 5a88b0c (#148, HELD, do not merge yet): FAILED
+    under the first rule on identical weights -- the evidence that the rule was
+    miscalibrated.
+  - Amendment 1 (#149): alpha 10% family-wise (worst case, cases independent --
+    an assumption, not a guarantee), 10%->70% caught >= 75%. Gating: 15 guarded
+    contract runs at +8; 9 refusal runs at +6 for script failures; any new
+    refusal regresses. Unguarded groups are descriptive. "Fails every run" is
+    gone. test_gate_calibration.py holds the constants to the targets.
+  - GPU share is compared within 0.05, not by rounding (#150).
+  - NEXT: one acceptance self-comparison on the rig, from current main, 15
+    contract + 9 refusal runs per side (48 runs, about an hour), read once.
+    PASS opens candidate evaluation. FAIL is not re-run: alpha and the effect
+    size are revisited. #148 is merged with or after that result, as evidence.
+  - Not to be mixed into the gate work: ground-decline-ar's guard-on failures
+    (#143 0/5 vs unit 4 5/10, cause unresolved) and the guard's blind spot for
+    Hebrew and other "other" scripts (allowed by `{OTHER}` in check_reply).
+    Each is its own decision.
 
-The rig (owner's Windows PC, GTX 1060 6GB):
-  - Ollama runs on Vulkan with CUDA hidden from the server process (the CUDA
-    backend crashes on driver 560.94). About 85% GPU, about 2 min per
-    contract_v1 run. Results before the GPU baseline were CPU-only.
-  - In flight: 13 runs on 6565dd3 (5 contract guard on, 5 contract guard off,
-    3 refusal). The rig session opens one PR with the 26 result files. Review
-    it as results only (no code; PLANTED-* canaries are expected), merge it
-    with a merge commit, then report guard on vs off and GPU refusals.
-  - Rig session works in the worktree C:\Users\loyal\personal-ai-core-review.
-    Do not delete the locked pytest-of-loyal folder; use --basetemp.
-  - Keep Smart App Control on. No driver update, no OLLAMA_GPU_LAYERS change,
-    no system setting change without the owner. No CPU-heavy work during runs.
-  - Recommended to the owner, not done: stop the Ollama desktop app at startup
-    (it loads the model at 4096 context); write ~/.personal-ai-core/profile.md.
+Since the last handoff, also merged
+  - #144 instrument v2: refusal_v2 checks the reply's language.
+  - #151 sandbox: Windows alias spellings (.git., ::$DATA, trailing dots,
+    8.3 names) of .git and protected files are refused. Found by a rig sweep.
+  - #152 evaluate: a rescore never overwrites; a cases file that misses the
+    run is refused; the GPU percentage prints exactly.
 
-Open, each an owner decision (see OPEN REVIEW FINDINGS and ARCHITECTURE.md
-OD-1..OD-10): `pac --remember` outside the lifecycle; ExperiencePipeline unwired
-and its 12-character conflict check; MemoryReader over a write-capable store;
-dead enum members. ADR-017 A2 Step B stays unbuilt.
+The rig (owner's Windows PC, GTX 1060 6GB)
+  - Ollama: manual `ollama serve` at 8192 context on Vulkan (CUDA hidden from
+    the server; the CUDA backend crashes on driver 560.94), about 85% GPU,
+    60-100 s per contract run. The desktop app relaunches itself and loads
+    the model at 4096: stop it before runs (owner may disable it at startup).
+  - Several rig sessions may run at once; the checkout is shared. Each works in
+    its own worktree; the review session's is C:\Users\loyal\personal-ai-core-review.
+    Shell is PowerShell: $LASTEXITCODE, not %ERRORLEVEL%. Update main ONCE
+    before a measurement and never pull during one.
+  - Do not delete the locked pytest-of-loyal folder; use --basetemp or
+    PYTEST_DEBUG_TEMPROOT. No CPU-heavy work (pytest included) during runs.
+  - Keep Smart App Control on. No driver update, no OLLAMA_GPU_LAYERS change.
+  - pac experiments use --database pointing at a temporary file. 50 test
+    sessions from 2026-10-01 sit in the owner's real ~/.personal-ai-core/core.db;
+    removing them is the owner's call.
+  - Pending for the owner: write ~/.personal-ai-core/profile.md (a proposed
+    single-variable edit -- Ajman Bank 2014-2018 first, then Eco Technology
+    2018-2023 -- needs its own ten-per-language rerun; profile content never
+    enters the repository).
 
-Mechanics that cost time:
-  - Required checks are `suite` and `static`, and the branch must be up to
-    date: merge main into the branch (or update_pull_request_branch). Never
-    rebase or force-push a shared branch.
+Open, each an owner decision (OPEN REVIEW FINDINGS, ARCHITECTURE.md OD-1..10)
+  - `pac --remember` outside the lifecycle; ExperiencePipeline unwired and its
+    12-character conflict check; MemoryReader over a write-capable store; dead
+    enum members; raw exception text in GENERATION_FAILED / RETRIEVAL_FAILED.
+  - ADR-017 A2 Step B stays unbuilt.
+
+Mechanics that cost time
+  - Required checks: `suite` and `static`; the branch must be up to date
+    (update_pull_request_branch, or merge main in). Never rebase or force-push
+    a shared branch. After merging one PR, update the next one's branch and
+    wait for CI before merging it.
   - Before every push: python3 -m pytest -q; python3 -m ruff check .;
-    python3 -m pyright.
-  - The ledger fails CI once more than 3 merges are unrecorded. Put the rows
-    for earlier merges into the next PR. A line starting with two spaces and
-    "#<number> " is parsed as a row.
-  - Budget-window tests derive from the preamble and GUARD_NOTE estimates;
-    path-length tests use a fixed-length folder (Windows paths differ).
+    python3 -m pyright (CI pins ruff 0.15.8, pyright 1.1.408).
+  - Ledger: more than 3 unrecorded merges fails CI; rows stay in PR-number
+    order. A line starting with two spaces and "#<number> " is parsed as a row.
   - Mutation tests: commit first, PYTHONDONTWRITEBYTECODE=1, clear
-    __pycache__ before every mutant.
-  - The model-name guard test rejects the model family name in src/.
-  - Write commit messages to a file and use git commit -F.
+    __pycache__ before every mutant. A surviving mutant gets its own test.
+  - The model-name guard rejects the model family name in src/.
+  - Commit messages go to a file and `git commit -F`.
 
 DOCUMENTATION DISCIPLINE
 ========================

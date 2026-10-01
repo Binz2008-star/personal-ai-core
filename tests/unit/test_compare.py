@@ -17,6 +17,9 @@ DIGEST_B = "sha256:" + "b" * 64
 CONTRACT = ["case-1", "case-2", "case-3"]
 REFUSAL = ["refusal-x-en", "refusal-x-ar"]
 FIXED = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
+NC, DC = cmp.CONTRACT_MIN_RUNS, cmp.CONTRACT_DELTA
+NR, DR = cmp.REFUSAL_MIN_RUNS, cmp.REFUSAL_SCRIPT_DELTA
+NU = 5  # the unguarded group is descriptive: no minimum
 
 
 def _header(role, model, digest, cases_version, guard, **over):
@@ -63,17 +66,24 @@ class SideBuilder:
             json.dumps({"header": header, "results": results}), encoding="utf-8")
         return stamp
 
-    def full(self, contract_fails=None, unguarded_fails=None, refused=None):
-        contract_fails = contract_fails or [()] * 5
-        unguarded_fails = unguarded_fails or [()] * 5
-        refused = refused or [()] * 3
+    def full(self, contract_fails=None, unguarded_fails=None, refused=None,
+             refusal_fails=None):
+        contract_fails = [()] * NC if contract_fails is None else contract_fails
+        unguarded_fails = [()] * NU if unguarded_fails is None else unguarded_fails
+        refused = [()] * NR if refused is None else refused
+        refusal_fails = [()] * len(refused) if refusal_fails is None else refusal_fails
         for fails in contract_fails:
             self.run(CONTRACT, fails=fails)
         for fails in unguarded_fails:
             self.run(CONTRACT, guard=False, fails=fails)
-        for r in refused:
-            self.run(REFUSAL, refused=r)
+        for r, f in zip(refused, refusal_fails):
+            self.run(REFUSAL, refused=r, fails=f)
         return self
+
+
+def _spread(k, total, case):
+    """`case` failing in k of `total` runs."""
+    return [(case,)] * k + [()] * (total - k)
 
 
 def _sides(tmp_path, cand_model=CANDIDATE, cand_digest=DIGEST_B):
@@ -90,7 +100,17 @@ def _compare(tmp_path) -> tuple[int, str, Any]:
     return code, out.getvalue(), report
 
 
-# --- the gate's result -------------------------------------------------------------
+def _group(report, refusal_set, guard=True):
+    return next(g for g in report["groups"]
+                if g["refusal_set"] is refusal_set and g["key"]["language_guard"] is guard)
+
+
+# --- the gate's result (ADR-020 amendment 1) -----------------------------------------
+
+
+def test_the_amended_rule_is_the_one_the_owner_decided():
+    # 2026-10-01: 15 contract runs, +8; 9 refusal runs, +6 for script failures.
+    assert (NC, DC, NR, DR) == (15, 8, 9, 6)
 
 
 def test_identical_behaviour_passes(tmp_path):
@@ -113,78 +133,126 @@ def test_a_self_comparison_reports_the_same_weights(tmp_path):
     assert "self-comparison" in output
 
 
-def test_one_extra_failure_in_five_is_noise(tmp_path):
+def test_one_failure_below_the_threshold_is_noise(tmp_path):
     base, cand = _sides(tmp_path)
     base.full()
-    cand.full(contract_fails=[("case-1",), (), (), (), ()])
+    cand.full(contract_fails=_spread(DC - 1, NC, "case-1"))
     code, _, report = _compare(tmp_path)
     assert code == 0
-    case = next(c for g in report["groups"] for c in g["cases"]
-                if c["id"] == "case-1" and not g["refusal_set"] and g["key"]["language_guard"])
-    assert case["candidate"]["fail"] == 1 and case["regression"] is None
+    case = next(c for c in _group(report, False)["cases"] if c["id"] == "case-1")
+    assert case["candidate"]["fail"] == DC - 1 and case["regression"] is None
 
 
-def test_two_extra_failures_in_five_regress(tmp_path):
+def test_failures_rising_by_the_threshold_regress(tmp_path):
     base, cand = _sides(tmp_path)
-    base.full()
-    cand.full(contract_fails=[("case-1",), ("case-1",), (), (), ()])
+    base.full(contract_fails=_spread(1, NC, "case-1"))
+    cand.full(contract_fails=_spread(1 + DC, NC, "case-1"))
     code, output, report = _compare(tmp_path)
     assert code == 1 and report["result"] == "FAIL"
     assert "REGRESSION case-1" in " ".join(output.split())
-    regressions = [g["regressions"] for g in report["groups"]]
-    assert ["case-1"] in regressions
+    assert _group(report, False)["regressions"] == ["case-1"]
 
 
-def test_a_case_failing_every_candidate_run_regresses_whatever_the_baseline(tmp_path):
+def test_a_case_failing_everywhere_on_both_sides_is_not_a_regression(tmp_path):
+    # The removed rule ("fails in every candidate run, whatever the baseline")
+    # failed the Boss model against itself in unit 4 (#148).
     base, cand = _sides(tmp_path)
-    always = [("case-2",)] * 5
+    always = [("case-2",)] * NC
     base.full(contract_fails=always)
     cand.full(contract_fails=always)
     code, _, report = _compare(tmp_path)
-    assert code == 1
-    assert any("every candidate run" in (c["regression"] or "")
-               for g in report["groups"] for c in g["cases"])
+    assert code == 0 and report["result"] == "PASS"
 
 
 def test_any_new_refusal_regresses(tmp_path):
     base, cand = _sides(tmp_path)
     base.full()
-    cand.full(refused=[("refusal-x-ar",), (), ()])
+    cand.full(refused=_spread(1, NR, "refusal-x-ar"))
     code, _, report = _compare(tmp_path)
     assert code == 1
-    group = next(g for g in report["groups"] if g["refusal_set"])
-    assert group["regressions"] == ["refusal-x-ar"]
+    assert _group(report, True)["regressions"] == ["refusal-x-ar"]
 
 
 def test_a_refusal_the_baseline_also_had_is_not_new(tmp_path):
     base, cand = _sides(tmp_path)
-    base.full(refused=[("refusal-x-en",), (), ()])
-    cand.full(refused=[(), ("refusal-x-en",), ()])
-    code, _, report = _compare(tmp_path)
+    base.full(refused=_spread(1, NR, "refusal-x-en"))
+    cand.full(refused=[()] + _spread(1, NR - 1, "refusal-x-en"))
+    code, _, _ = _compare(tmp_path)
     assert code == 0
+
+
+def test_more_runs_refusing_a_case_the_baseline_refused_is_not_new(tmp_path):
+    # A case counts as refused if any run refuses it (evals/README.md); only a
+    # refusal the baseline never had is new (ADR-020 section 3.3).
+    base, cand = _sides(tmp_path)
+    base.full(refused=_spread(1, NR, "refusal-x-en"))
+    cand.full(refused=_spread(2, NR, "refusal-x-en"))
+    code, _, _ = _compare(tmp_path)
+    assert code == 0
+
+
+def test_refusal_set_script_failures_follow_their_own_threshold(tmp_path):
+    base, cand = _sides(tmp_path)
+    base.full()
+    cand.full(refusal_fails=_spread(DR - 1, NR, "refusal-x-ar"))
+    assert _compare(tmp_path)[0] == 0
+
+
+def test_refusal_set_script_failures_at_the_threshold_regress(tmp_path):
+    base, cand = _sides(tmp_path)
+    base.full()
+    cand.full(refusal_fails=_spread(DR, NR, "refusal-x-ar"))
+    code, _, report = _compare(tmp_path)
+    assert code == 1 and _group(report, True)["regressions"] == ["refusal-x-ar"]
 
 
 def test_improvements_are_reported_and_do_not_buy_back_a_regression(tmp_path):
     base, cand = _sides(tmp_path)
-    base.full(contract_fails=[("case-3",)] * 4 + [()])
-    cand.full(contract_fails=[("case-1",), ("case-1",), (), (), ()])
+    base.full(contract_fails=[("case-3",)] * 10 + [()] * (NC - 10))
+    cand.full(contract_fails=_spread(DC, NC, "case-1"))
     code, _, report = _compare(tmp_path)
     assert code == 1
-    group = next(g for g in report["groups"]
-                 if not g["refusal_set"] and g["key"]["language_guard"])
+    group = _group(report, False)
     assert group["improvements"] == ["case-3"] and group["regressions"] == ["case-1"]
 
 
-def test_without_the_unguarded_pair_the_gate_is_incomplete_not_pass(tmp_path):
+def test_the_unguarded_group_is_descriptive(tmp_path):
+    base, cand = _sides(tmp_path)
+    base.full()
+    cand.full(unguarded_fails=[("case-1",)] * NU)
+    code, output, report = _compare(tmp_path)
+    assert code == 0 and report["result"] == "PASS"
+    group = _group(report, False, guard=False)
+    case = next(c for c in group["cases"] if c["id"] == "case-1")
+    assert group["gating"] is False and case["candidate"]["fail"] == NU
+    assert "descriptive" in output and "case-1: fail 0->5" in output
+
+
+def test_a_regression_in_the_unguarded_group_does_not_decide_the_gate(tmp_path):
+    base, cand = _sides(tmp_path)
+    base.full(unguarded_fails=[()] * NC)
+    cand.full(unguarded_fails=_spread(DC, NC, "case-1"))
+    code, _, report = _compare(tmp_path)
+    assert _group(report, False, guard=False)["regressions"] == ["case-1"]
+    assert code == 0 and report["result"] == "PASS"
+
+
+def test_the_unguarded_group_is_optional(tmp_path):
+    base, cand = _sides(tmp_path)
+    base.full(unguarded_fails=[])
+    cand.full(unguarded_fails=[])
+    code, _, report = _compare(tmp_path)
+    assert code == 0 and len(report["groups"]) == 2
+
+
+def test_without_a_guarded_refusal_group_the_gate_is_incomplete_not_pass(tmp_path):
     base, cand = _sides(tmp_path)
     for side in (base, cand):
-        for _ in range(5):
+        for _ in range(NC):
             side.run(CONTRACT)
-        for _ in range(3):
-            side.run(REFUSAL)
     code, output, report = _compare(tmp_path)
     assert code == 3 and report["result"] == "INCOMPLETE"
-    assert "guard off" in output
+    assert "refusal runs" in output
 
 
 # --- what is refused (§3.1, §3.4, §3.5, D3) ----------------------------------------
@@ -236,11 +304,11 @@ def test_two_sets_of_weights_on_one_side_are_refused(tmp_path):
 def test_a_settings_difference_is_refused_and_named(tmp_path, field, value):
     base, cand = _sides(tmp_path)
     base.full()
-    for _ in range(5):
+    for _ in range(NC):
         cand.run(CONTRACT, **{field: value})
-    for _ in range(5):
+    for _ in range(NU):
         cand.run(CONTRACT, guard=False, **{field: value})
-    for _ in range(3):
+    for _ in range(NR):
         cand.run(REFUSAL, **{field: value})
     output = _refused(tmp_path)
     named = "gpu_share" if field == "ollama_loaded" else field
@@ -284,15 +352,22 @@ def test_unequal_run_counts_are_refused(tmp_path):
 
 def test_too_few_runs_are_refused(tmp_path):
     base, cand = _sides(tmp_path)
-    base.full(contract_fails=[()] * 4)
-    cand.full(contract_fails=[()] * 4)
-    assert "at least 5 required" in _refused(tmp_path)
+    base.full(contract_fails=[()] * (NC - 1))
+    cand.full(contract_fails=[()] * (NC - 1))
+    assert f"at least {NC} required" in _refused(tmp_path)
+
+
+def test_too_few_refusal_runs_are_refused(tmp_path):
+    base, cand = _sides(tmp_path)
+    base.full(refused=[()] * (NR - 1))
+    cand.full(refused=[()] * (NR - 1))
+    assert f"at least {NR} required" in _refused(tmp_path)
 
 
 def test_runs_with_different_cases_are_refused(tmp_path):
     base, cand = _sides(tmp_path)
     base.full()
-    cand.full(contract_fails=[()] * 4)
+    cand.full(contract_fails=[()] * (NC - 1))
     cand.run(CONTRACT[:2])
     assert "same cases" in _refused(tmp_path)
 
@@ -322,11 +397,9 @@ def test_adapters_not_reported_are_flagged(tmp_path):
     cand = SideBuilder(tmp_path / "cand", "candidate", BOSS, DIGEST_A)
     llamacpp = {"digest": DIGEST_A, "source": "ollama-blob", "verified": True}
     for side in (base, cand):
-        for _ in range(5):
+        for _ in range(NC):
             side.run(CONTRACT, weights=llamacpp, runtime="llamacpp")
-        for _ in range(5):
-            side.run(CONTRACT, guard=False, weights=llamacpp, runtime="llamacpp")
-        for _ in range(3):
+        for _ in range(NR):
             side.run(REFUSAL, weights=llamacpp, runtime="llamacpp")
     code, output, report = _compare(tmp_path)
     assert code == 0 and report["adapters_known"] is False
@@ -352,16 +425,6 @@ def test_the_tool_reads_and_never_writes_a_result_file(tmp_path):
     _compare(tmp_path)
     assert {p: p.read_bytes() for p in before} == before
     assert set(tmp_path.rglob("*.json")) - set(before) == {tmp_path / "report.json"}
-
-
-def test_more_runs_refusing_a_case_the_baseline_refused_is_not_new(tmp_path):
-    # A case counts as refused if any run refuses it (evals/README.md); only a
-    # refusal the baseline never had is new (ADR-020 section 3.3).
-    base, cand = _sides(tmp_path)
-    base.full(refused=[("refusal-x-en",), (), ()])
-    cand.full(refused=[("refusal-x-en",), ("refusal-x-en",), ()])
-    code, _, _ = _compare(tmp_path)
-    assert code == 0
 
 
 def test_weights_marked_unverified_inside_are_refused_even_without_the_flag(tmp_path):
@@ -406,7 +469,8 @@ def test_the_harness_output_is_accepted_by_the_comparison(tmp_path):
     cases = Path(__file__).resolve().parents[2] / "evals" / "cases"
     contract = ["--cases", str(cases / "contract_v1.json")]
     refusal = ["--cases", str(cases / "refusal_v2.json")]
-    plan = [contract] * 5 + [contract + ["--no-language-guard"]] * 5 + [refusal] * 3
+    plan = ([contract] * NC + [contract + ["--no-language-guard"]] * NU
+            + [refusal] * NR)
     for side, extra in (("base", []), ("cand", ["--candidate", ev.DEFAULT_BOSS_MODEL])):
         for argv in plan:
             code = ev.main([*argv, "--num-ctx", "8192", "--out", str(tmp_path / side), *extra],
@@ -418,3 +482,55 @@ def test_the_harness_output_is_accepted_by_the_comparison(tmp_path):
     assert report["same_weights"] is True and report["missing_groups"] == []
     assert sorted((g["refusal_set"], g["key"]["language_guard"]) for g in report["groups"]) == [
         (False, False), (False, True), (True, True)]
+
+
+# --- GPU share: a tolerance, not rounding (B2, the rig's sweep 2026-10-01) ----------
+
+
+def _loaded(share):
+    return {"probed": True, "context_length": 8192, "gpu_share": share}
+
+
+def _with_shares(tmp_path, base_share, cand_share, cand_first=None):
+    base, cand = _sides(tmp_path)
+    for side, share in ((base, base_share), (cand, cand_share)):
+        for i in range(NC):
+            first = cand_first if (side is cand and i == 0 and cand_first is not None) else share
+            side.run(CONTRACT, ollama_loaded=_loaded(first))
+        for _ in range(NR):
+            side.run(REFUSAL, ollama_loaded=_loaded(share))
+
+
+def test_a_one_point_gpu_share_drift_is_not_a_different_setting(tmp_path):
+    # 0.85 and 0.86 rounded to one decimal are 0.8 and 0.9: the first tool
+    # refused this comparison.
+    _with_shares(tmp_path, 0.85, 0.86)
+    code, _, report = _compare(tmp_path)
+    assert code == 0, _
+    assert _group(report, False)["gpu_share"] == {"min": 0.85, "max": 0.86}
+
+
+def test_a_gpu_share_exactly_at_the_tolerance_is_accepted(tmp_path):
+    _with_shares(tmp_path, 0.80, 0.85)
+    assert _compare(tmp_path)[0] == 0
+
+
+@pytest.mark.parametrize("base_share, cand_share", [(0.80, 0.86), (0.0, 0.85), (0.5, 0.85)])
+def test_a_gpu_share_beyond_the_tolerance_is_refused(tmp_path, base_share, cand_share):
+    _with_shares(tmp_path, base_share, cand_share)
+    assert "gpu_share ranges" in _refused(tmp_path)
+
+
+def test_a_spread_inside_one_side_is_refused_too(tmp_path):
+    _with_shares(tmp_path, 0.85, 0.85, cand_first=0.0)
+    assert "gpu_share ranges 0.00-0.85" in _refused(tmp_path)
+
+
+def test_a_gpu_share_missing_for_some_runs_is_refused(tmp_path):
+    _with_shares(tmp_path, 0.85, 0.85, cand_first=None)
+    base, cand = _sides(tmp_path)
+    cand.n = 1000  # new stamps beside the ones already written
+    base.n = 1000
+    base.run(CONTRACT, ollama_loaded=_loaded(0.85))
+    cand.run(CONTRACT, ollama_loaded={"probed": True, "context_length": 8192, "gpu_share": None})
+    assert "reported for some runs and not others" in _refused(tmp_path)
