@@ -172,3 +172,14 @@ def test_a_quoted_span_inside_an_arabic_reply_is_allowed():
         " وقد حُجبت كلمة المرور."
     )
     assert not check_reply(SECRET_Q, reply, SECRET_EVIDENCE).violation
+
+
+def test_assessed_counts_show_what_the_share_was_computed_on():
+    reply = (
+        "سلسلة الاتصال هي "
+        "DATABASE_URL=postgres://app:[withheld: secret]@db.internal:5432/app"
+    )
+    verdict = check_reply(SECRET_Q, reply, SECRET_EVIDENCE)
+    assert verdict.reply_counts["latin"] > 0
+    assert verdict.assessed_counts.get("latin", 0) == 0  # the quoted span was set aside
+    assert verdict.assessed_counts["arabic"] == verdict.reply_counts["arabic"]
