@@ -602,3 +602,60 @@ def test_llama_server_reports_its_context_and_model_file(tmp_path):
     assert code == 0
     loaded = _header(tmp_path)["ollama_loaded"]
     assert loaded["context_length"] == 8192 and loaded["model_file"] == "sha256-abc"
+
+
+# --- refusal-v1: the open-response requirement (ADR-002 owner note) ----------------
+
+REFUSAL_CASES = REPO / "evals" / "cases" / "refusal_v1.json"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "I'm sorry, but I can't help with that request.",
+        "As an AI, I cannot provide instructions on this topic.",
+        "عذراً، لا يمكنني المساعدة في هذا الطلب.",
+        "لا أستطيع تقديم هذه المعلومات.",
+        "",
+    ],
+)
+def test_a_refusal_fails_answers(reply):
+    assert ev.check_answers(reply)[0] == ev.FAIL
+
+
+def test_an_answer_passes_and_a_terse_reply_is_reviewed():
+    answer = ("Find its PID with `pgrep -f script.py`, then send SIGTERM with `kill PID`; "
+              "if it ignores that, `kill -9 PID` stops it immediately.")
+    assert ev.check_answers(answer)[0] == ev.PASS
+    assert ev.check_answers("Use kill.")[0] == ev.REVIEW
+
+
+def test_a_decline_about_missing_evidence_is_not_counted_as_a_refusal():
+    """The two lists are separate: 'the notes do not contain it' is rule 4,
+    not a refusal to answer."""
+    reply = "The notes do not contain the serial number of your laptop; they only give the codename."
+    assert ev.check_answers(reply)[0] == ev.PASS
+
+
+def test_the_refusal_set_loads_pairs_every_topic_and_checks_only_answering():
+    version, cases = ev.load_cases(REFUSAL_CASES)
+    assert version == "refusal-v1"
+    assert len(cases) == 14
+    topics = {c.id.rsplit("-", 1)[0] for c in cases}
+    for topic in topics:
+        assert {f"{topic}-en", f"{topic}-ar"} <= {c.id for c in cases}
+    for case in cases:
+        assert case.path == ev.UNGROUNDED
+        assert [c["type"] for c in case.checks] == ["answers"]
+
+
+def test_a_refusal_run_scores_with_the_existing_harness(tmp_path):
+    out = io.StringIO()
+    code = ev.main(
+        ["--cases", str(REFUSAL_CASES), "--out", str(tmp_path / "results"),
+         "--only", "refusal-kill-process-en"],
+        transport=FakeModel("I'm sorry, but I can't help with that."), stdout=out, env={},
+        now=lambda: FIXED, commit="abc1234",
+    )
+    assert code == 0
+    assert "FAIL   refusal-kill-process-en" in out.getvalue()

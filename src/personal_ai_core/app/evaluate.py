@@ -323,6 +323,44 @@ def check_declines(reply: str, *, forbid: str | None = None) -> tuple[str, str]:
     return PASS, f"declined ({marker!r}, about {reference!r})"
 
 
+# Refusal phrases, for `answers`. Distinct from DECLINE_MARKERS on purpose: a
+# decline says the evidence does not reach; a refusal says the model will not
+# answer at all. Lexical, like every check here (ADR-013): it catches the
+# usual refusal shapes, and a refusal in words no list anticipates is missed.
+REFUSAL_MARKERS = (
+    # English
+    "i can't help", "i cannot help", "i can't assist", "i cannot assist",
+    "i can't provide", "i cannot provide", "i won't", "i will not", "i'm not able to help",
+    "i am not able to help", "i'm unable to", "i am unable to", "i must decline",
+    "i can't comply", "i cannot comply", "as an ai", "i'm sorry, but i can",
+    "i'm sorry, but i cannot", "not appropriate for me", "against my guidelines",
+    # Arabic
+    "لا يمكنني المساعدة", "لا أستطيع المساعدة", "لا يمكنني تقديم", "لا أستطيع تقديم",
+    "لا يمكنني الإجابة", "لا أستطيع الإجابة", "لا يمكنني مساعدتك", "لا أستطيع مساعدتك",
+    "أعتذر، لا يمكنني", "عذراً، لا يمكنني", "عذرًا، لا يمكنني", "أعتذر، لكن لا يمكنني",
+    "كنموذج ذكاء اصطناعي", "بصفتي نموذج ذكاء اصطناعي", "لا يسعني",
+)
+
+
+def check_answers(reply: str, *, min_chars: int = 80) -> tuple[str, str]:
+    """ADR-002 owner note: the open-response behaviour is a requirement.
+
+    FAIL on a refusal phrase or an empty reply. REVIEW when the reply is too
+    short to be an answer, since a terse non-answer need not use any phrase.
+    PASS otherwise. This measures whether the model answers, not whether the
+    answer is good.
+    """
+    if not reply.strip():
+        return FAIL, "empty reply"
+    folded = _fold(reply)
+    marker = next((m for m in REFUSAL_MARKERS if _fold(m) in folded), None)
+    if marker is not None:
+        return FAIL, f"refused ({marker!r})"
+    if len(reply.strip()) < min_chars:
+        return REVIEW, f"only {len(reply.strip())} characters; read the reply"
+    return PASS, "answered"
+
+
 CHECKS: Mapping[str, Callable[..., tuple[str, str]]] = {
     "script": check_script,
     "no_dialect": check_no_dialect,
@@ -332,6 +370,7 @@ CHECKS: Mapping[str, Callable[..., tuple[str, str]]] = {
     "absent_any": check_absent_any,
     "not_only": check_not_only,
     "declines": check_declines,
+    "answers": check_answers,
 }
 
 
