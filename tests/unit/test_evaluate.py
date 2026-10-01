@@ -414,3 +414,76 @@ def test_the_chunk_boundary_case_really_straddles_a_chunk_boundary():
     assert [head in c.text for c in chunks] == [True] + [False] * (len(chunks) - 1)
     # the tail sits in a later chunk with no key in front of it: the D6 limit
     assert tail not in chunks[0].text and any(tail in c.text for c in chunks[1:])
+
+
+# --- the loaded context is what the server says, not what was typed --------------
+
+
+def _ps(context_length, size=5_500_000_000, size_vram=0, name=None):
+    model = name or ev.DEFAULT_BOSS_MODEL
+
+    def probe(url):
+        assert url.endswith("/api/ps")
+        return {"models": [{"name": model, "model": model, "size": size,
+                            "size_vram": size_vram, "context_length": context_length}]}
+
+    return probe
+
+
+def _header(tmp_path):
+    raw = json.loads((tmp_path / "results" / "raw-20260930T120000Z.json").read_text("utf-8"))
+    return raw["header"]
+
+
+def _run_probed(tmp_path, probe, *argv):
+    out = io.StringIO()
+    code = ev.main(
+        ["--cases", str(CASES), "--out", str(tmp_path / "results"), "--only", "lang-en-1",
+         *argv],
+        transport=FakeModel("A thread shares memory."), stdout=out, env={},
+        now=lambda: FIXED, commit="abc1234", probe=probe,
+    )
+    return code, out.getvalue()
+
+
+def test_a_matching_loaded_context_is_recorded_and_the_run_succeeds(tmp_path):
+    code, output = _run_probed(tmp_path, _ps(8192), "--num-ctx", "8192")
+    assert code == 0
+    header = _header(tmp_path)
+    assert header["ollama_loaded"] == {"probed": True, "context_length": 8192, "gpu_share": 0.0}
+    assert header["context_mismatch"] is False
+    assert "loaded: context 8192, 0% GPU" in output
+
+
+def test_a_run_whose_server_disagrees_with_num_ctx_is_marked_and_fails(tmp_path):
+    """2026-10-01: a run went through the desktop app at 4096 while the shell
+    said 8192. The files are still written -- they are evidence -- but marked,
+    and the exit code is not 0."""
+    code, output = _run_probed(tmp_path, _ps(4096), "--num-ctx", "8192")
+    assert code == 3
+    assert _header(tmp_path)["context_mismatch"] is True
+    assert "WARNING" in output and "4096" in output and "8192" in output
+
+
+def test_a_probe_that_cannot_answer_never_fails_the_run(tmp_path):
+    def broken(url):
+        raise OSError("connection refused")
+
+    code, output = _run_probed(tmp_path, broken, "--num-ctx", "8192")
+    assert code == 0
+    assert _header(tmp_path)["ollama_loaded"] == {"probed": False, "reason": "OSError"}
+    assert _header(tmp_path)["context_mismatch"] is False
+    assert "loaded: not confirmed (OSError)" in output
+
+
+def test_another_model_loaded_is_not_taken_for_the_boss_model(tmp_path):
+    code, _ = _run_probed(tmp_path, _ps(4096, name="llama3:8b"), "--num-ctx", "8192")
+    assert code == 0
+    assert _header(tmp_path)["ollama_loaded"]["context_length"] is None
+
+
+def test_a_test_transport_does_not_reach_a_real_server(tmp_path):
+    """No probe given and a fake transport: nothing is fetched."""
+    code, _ = _run(tmp_path, FakeModel("A thread shares memory."), "--only", "lang-en-1")
+    assert code == 0
+    assert _header(tmp_path)["ollama_loaded"]["probed"] is False

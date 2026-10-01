@@ -44,6 +44,7 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence, TextIO
@@ -432,6 +433,44 @@ def _machine() -> dict[str, str]:
     }
 
 
+# A probe takes a URL and returns the decoded JSON of a GET to it.
+Probe = Callable[[str], Mapping[str, Any]]
+
+
+def _http_probe(url: str) -> Mapping[str, Any]:
+    with urllib.request.urlopen(url, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _loaded(probe: Probe | None, host: str, model: str) -> dict[str, Any]:
+    """What Ollama actually has loaded for the Boss model, from `/api/ps`.
+
+    `--num-ctx` is what the owner typed. On 2026-10-01 a run went through the
+    Ollama desktop app at 4096 while the shell said 8192, and nothing in the
+    result could tell. This records what the server reports instead, and
+    never fails the run: a probe that cannot answer says so in the header.
+    """
+    if probe is None:
+        return {"probed": False, "reason": "no probe (test transport)"}
+    try:
+        data = probe(f"{host.rstrip('/')}/api/ps")
+    except Exception as exc:  # noqa: BLE001 -- recorded, never fatal
+        return {"probed": False, "reason": type(exc).__name__}
+    for entry in data.get("models", []) or []:
+        if model in (entry.get("name"), entry.get("model")):
+            size, vram = entry.get("size"), entry.get("size_vram")
+            return {
+                "probed": True,
+                "context_length": entry.get("context_length"),
+                "gpu_share": (
+                    round(vram / size, 2)
+                    if isinstance(size, int) and isinstance(vram, int) and size
+                    else None
+                ),
+            }
+    return {"probed": True, "context_length": None, "reason": "model not loaded"}
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m personal_ai_core.app.evaluate",
@@ -473,6 +512,7 @@ def main(
     env: dict[str, str] | None = None,
     now: Callable[[], datetime] | None = None,
     commit: str | None = None,
+    probe: Probe | None = None,
 ) -> int:
     args = _parser().parse_args(argv)
     out = stdout if stdout is not None else sys.stdout
@@ -534,6 +574,20 @@ def main(
             print(f"running {case.id} ...", file=out)
             records.append(run_case(case, settings, transport, Path(tmp), policy))
 
+    # Asked after the cases, while the model is still loaded. A real run
+    # (no injected transport) probes the real server unless told otherwise.
+    loaded = _loaded(
+        probe if probe is not None else (_http_probe if transport is None else None),
+        settings.ollama_host,
+        settings.boss_model,
+    )
+    header["ollama_loaded"] = loaded
+    measured = loaded.get("context_length")
+    mismatch = (
+        args.num_ctx is not None and isinstance(measured, int) and measured != args.num_ctx
+    )
+    header["context_mismatch"] = mismatch
+
     args.out.mkdir(parents=True, exist_ok=True)
     name = stamp.strftime("%Y%m%dT%H%M%SZ")
     raw_path = args.out / f"raw-{name}.json"
@@ -563,9 +617,28 @@ def main(
         file=out,
     )
     print(f"variant: {args.identity_variant}", file=out)
+    print(f"loaded: {_describe(loaded)}", file=out)
     print(f"raw:    {raw_path}", file=out)
     print(f"scored: {scored_path}", file=out)
+    if mismatch:
+        print(
+            f"WARNING: --num-ctx says {args.num_ctx} but Ollama has the model loaded "
+            f"at {measured}. The files are written and marked context_mismatch; "
+            f"do not report this run as a {args.num_ctx} run.",
+            file=out,
+        )
+        return 3
     return 0
+
+
+def _describe(loaded: Mapping[str, Any]) -> str:
+    if not loaded.get("probed"):
+        return f"not confirmed ({loaded.get('reason')})"
+    if loaded.get("context_length") is None:
+        return f"not confirmed ({loaded.get('reason', 'no context_length reported')})"
+    share = loaded.get("gpu_share")
+    where = "" if share is None else f", {int(share * 100)}% GPU"
+    return f"context {loaded['context_length']}{where}"
 
 
 def rescore(raw_path: Path, cases_path: Path, out: TextIO) -> int:
