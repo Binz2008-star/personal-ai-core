@@ -4,7 +4,7 @@ PROJECT STATE
 CURRENT ACCEPTED STATE (REMOTE)
 -------------------------------
 Accepted phase: Phase 6 (ACCEPTED / MERGED — implementation 7803d2e via PR #72 / merge 1c5042d, wiring via PR #73 / merge 5a5a4fb)
-Main branch head (last reconciled): dff472c8349e548f184ba2e0ca57fa9ff71e2d32 (short: dff472c — Merge pull request #100)
+Main branch head (last reconciled): 8527b7d0759553d359567318671c240c654e0d8a (short: 8527b7d — Merge pull request #134)
   Phase 6 is the accepted phase. Everything between Phase 4 and it -- PRs
   #3-#59 and #64-#67 -- was correction, hardening and design work on top of
   Phase 4, not a new phase: see POST-PHASE-4 MERGES. A few of those exceptions
@@ -54,16 +54,56 @@ Test verification (remote):
    green: 1094 passed / 48 skipped (14 baseline + 34 accounted server legs).
    ruff 0 errors; pyright 0 errors
 - ruff: 0 errors  |  pyright: 0 errors
-- At dff472c (merge of #100): CI run #236 green on static, suite and
-  suite-windows. CI is the authority for the current count; a figure
-  written here goes stale with the next merge.
+- At 8527b7d (merge of #134): CI green on static, suite and suite-windows;
+  locally 1636 passed / 79 skipped. CI is the authority for the current
+  count; a figure written here goes stale with the next merge.
 
-Synchronization: origin/main was last reconciled at dff472c (merge of #100);
+Synchronization: origin/main was last reconciled at 8527b7d (merge of #134);
   merges after Phase 6 are recorded row by row in POST-PHASE-4 MERGES.
   Phase history: Phase 4 merged in PR #2, the
   post-Phase-4 record in PRs #3-#59 and #64-#67, Phase 5 via PR #69, ADR-016
   via PR #71, the Phase 6 backend via PR #72, and the Phase 6 wiring via
   PR #73; Phase 6 ACCEPTED 2026-09-25.
+
+SINCE dff472c (2026-10-01), LIVE IN pac
+-----------------------------------------
+- ADR-018 secret redaction: v1 (#107, #108) and amendment 1, prose secrets (#114).
+- ADR-012 amendment 1: the language rule names no language, variant B (#111).
+- Grounding note does not set the reply language (#112).
+- Boss-model sampling from the model card, sent on every turn (#120).
+- ADR-019 reply-language guard, on by default (#122, #123, #126, #130, #132).
+- Agent tool find_files (#129).
+- ADR-002 owner note: the open-response behaviour is intended and is a
+  requirement for any model change (#127).
+
+Evaluation (ADR-013 harness; the harness is PROPOSED, it has been run many
+times):
+- contract_v1, 22 cases. Best runs: 22/22 with the guard (Ollama, af574a2)
+  and 22/22 on llama.cpp with the no-foreign-script grammar (5ac65b2), each a
+  single run. Results are in evals/results/.
+- refusal_v1, 14 cases: baseline at c8738e9, two runs, 0 refusals in 28
+  replies (#133). The check was hardened afterwards (#134); the baseline can
+  be rescored. A model change must not refuse more (ADR-002 owner note).
+
+OPEN REVIEW FINDINGS (independent review, 2026-10-01; verified at 297f001)
+--------------------------------------------------------------------------
+Fixed: #130, #131, #132, #134. Open, each an owner decision, nothing done:
+- A candidate model cannot be evaluated under its own name: the harness
+  refuses another PAC_BOSS_MODEL, and llama.cpp turns are recorded with
+  provider "ollama". Must be settled before any fine-tune run.
+- `pac --remember` appends to profile.md outside the promotion lifecycle.
+  The profile is owner-authored identity text, not a MemoryRecord; whether
+  that is the intended boundary is unrecorded.
+- ExperiencePipeline has no production caller: memory promotion does not
+  run. Its gate's conflict check compares a 12-character prefix, which
+  misses real contradictions ("I prefer tea" / "I prefer coffee").
+- MemoryReader wraps a write-capable repository on grounded paths; the
+  sole-writer test matches a naming pattern, not every writer.
+- MemoryScope.USER, MemoryStatus.SUPERSEDED and ModelRole.AUXILIARY have no
+  production producer.
+- A full local suite on the rig (Python 3.14, Windows), run while another
+  session ran pytest, ended with 330 errors; CI on 3.12 is green. Rerun
+  alone before reading anything into it.
 
 PHASE STATUS SUMMARY
 --------------------
@@ -528,6 +568,11 @@ claim written in one place with nothing that notices it going stale.
   #129 297f001  feat(agent): find_files -- find files by name in every subdirectory
   #130 940c421  fix(conversation): align the language guard with ADR-019's contract
   #131 d4eef16  docs: correct three statements the 297f001 review found inaccurate
+  #132 35ad886  fix(conversation): record the guard's trigger when the retry fails;
+               record assessed counts
+  #133 fded060  eval: refusal_v1 baseline at c8738e9, unchanged Boss model, two runs
+  #134 8527b7d  fix(eval): close the refusal check's blind spots before a baseline
+               exists
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
