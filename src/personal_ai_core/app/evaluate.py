@@ -567,6 +567,16 @@ def _parser() -> argparse.ArgumentParser:
         help="experiment: GBNF grammar for llama-server (with --runtime llamacpp)",
     )
     parser.add_argument(
+        "--candidate",
+        default=None,
+        metavar="MODEL",
+        help=(
+            "evaluate this model as a candidate under its own name (ADR-020); the "
+            "result is marked role: candidate. pac is not changed. The Boss model "
+            "may be named, for a self-comparison"
+        ),
+    )
+    parser.add_argument(
         "--no-language-guard",
         action="store_true",
         help="experiment: run with ADR-019's reply-language guard off",
@@ -607,10 +617,22 @@ def main(
     if settings.boss_model != DEFAULT_BOSS_MODEL:
         print(
             f"refusing to run: PAC_BOSS_MODEL is {settings.boss_model!r}, "
-            f"not the Boss model {DEFAULT_BOSS_MODEL!r}",
+            f"not the Boss model {DEFAULT_BOSS_MODEL!r}"
+            + ("" if args.candidate else "; a candidate is named with --candidate"),
             file=out,
         )
         return 2
+    # ADR-020 section 3.6: a candidate is evaluated under its own name, and the
+    # result says so. Only this run's settings change: nothing here alters what
+    # pac runs, and adopting a candidate is a separate owner decision.
+    role = "boss"
+    if args.candidate is not None:
+        candidate = args.candidate.strip()
+        if not candidate:
+            print("refusing to run: --candidate needs a model name", file=out)
+            return 2
+        settings = dataclasses.replace(settings, boss_model=candidate)
+        role = "candidate"
     # No profile: the owner's profile.md would make every result depend on
     # what it says today. The contract is what is under test.
     settings = dataclasses.replace(settings, profile="")
@@ -649,6 +671,7 @@ def main(
         "cases_version": version,
         "commit": commit if commit is not None else _git_commit(),
         "model": settings.boss_model,
+        "role": role,
         "core_assumed_context_window": settings.boss_context_window,
         "num_ctx_sent_by_core": False,
         "num_ctx_measured_by_owner": args.num_ctx,
@@ -738,6 +761,7 @@ def main(
         f"ERROR {summary['ERROR']}",
         file=out,
     )
+    print(f"model: {settings.boss_model}  role: {role}", file=out)
     print(
         f"variant: {args.identity_variant}  sampling: {args.sampling}  "
         f"runtime: {args.runtime}  grammar: {args.grammar}",

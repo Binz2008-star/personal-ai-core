@@ -173,6 +173,26 @@ The check is lexical, and its limits are stated rather than solved:
 
 A raw file scored before a change to these checks can be rescored with `--rescore`.
 
+## Evaluating a candidate model (ADR-020)
+
+A run against any model but the Boss model is refused, so a mistyped `PAC_BOSS_MODEL`
+cannot produce a result filed under the Boss model. A candidate is named explicitly:
+
+```bat
+python -m personal_ai_core.app.evaluate --num-ctx 8192 --candidate owner/boss-lora:7b
+```
+
+- The run sends the candidate's name, and the header records it as `model` with
+  `role: candidate`. An ordinary run records `role: boss`.
+- `weights` records the candidate's digest, as for any run.
+- Nothing `pac` runs changes. Adopting a candidate is a separate owner decision, made on a
+  passed gate (ADR-020 §3.6, D4).
+- The Boss model may be named as its own candidate: that is the self-comparison ADR-020 §5
+  runs before any real candidate.
+
+Runs for a comparison use the same cases files, scorer, sampling, variant, guard setting,
+`num_ctx`, runtime and hardware on both sides (ADR-020 §3.4, §3.5).
+
 ## Verdicts
 
 | Verdict | Meaning |
