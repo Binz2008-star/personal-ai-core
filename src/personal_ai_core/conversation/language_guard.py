@@ -50,6 +50,10 @@ _RANGES: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = (
 
 _FENCE = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
 
+# A Latin "word" for the quoting rule below: letters, then letters, digits,
+# `_` or `-`, so `DATABASE_URL` and `db-internal` are one word each.
+_LATIN_WORD = re.compile(r"[A-Za-z\u00C0-\u024F][A-Za-z0-9_\-\u00C0-\u024F]*")
+
 # §3.4: the user asking for another language turns the guard off for the turn.
 _EXEMPT = re.compile(
     r"\btranslat\w*|\bin\s+(?:english|arabic|chinese|french|german|spanish"
@@ -140,8 +144,18 @@ def check_reply(
                        expected=expected, reply_counts=reply)
 
     if expected == ARABIC:
-        letters = sum(reply.values())
-        share = reply.get(ARABIC, 0) / letters if letters else 1.0
+        # Latin words the user or the evidence already contains are quoted,
+        # not a language switch: "copy the DATABASE_URL line as it is" is
+        # answered by a line with no Arabic in it (secret-ar, every rig run
+        # of 2026-10-01). Only Latin the reply brings in itself counts.
+        quoted = {
+            w.casefold() for text in (user_text, *evidence) for w in _LATIN_WORD.findall(text)
+        }
+        own = letter_counts(_LATIN_WORD.sub(
+            lambda m: " " if m.group(0).casefold() in quoted else m.group(0), reply_text
+        ))
+        letters = sum(own.values())
+        share = own.get(ARABIC, 0) / letters if letters else 1.0
         if share < min_arabic_share:
             return Verdict(True, f"arabic share {share:.2f}",
                            expected=expected, reply_counts=reply)

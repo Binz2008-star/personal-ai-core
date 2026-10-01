@@ -516,6 +516,10 @@ claim written in one place with nothing that notices it going stale.
                reply-language check
   #123 af574a2  feat(conversation): ADR-019 unit 2 -- generate again once when the
                reply leaves the user's language
+  #124 5ac65b2  feat(eval): llama.cpp runtime with a grammar that forbids foreign
+               scripts
+  #125 74d98bf  eval: contract_v1 with the reply-language guard and on llama.cpp
+               without and with the grammar
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
