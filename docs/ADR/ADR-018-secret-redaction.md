@@ -41,7 +41,10 @@ A model that never receives the secret cannot disclose it. That is the whole des
 - **Redacting at ingestion or in storage.** It would change what is persisted and
   indexed, which is a persistence change (hard invariant 6), and it is irreversible: a
   false positive would destroy the user's own text. Stored documents stay as they are.
-- **A different model.** The Boss model is an invariant (ADR-002).
+- **A different model.** ADR-002 lets the Boss model be replaced through an evaluation
+  gate, but that is a separate decision, and no model is a guarantee against
+  disclosing a secret it was shown. *(Corrected 2026-10-01: this line first called the
+  model "an invariant", which ADR-002 does not say.)*
 
 ## 3. Proposed design
 
