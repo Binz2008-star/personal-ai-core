@@ -159,12 +159,15 @@ design background, not current architecture.
   committed: two runs at `c8738e9`, no refusals, one case scored REVIEW in one run.
   `evals/README.md` asks for at least three runs.
 - **[CURRENT]** The harness refuses to run under any model name but the Boss model's.
-- **[CURRENT]** A result records a model name, not the weights that produced it.
+- **[CURRENT]** An evaluation run records the weights' digest (`weights`, or
+  `weights_unverified` when no digest can be confirmed) and the adapter that served it
+  (`provider`, read from the turns' `GENERATION_REQUESTED`). Both runtimes name the same
+  weights by the same digest: the Ollama blob the modelfile's `FROM` names (with any
+  `ADAPTER` blobs), or the GGUF file's SHA-256, computed every run (ADR-020 §3.1, §3.2,
+  unit 1). A `pac` turn records the provider, not the digest.
 - **[TARGET]** Each reply and each evaluation run names the weights and the runtime that
   produced it.
 - **[TARGET]** A change to the instrument is never approved by the result it produces.
-- **[TARGET]** Weights are identified by digest. The provider is recorded from the adapter
-  that served the turn, not as a constant (ADR-020 §3.1, §3.2).
 - **[TARGET]** A candidate is evaluated under its own name and digest, without changing
   what `pac` runs. It is judged per case over several runs, against a baseline taken with
   the same cases version, scorer version and settings (ADR-020 §3.3 to §3.6).

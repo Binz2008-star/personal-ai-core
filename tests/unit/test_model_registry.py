@@ -7,7 +7,7 @@ from personal_ai_core.runtime.model_registry import ModelRegistry, ModelRole, Mo
 
 
 def test_registry_from_settings_registers_the_boss_model():
-    registry = ModelRegistry.from_settings(Settings.from_env({}))
+    registry = ModelRegistry.from_settings(Settings.from_env({}), provider="ollama")
     boss = registry.boss()
     assert boss.name == "huihui_ai/qwen2.5-abliterate:7b"
     assert boss.role is ModelRole.BOSS
@@ -16,20 +16,20 @@ def test_registry_from_settings_registers_the_boss_model():
 
 
 def test_active_model_is_the_boss_by_default():
-    registry = ModelRegistry.from_settings(Settings.from_env({}))
+    registry = ModelRegistry.from_settings(Settings.from_env({}), provider="ollama")
     assert registry.active.id == registry.boss().id
 
 
 def test_model_is_replaceable_without_code_change():
     # The whole point of ADR-002: swapping the model is registry configuration.
     registry = ModelRegistry.from_settings(
-        Settings.from_env({"PAC_BOSS_MODEL": "some-other-model:8b"})
+        Settings.from_env({"PAC_BOSS_MODEL": "some-other-model:8b"}), provider="ollama"
     )
     assert registry.active.name == "some-other-model:8b"
 
 
 def test_registering_a_second_model_and_switching():
-    registry = ModelRegistry.from_settings(Settings.from_env({}))
+    registry = ModelRegistry.from_settings(Settings.from_env({}), provider="ollama")
     registry.register(
         ModelSpec(id="model-002", provider="ollama", name="aux:3b", context_window=4096)
     )
@@ -40,7 +40,7 @@ def test_registering_a_second_model_and_switching():
 
 
 def test_duplicate_registration_is_rejected():
-    registry = ModelRegistry.from_settings(Settings.from_env({}))
+    registry = ModelRegistry.from_settings(Settings.from_env({}), provider="ollama")
     with pytest.raises(ConfigError):
         registry.register(
             ModelSpec(id="model-001", provider="ollama", name="dup", context_window=1)
@@ -55,3 +55,9 @@ def test_unknown_model_raises():
         registry.set_active("nope")
     with pytest.raises(ConfigError):
         registry.active
+
+
+def test_the_provider_label_is_the_serving_adapter_not_a_constant():
+    # ADR-020 section 3.2: a llama.cpp run was filed as an Ollama run.
+    registry = ModelRegistry.from_settings(Settings.from_env({}), provider="llamacpp")
+    assert registry.boss().provider == "llamacpp"

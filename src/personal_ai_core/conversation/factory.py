@@ -139,7 +139,7 @@ def describe_loaded(
     ollama_host: str,
     llamacpp_host: str,
     model: str,
-    probe: Callable[[str], Mapping[str, Any]] | None = None,
+    probe: Callable[..., Mapping[str, Any]] | None = None,
     live: bool = True,
 ) -> dict[str, Any]:
     """What the model server reports it has loaded, for the evaluation header.
@@ -181,12 +181,12 @@ def build_in_memory_service(
     a live Ollama server.
     """
     settings = settings or Settings.from_env()
-    registry = ModelRegistry.from_settings(settings)
     provider = provider or OllamaProvider(
         settings.ollama_host,
         timeout_seconds=settings.request_timeout_seconds,
         transport=transport,
     )
+    registry = ModelRegistry.from_settings(settings, provider=provider.name)
     events = InMemoryEventRepository()
     # The identity share is funded from the composed text, measured by the
     # same estimator the rest of the budget uses. ADR-005: a budget is derived
@@ -436,12 +436,12 @@ def build_persistent_service(
     user scope is explicit on the query.
     """
     settings = settings or Settings.from_env()
-    registry = ModelRegistry.from_settings(settings)
     provider = OllamaProvider(
         settings.ollama_host,
         timeout_seconds=settings.request_timeout_seconds,
         transport=transport,
     )
+    registry = ModelRegistry.from_settings(settings, provider=provider.name)
     connection = connect(database)
     events = SqliteEventRepository(connection)
     sessions = SqliteSessionRepository(connection)
@@ -549,12 +549,12 @@ def build_server_service(
     corpus is not, just as on the file store.
     """
     settings = settings or Settings.from_env()
-    registry = ModelRegistry.from_settings(settings)
     provider = OllamaProvider(
         settings.ollama_host,
         timeout_seconds=settings.request_timeout_seconds,
         transport=transport,
     )
+    registry = ModelRegistry.from_settings(settings, provider=provider.name)
     connection = server_connect(database_url, intent=intent, identity=identity)
     events = PostgresEventRepository(connection)
     sessions = PostgresSessionRepository(connection)
@@ -640,12 +640,12 @@ def build_grounded_in_memory_service(
     the retrieval half is and is not.
     """
     settings = settings or Settings.from_env()
-    registry = ModelRegistry.from_settings(settings)
     provider = provider or OllamaProvider(
         settings.ollama_host,
         timeout_seconds=settings.request_timeout_seconds,
         transport=transport,
     )
+    registry = ModelRegistry.from_settings(settings, provider=provider.name)
 
     # One composer and one policy instance, each handed to everything that
     # needs it. Two policy instances would be two sources for the same number;
@@ -752,12 +752,12 @@ def build_agent(
             "pass session_exists"
         )
     settings = settings or Settings.from_env()
-    registry = ModelRegistry.from_settings(settings)
     provider = OllamaProvider(
         settings.ollama_host,
         timeout_seconds=settings.request_timeout_seconds,
         transport=transport,
     )
+    registry = ModelRegistry.from_settings(settings, provider=provider.name)
     sandbox = Workspace(
         Path(workspace), reserved=() if database is None else (Path(database),)
     )
