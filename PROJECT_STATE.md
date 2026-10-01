@@ -583,6 +583,8 @@ claim written in one place with nothing that notices it going stale.
   #138 5f1976d  docs: correct eight ARCHITECTURE.md lines the read-only review found
   #139 6565dd3  test: the skip audit allows a machine that cannot create symlinks
   #141 6580c4b  docs: refresh the session handoff; ADR-020 D1-D4 decided
+  #143 074337c  eval: first GPU (Vulkan) baseline at 6565dd3 -- contract_v1 x5 guard on,
+               x5 guard off, refusal_v1 x3, plus the d2fd7d0 check run
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
