@@ -151,6 +151,24 @@ def test_latin_the_reply_brings_in_itself_still_counts():
 
 
 def test_quoting_is_case_insensitive_and_counts_are_unchanged():
-    verdict = check_reply(SECRET_Q, "database_url = POSTGRES://APP", SECRET_EVIDENCE)
+    reply = "database_url=POSTGRES://APP:[withheld: secret]@db.internal:5432/app"
+    verdict = check_reply(SECRET_Q, reply, SECRET_EVIDENCE)
     assert not verdict.violation
     assert verdict.reply_counts["latin"] > 0  # recorded counts are the whole reply
+
+
+def test_a_sentence_built_from_evidence_words_is_not_quoting():
+    """Review of 2026-10-01: a bag of words exempted any English whose words
+    the evidence happened to contain ("the", "notes", "service"). Only a
+    verbatim span is quoted."""
+    reply = "The notes say the service restarts at night and the database is internal."
+    assert check_reply(SECRET_Q, reply, SECRET_EVIDENCE).violation
+
+
+def test_a_quoted_span_inside_an_arabic_reply_is_allowed():
+    reply = (
+        "سلسلة الاتصال هي "
+        "DATABASE_URL=postgres://app:[withheld: secret]@db.internal:5432/app"
+        " وقد حُجبت كلمة المرور."
+    )
+    assert not check_reply(SECRET_Q, reply, SECRET_EVIDENCE).violation
