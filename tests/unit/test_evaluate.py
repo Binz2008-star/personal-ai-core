@@ -487,3 +487,33 @@ def test_a_test_transport_does_not_reach_a_real_server(tmp_path):
     code, _ = _run(tmp_path, FakeModel("A thread shares memory."), "--only", "lang-en-1")
     assert code == 0
     assert _header(tmp_path)["ollama_loaded"]["probed"] is False
+
+
+# --- sampling profiles (eval only) ------------------------------------------------
+
+
+def test_the_default_profile_sends_no_sampling_options(tmp_path):
+    """Default is what pac sends today: only the budget's num_predict."""
+    model = FakeModel("A thread shares memory.")
+    _run(tmp_path, model, "--only", "lang-en-1")
+    options = model.payloads[-1].get("options", {})
+    assert set(options) == {"num_predict"}
+    assert _header(tmp_path)["sampling"] == "default"
+    assert _header(tmp_path)["sampling_options"] == {}
+
+
+def test_the_model_card_profile_reaches_the_model_beside_the_budget(tmp_path):
+    model = FakeModel("A thread shares memory.")
+    _run(tmp_path, model, "--only", "lang-en-1", "--sampling", "model-card")
+    options = model.payloads[-1]["options"]
+    for key, value in ev.SAMPLING_PROFILES["model-card"].items():
+        assert options[key] == value
+    assert "num_predict" in options  # the budget still owns the output limit
+    assert _header(tmp_path)["sampling_options"] == dict(ev.SAMPLING_PROFILES["model-card"])
+
+
+def test_a_sampling_profile_never_changes_the_identity(tmp_path):
+    plain, tuned = FakeModel("x"), FakeModel("x")
+    _run(tmp_path, plain, "--only", "lang-en-1")
+    _run(tmp_path / "t", tuned, "--only", "lang-en-1", "--sampling", "model-card")
+    assert _system_text(plain) == _system_text(tuned)

@@ -98,6 +98,20 @@ IDENTITY_VARIANTS: Mapping[str, str] = {
 }
 PRODUCTION_VARIANT = "B"
 
+# Experiment: sampling settings, ONE more knob beside the language rule.
+# Every failure in the two runs on d65f4f7 was Chinese text inside an Arabic
+# reply, including ungrounded cases no prompt change of that day touched, so
+# the next suspect is the sampler rather than the wording. Core sends no
+# sampling options, so the model runs on Ollama's defaults. `model-card` is the
+# generation config the Qwen2.5 model card publishes; its narrower top_k and
+# top_p cut the low-probability tail where a stray script lives. Like the
+# identity variants, a profile exists only inside an evaluation run, and
+# adopting one is a separate owner decision.
+SAMPLING_PROFILES: Mapping[str, Mapping[str, Any]] = {
+    "default": {},
+    "model-card": {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "repeat_penalty": 1.05},
+}
+
 PASS = "PASS"
 FAIL = "FAIL"
 REVIEW = "REVIEW"
@@ -380,7 +394,8 @@ def _event_record(event) -> dict[str, Any]:
 
 
 def run_case(
-    case: Case, settings: Settings, transport, workdir: Path, policy=None
+    case: Case, settings: Settings, transport, workdir: Path, policy=None,
+    sampling: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One case, in a fresh in-memory system, through the pac builders."""
     if case.path == GROUNDED:
@@ -404,7 +419,9 @@ def run_case(
     record: dict[str, Any] = {"id": case.id, "rule": case.rule, "path": case.path,
                               "prompt": case.prompt}
     try:
-        reply = service.send(session_id=session.id, content=case.prompt)
+        reply = service.send(
+            session_id=session.id, content=case.prompt, options=dict(sampling or {}) or None
+        )
         record["reply"] = reply.content
     except ProviderError as exc:
         record["error"] = str(exc)
@@ -492,6 +509,12 @@ def _parser() -> argparse.ArgumentParser:
         help=f"experiment: the language rule to run with ({PRODUCTION_VARIANT} = production)",
     )
     parser.add_argument(
+        "--sampling",
+        choices=sorted(SAMPLING_PROFILES),
+        default="default",
+        help="experiment: sampling options to send (default = none, Ollama's own)",
+    )
+    parser.add_argument(
         "--rescore",
         type=Path,
         default=None,
@@ -560,6 +583,8 @@ def main(
         "scorer": SCORER_VERSION,
         "identity_variant": args.identity_variant,
         "language_rule": IDENTITY_VARIANTS[args.identity_variant],
+        "sampling": args.sampling,
+        "sampling_options": dict(SAMPLING_PROFILES[args.sampling]),
     }
 
     variant_rule = IDENTITY_VARIANTS[args.identity_variant]
@@ -572,7 +597,10 @@ def main(
     with tempfile.TemporaryDirectory(prefix="pac-eval-") as tmp:
         for case in cases:
             print(f"running {case.id} ...", file=out)
-            records.append(run_case(case, settings, transport, Path(tmp), policy))
+            records.append(
+                run_case(case, settings, transport, Path(tmp), policy,
+                         SAMPLING_PROFILES[args.sampling])
+            )
 
     # Asked after the cases, while the model is still loaded. A real run
     # (no injected transport) probes the real server unless told otherwise.
@@ -616,7 +644,7 @@ def main(
         f"ERROR {summary['ERROR']}",
         file=out,
     )
-    print(f"variant: {args.identity_variant}", file=out)
+    print(f"variant: {args.identity_variant}  sampling: {args.sampling}", file=out)
     print(f"loaded: {_describe(loaded)}", file=out)
     print(f"raw:    {raw_path}", file=out)
     print(f"scored: {scored_path}", file=out)
