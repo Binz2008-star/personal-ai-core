@@ -787,7 +787,8 @@ def _describe(loaded: Mapping[str, Any]) -> str:
     if loaded.get("context_length") is None:
         return f"not confirmed ({loaded.get('reason', 'no context_length reported')})"
     share = loaded.get("gpu_share")
-    where = "" if share is None else f", {int(share * 100)}% GPU"
+    # round, not int: 0.29 * 100 is 28.999... in floating point.
+    where = "" if share is None else f", {round(share * 100)}% GPU"
     return f"context {loaded['context_length']}{where}"
 
 
@@ -801,13 +802,31 @@ def rescore(raw_path: Path, cases_path: Path, out: TextIO) -> int:
     if not raw_path.is_file():
         print(f"no such raw file: {raw_path}", file=out)
         return 2
-    raw = json.loads(raw_path.read_text(encoding="utf-8"))
-    cases_version, cases = load_cases(cases_path)
-    scored = score_records(raw["records"], cases)
-    summary = summarize(scored)
     target = raw_path.with_name(
         raw_path.name.replace("raw-", "rescored-", 1).replace(".json", f"-{SCORER_VERSION}.json")
     )
+    # The name holds the scorer, not the cases file, so a second rescore with
+    # another cases file would replace the first verdict under the same name.
+    if target.exists():
+        print(
+            f"refused: {target} exists; a rescored file is never overwritten, so this "
+            f"run cannot be rescored with a second cases file under {SCORER_VERSION}",
+            file=out,
+        )
+        return 2
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    cases_version, cases = load_cases(cases_path)
+    uncovered = sorted({r["id"] for r in raw["records"]} - {c.id for c in cases})
+    if uncovered:
+        print(
+            f"refused: {cases_path} has no case for {', '.join(uncovered)}; rescore with "
+            f"the cases file the run used ({raw['header'].get('cases_file')}) or a later "
+            "version of it",
+            file=out,
+        )
+        return 2
+    scored = score_records(raw["records"], cases)
+    summary = summarize(scored)
     target.write_text(
         json.dumps(
             {"header": raw["header"], "source": raw_path.name, "scorer": SCORER_VERSION,
