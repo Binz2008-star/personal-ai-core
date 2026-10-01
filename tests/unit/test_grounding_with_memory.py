@@ -49,6 +49,7 @@ from personal_ai_core.memory.retriever import (
     SimpleMemoryRetriever,
 )
 from personal_ai_core.persistence.memory_store import InMemoryMemoryRepository
+from personal_ai_core.context import NullRedactor
 
 SECRET = "CANARY-DO-NOT-LEAK-a7f3e91c"
 SRC = Path(__file__).resolve().parents[2] / "src" / "personal_ai_core"
@@ -130,7 +131,7 @@ def builder(*, results=(), memory_retriever=None) -> ContextBuilder:
         assembler=HybridContextAssembler(estimator),
         budget_policy=ReserveBasedBudgetPolicy(),
         estimator=estimator,
-        memory_retriever=memory_retriever,
+        memory_retriever=memory_retriever, redactor=NullRedactor()
     )
 
 
@@ -233,7 +234,7 @@ def test_document_retrieval_failure_still_raises():
         assembler=HybridContextAssembler(estimator),
         budget_policy=ReserveBasedBudgetPolicy(),
         estimator=estimator,
-        memory_retriever=real_memory_retriever(record()),
+        memory_retriever=real_memory_retriever(record()), redactor=NullRedactor()
     )
     with pytest.raises(RuntimeError, match="index down"):
         build(b)

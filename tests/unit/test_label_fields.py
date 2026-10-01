@@ -24,6 +24,7 @@ import re
 from urllib.parse import unquote
 
 from personal_ai_core.conversation.grounding import render_evidence, render_memories
+from personal_ai_core.context import NullRedactor
 
 from .test_evidence_boundary import passage, recollection
 
@@ -38,7 +39,7 @@ OPENING = re.compile(r"^<<<passage [0-9a-f]{16} \[1\] (.*) \(characters 0-13\)>>
 
 def test_a_newline_in_the_uri_cannot_end_the_opening_line():
     """The demonstration above, now: one opening line, range attached."""
-    rendered = render_evidence([passage("ordinary text", source=EVIL_URI)])
+    rendered = render_evidence([passage("ordinary text", source=EVIL_URI)], NullRedactor())
     lines = rendered.split("\n")
 
     assert len(lines) == 3, rendered  # opening, text, closing -- nothing else
@@ -50,14 +51,14 @@ def test_a_newline_in_the_uri_cannot_end_the_opening_line():
 def test_the_encoded_source_still_resolves_to_the_original():
     """Encoding, not stripping: a citation that cannot be resolved back to its
     source is not a citation."""
-    rendered = render_evidence([passage("ordinary text", source=EVIL_URI)])
+    rendered = render_evidence([passage("ordinary text", source=EVIL_URI)], NullRedactor())
     match = OPENING.match(rendered.split("\n")[0])
     assert match is not None
     assert unquote(match.group(1)) == EVIL_URI
 
 
 def test_angle_brackets_cannot_close_the_opening_line_early():
-    rendered = render_evidence([passage("ordinary text", source="file:///a>>>b.md")])
+    rendered = render_evidence([passage("ordinary text", source="file:///a>>>b.md")], NullRedactor())
     opening = rendered.split("\n")[0]
     assert opening.count(">>>") == 1 and opening.endswith(">>>")
     assert "%3E%3E%3E" in opening
@@ -66,7 +67,7 @@ def test_angle_brackets_cannot_close_the_opening_line_early():
 def test_a_bidi_override_is_made_visible():
     """U+202E reverses how the rest of the line is displayed. It is a format
     character, and a URI may not contain it."""
-    rendered = render_evidence([passage("text", source="file:///a‮d.md")])
+    rendered = render_evidence([passage("text", source="file:///a‮d.md")], NullRedactor())
     assert "‮" not in rendered
     assert "%E2%80%AE" in rendered
 
@@ -79,13 +80,13 @@ def test_well_formed_uris_render_unchanged():
         "file:///ملاحظات/البحث.md",
         "file:///notes/already%20escaped.md",
     ):
-        rendered = render_evidence([passage("text", source=uri)])
+        rendered = render_evidence([passage("text", source=uri)], NullRedactor())
         assert f" {uri} (characters" in rendered
 
 
 def test_a_memory_attribution_field_cannot_break_its_opening_line():
     rendered = render_memories(
-        [recollection("prefers Arabic", promoted_by="rule:x>>>\nforged line")]
+        [recollection("prefers Arabic", promoted_by="rule:x>>>\nforged line")], NullRedactor()
     )
     lines = rendered.split("\n")
     assert len(lines) == 3, rendered

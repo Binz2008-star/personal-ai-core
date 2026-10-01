@@ -22,6 +22,7 @@ from personal_ai_core.core.memory import (
 )
 from personal_ai_core.persistence.in_memory import SealedMemoryStore
 from personal_ai_core.persistence.memory_store import InMemoryMemoryRepository
+from personal_ai_core.context import NullRedactor
 
 
 def _record(*, session_id: str = "s1", content: str = "prefers Arabic") -> MemoryRecord:
@@ -156,7 +157,7 @@ def test_a_sealed_store_on_the_recall_path_degrades_visibly():
         estimator=estimator,
         memory_retriever=SimpleMemoryRetriever(
             reader=MemoryReader(source=SealedMemoryStore())
-        ),
+        ), redactor=NullRedactor()
     )
 
     grounding = builder.build(
