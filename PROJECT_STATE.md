@@ -526,6 +526,8 @@ claim written in one place with nothing that notices it going stale.
   #128 c8738e9  feat(eval): refusal_v1 -- make the open-response requirement
                measurable
   #129 297f001  feat(agent): find_files -- find files by name in every subdirectory
+  #130 940c421  fix(conversation): align the language guard with ADR-019's contract
+  #131 d4eef16  docs: correct three statements the 297f001 review found inaccurate
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped

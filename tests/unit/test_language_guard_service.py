@@ -143,9 +143,14 @@ def test_a_failed_retry_is_recorded_as_attempt_two_and_raised():
     session = service.start_session(service.create_user().id)
     with pytest.raises(ProviderError):
         service.send(session_id=session.id, content=QUESTION)
-    failed = [e for e in events.list_for_session(session.id)
-              if e.type is EventType.GENERATION_FAILED]
+    recorded = events.list_for_session(session.id)
+    failed = [e for e in recorded if e.type is EventType.GENERATION_FAILED]
     assert [e.payload["attempt"] for e in failed] == [2]
+    # Review of 2026-10-01: the guard's trigger was lost on this path.
+    [guard] = [e for e in recorded if e.type is EventType.REPLY_LANGUAGE_GUARD]
+    assert guard.payload["retry_failed"] is True
+    assert guard.payload["delivered_passed"] is None
+    assert guard.payload["rejected_counts"]["han"] > 0
 
 
 def test_the_note_is_reserved_in_the_budget_as_its_own_share(tmp_path):
@@ -162,3 +167,14 @@ def test_the_note_is_reserved_in_the_budget_as_its_own_share(tmp_path):
         assert assembled.payload["guard_reserve"] == reserve
         if reserve:
             assert f"guard={reserve}" in assembled.payload["budget_source"]
+
+
+def test_the_event_carries_the_counts_the_verdict_was_computed_on():
+    """Review of 2026-10-01: raw counts alone cannot reproduce a share verdict
+    once quoted Latin is set aside."""
+    english = "The notes do not mention it at all, sorry."
+    model = Scripted(english, ARABIC)
+    _, events, _, _ = turn(model)
+    [event] = guard_events(events)
+    assert event.payload["rejected_assessed_counts"] == event.payload["rejected_counts"]
+    assert event.payload["retry_failed"] is False

@@ -106,6 +106,9 @@ class Verdict:
     expected: str | None = None
     reply_counts: Mapping[str, int] = field(default_factory=dict)
     exempt: str | None = None
+    # The counts the Arabic-share rule was computed on: the reply with quoted
+    # Latin removed. Equal to reply_counts when no rule needed them.
+    assessed_counts: Mapping[str, int] = field(default_factory=dict)
 
 
 def check_reply(
@@ -150,7 +153,7 @@ def check_reply(
     if foreign_total >= foreign_letters:
         names = ", ".join(sorted(foreign))
         return Verdict(True, f"{foreign_total} letters in {names}",
-                       expected=expected, reply_counts=reply)
+                       expected=expected, reply_counts=reply, assessed_counts=reply)
 
     if expected == ARABIC:
         # A Latin run copied verbatim from the user's message or the evidence
@@ -169,6 +172,7 @@ def check_reply(
         share = own.get(ARABIC, 0) / letters if letters else 1.0
         if share < min_arabic_share:
             return Verdict(True, f"arabic share {share:.2f}",
-                           expected=expected, reply_counts=reply)
+                           expected=expected, reply_counts=reply, assessed_counts=own)
+        return Verdict(False, "ok", expected=expected, reply_counts=reply, assessed_counts=own)
 
-    return Verdict(False, "ok", expected=expected, reply_counts=reply)
+    return Verdict(False, "ok", expected=expected, reply_counts=reply, assessed_counts=reply)
