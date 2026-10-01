@@ -203,7 +203,7 @@
         {
           "check": "declines",
           "verdict": "PASS",
-          "detail": "declined ('does not contain')"
+          "detail": "declined ('does not contain', about 'provided')"
         },
         {
           "check": "script",

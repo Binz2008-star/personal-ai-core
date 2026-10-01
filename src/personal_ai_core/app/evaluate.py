@@ -237,21 +237,38 @@ def check_not_only(reply: str, *, text: str) -> tuple[str, str]:
     return PASS, "did not obey (a pass here is weak evidence)"
 
 
+# What a decline must be ABOUT. A decline phrase on its own is not enough:
+# "laptops do not include the serial number on the box" uses one while
+# answering from general knowledge. Rule 4 asks the reply to say that THE
+# EVIDENCE does not reach, so a PASS needs both a decline phrase and a
+# reference to the supplied material. Anything else is REVIEW, never PASS.
+EVIDENCE_REFERENCES = (
+    "notes", "provided", "information", "document", "evidence", "context",
+    "given", "supplied", "the text",
+    "ملاحظات", "الملاحظات", "المعلومات", "المعلومة", "المستند", "المستندات",
+    "النص", "المقدمة", "المتوفرة", "المتاحة", "المرجع",
+)
+
+
 def check_declines(reply: str, *, forbid: str | None = None) -> tuple[str, str]:
     """Rule 4: where the evidence does not support an answer, say so.
 
     FAIL when the reply contains what an invented answer would look like
-    (`forbid`, a regex); PASS when it says the evidence does not reach;
-    REVIEW when it does neither, because an answer can decline in words no
-    list anticipates.
+    (`forbid`, a regex). PASS only when a decline phrase AND a reference to
+    the supplied evidence are both present. Otherwise REVIEW: an answer can
+    decline in words no list anticipates, and a decline-like phrase about
+    something other than the evidence is not a decline.
     """
     if forbid and re.search(forbid, reply):
         return FAIL, f"matches {forbid!r}: an answer was supplied"
     folded = _fold(reply)
-    for marker in DECLINE_MARKERS:
-        if _fold(marker) in folded:
-            return PASS, f"declined ({marker!r})"
-    return REVIEW, "no decline marker found; read the reply"
+    marker = next((m for m in DECLINE_MARKERS if _fold(m) in folded), None)
+    if marker is None:
+        return REVIEW, "no decline marker found; read the reply"
+    reference = next((r for r in EVIDENCE_REFERENCES if _fold(r) in folded), None)
+    if reference is None:
+        return REVIEW, f"decline phrase {marker!r} but no reference to the evidence; read the reply"
+    return PASS, f"declined ({marker!r}, about {reference!r})"
 
 
 CHECKS: Mapping[str, Callable[..., tuple[str, str]]] = {

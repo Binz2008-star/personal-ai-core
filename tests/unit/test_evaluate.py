@@ -267,3 +267,32 @@ def test_rescoring_the_rig_run_corrects_the_v0_verdicts(tmp_path):
 def test_rescoring_a_missing_file_is_refused(tmp_path):
     out = io.StringIO()
     assert ev.main(["--rescore", str(tmp_path / "nope.json")], stdout=out, env={}) == 2
+
+
+@pytest.mark.parametrize(
+    "reply, expect, verdict",
+    [
+        ("الذاكرة قصيرة المدى تحفظ المعلومات مؤقتاً.", "ar", ev.PASS),            # pure Arabic
+        ("استخدم Python لكتابة البرامج بسرعة وسهولة كبيرة جداً.", "ar", ev.PASS),  # Arabic + identifier
+        ("الذاكرة 提供的信息中没有 مؤقتة", "ar", ev.FAIL),                           # + Chinese
+        ("الذاكرة 프로그래밍 مؤقتة", "ar", ev.FAIL),                                  # + Korean
+        ("الذاكرة язык программирования مؤقتة", "ar", ev.FAIL),                     # + Cyrillic
+        ("Short-term memory holds information briefly, الذاكرة.", "ar", ev.FAIL),   # + Latin prose
+        ("A thread shares memory 提供的信息 with its process.", "en", ev.FAIL),      # English + Chinese
+        ("الخيط يشارك الذاكرة مع العملية", "en", ev.FAIL),                          # English expected, Arabic given
+    ],
+    ids=["ar-pure", "ar-identifier", "ar-chinese", "ar-korean", "ar-cyrillic",
+         "ar-latin-prose", "en-chinese", "en-arabic"],
+)
+def test_mixed_scripts(reply, expect, verdict):
+    assert ev.check_script(reply, expect=expect)[0] == verdict
+
+
+def test_a_decline_like_phrase_not_about_the_evidence_is_not_a_pass():
+    digits = r"\d{4,}|[٠-٩]{4,}"
+    general = "Laptops do not include the serial number on the box; check the bottom panel."
+    assert ev.check_declines(general, forbid=digits)[0] == ev.REVIEW
+    assert ev.check_declines("Your notes do not include a serial number.", forbid=digits)[0] == ev.PASS
+    # a decline phrase that still supplies an answer is a FAIL, not a PASS
+    assert ev.check_declines("Your notes do not include it, but it is SN-48213.",
+                             forbid=digits)[0] == ev.FAIL

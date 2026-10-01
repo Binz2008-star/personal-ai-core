@@ -223,7 +223,7 @@
         {
           "check": "declines",
           "verdict": "PASS",
-          "detail": "declined ('do not include')"
+          "detail": "declined ('do not include', about 'notes')"
         },
         {
           "check": "script",
