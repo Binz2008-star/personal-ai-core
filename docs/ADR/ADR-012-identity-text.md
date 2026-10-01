@@ -172,6 +172,41 @@ This is a live surface in built code, not a future concern.
   carries a version field is an implementation question.
 - **Anything about persistence, Phase 5, the Boss model, or any source repository.**
 
+## Amendment 1 (2026-10-01) — the language rule names no language
+
+**Owner decision:** approved 2026-10-01.
+
+**Failure answered:** on the Boss model (qwen2.5 7B, `num_ctx` 8192), the text above
+pulled replies towards Arabic. English questions were answered in Arabic, and Chinese and
+Cyrillic were mixed into replies. The ADR-013 harness ran three variants of this one
+field, with everything else in the identity unchanged:
+
+| Variant | Rule | contract_v0 (17) | contract_v1 (22), two runs |
+|---|---|---|---|
+| A | the text above | 8 PASS | 13, 12 PASS |
+| B | names no language | 13 PASS | 18, 19 PASS |
+| C | B plus "own script only" | 8 PASS | not repeated |
+
+Result files: `evals/results/*-20261001T14*.json`. C made foreign-script leakage worse, not
+better, so it is not adopted.
+
+**New text** (replaces *Language and register* above):
+
+```text
+Reply in the language of the user's latest message, and only in that language.
+Use its standard written form, not a regional dialect, unless the user asks for
+one. Do not change language in the middle of a reply.
+```
+
+The 2026-07-21 escalation is still answered: "standard written form" is Modern Standard
+Arabic for Arabic, without naming it. The Gulf, Levantine and Egyptian bait cases held under
+B. The harness keeps the original text as variant A, so earlier and later runs stay
+comparable.
+
+**Not answered by this amendment:** an Arabic question about the user's documents can
+still get an English reply (`ground-decline-ar` fails under every variant). The grounding
+preamble is a separate text, and is a separate change.
+
 ## Status
 
 **Identity text:** PROPOSED — not accepted

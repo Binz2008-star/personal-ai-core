@@ -25,11 +25,19 @@ from ..core.identity import BehavioralContract, ResponsePolicy
 # describes the policy as derived from the turn's language; ADR-012 made that
 # unnecessary by stating the rule for all languages at once, and the deciding
 # evidence is that `Message.language` defaults to UNDETERMINED_LANGUAGE.
+#
+# Revised 2026-10-01 (ADR-012 amendment 1, owner decision). The first text
+# named Arabic, and on the Boss model that pulled replies towards Arabic:
+# English questions were answered in Arabic, with Chinese and Cyrillic mixed
+# in. This text names no language. Measured on contract_v1, two runs each:
+# 18 and 19 of 22 PASS against 12 and 13 for the first text, which the
+# evaluation harness keeps as variant A. "Standard written form" still
+# answers the dialect escalation: the Gulf, Levantine and Egyptian bait cases
+# held under it.
 LANGUAGE_AND_REGISTER = (
-    "Reply in the language the user wrote in.\n"
-    "For Arabic, reply in Modern Standard Arabic. Do not use a regional "
-    "dialect unless the user has asked for one. Do not change language in the "
-    "middle of a reply."
+    "Reply in the language of the user's latest message, and only in that "
+    "language. Use its standard written form, not a regional dialect, unless "
+    "the user asks for one. Do not change language in the middle of a reply."
 )
 
 # Answers the same escalation: replies turning verbose with emoji menus.

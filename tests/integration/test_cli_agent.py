@@ -119,7 +119,7 @@ def test_the_agent_carries_the_identity_contract(tmp_path):
     run(tmp_path, transport, "hello")
     messages = transport.sent[0]["messages"]  # type: ignore[attr-defined]
     assert [m["role"] for m in messages[:2]] == ["system", "system"]
-    assert "Modern Standard Arabic" in messages[0]["content"]
+    assert "standard written form" in messages[0]["content"]
     assert "Reply with exactly ONE JSON object" in messages[1]["content"]
 
 

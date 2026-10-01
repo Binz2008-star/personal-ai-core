@@ -126,10 +126,21 @@ def test_the_contract_carries_every_rule_ADR_012_states():
 def test_the_policy_answers_the_dialect_escalation():
     """The 2026-07-21 escalation is the reason this rule exists: a Jordanian
     user addressed in hardcoded Gulf dialect. If the rule that answers it ever
-    disappears, this says so."""
+    disappears, this says so. Since ADR-012 amendment 1 the rule names no
+    language: the standard written form is what keeps a dialect from being
+    chosen for the user."""
     text = RESPONSE_POLICY.language_and_register
-    assert "Modern Standard Arabic" in text
-    assert "dialect" in text
+    assert "standard written form" in text
+    assert "not a regional dialect" in text
+    assert "unless the user asks" in text
+
+
+def test_the_language_rule_names_no_language():
+    """ADR-012 amendment 1: naming Arabic pulled the Boss model towards Arabic
+    on English questions. Naming any language would reopen that failure."""
+    text = RESPONSE_POLICY.language_and_register.casefold()
+    for name in ("arabic", "english", "chinese", "fusha", "العربية", "الفصحى"):
+        assert name not in text
 
 
 def test_the_rule_that_answers_prompt_injection_is_present():
