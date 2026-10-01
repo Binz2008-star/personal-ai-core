@@ -521,6 +521,8 @@ claim written in one place with nothing that notices it going stale.
   #125 74d98bf  eval: contract_v1 with the reply-language guard and on llama.cpp
                without and with the grammar
   #126 6158bb0  fix(conversation): quoted Latin is not a language switch (ADR-019)
+  #127 7626f90  docs(adr): ADR-002 owner note -- the open-response behaviour is
+               intended
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
