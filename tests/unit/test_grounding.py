@@ -26,6 +26,7 @@ from personal_ai_core.core.knowledge import (
     RetrievalProvenance,
     RetrievalResult,
 )
+from personal_ai_core.context import NullRedactor
 
 
 class Spec:
@@ -81,7 +82,7 @@ def builder(
             identity_reserve=identity_reserve,
         ),
         estimator=estimator,
-        limit=limit,
+        limit=limit, redactor=NullRedactor()
     )
 
 
@@ -122,7 +123,7 @@ def test_evidence_is_rendered_with_a_resolvable_citation(make_chunk):
     not a citation.
     """
     chunk = make_chunk("Some evidence.", chunk_id="c1", start=40)
-    rendered = render_evidence([result(chunk, source_uri="file:///notes/a.md")])
+    rendered = render_evidence([result(chunk, source_uri="file:///notes/a.md")], NullRedactor())
     assert "file:///notes/a.md" in rendered
     assert f"characters {chunk.start}-{chunk.end}" in rendered
     assert "Some evidence." in rendered
@@ -130,7 +131,7 @@ def test_evidence_is_rendered_with_a_resolvable_citation(make_chunk):
 
 def test_rendering_is_deterministic(make_chunk):
     results = [result(make_chunk(f"passage {i}", chunk_id=f"c{i}")) for i in range(3)]
-    assert render_evidence(results) == render_evidence(results)
+    assert render_evidence(results, NullRedactor()) == render_evidence(results, NullRedactor())
 
 
 def test_the_language_of_the_turn_reaches_the_query(make_chunk):

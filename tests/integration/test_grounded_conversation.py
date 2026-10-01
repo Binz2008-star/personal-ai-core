@@ -37,6 +37,7 @@ from personal_ai_core.runtime.ollama.provider import OllamaProvider
 from personal_ai_core.core.domain import EventType, Role
 from personal_ai_core.core.errors import RetrievalError
 from personal_ai_core.core.knowledge import Document
+from personal_ai_core.context import NullRedactor
 
 NOTES_EN = """Hybrid retrieval runs a vector arm and a lexical arm together.
 
@@ -345,7 +346,7 @@ def test_a_retrieval_failure_is_recorded_and_fails_the_turn(transport):
             retriever=BrokenRetriever(),
             assembler=HybridContextAssembler(estimator),
             budget_policy=budget_policy,
-            estimator=estimator,
+            estimator=estimator, redactor=NullRedactor()
         ),
     )
 

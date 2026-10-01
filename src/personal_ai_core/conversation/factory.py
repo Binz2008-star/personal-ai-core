@@ -29,6 +29,7 @@ from ..agent.executor import Confirm
 from ..agent.loop import AgentLoop
 from ..agent.web import Fetch
 from ..context import (
+    PatternSecretRedactor,
     HybridContextAssembler,
     ReserveBasedBudgetPolicy,
     ScriptAwareTokenEstimator,
@@ -249,6 +250,10 @@ def _knowledge_stack(
         catalog=catalog,
     )
     estimator = ScriptAwareTokenEstimator()
+    # ADR-018: ONE redactor instance, handed to both the builder that renders
+    # the evidence and the cost that prices it, so the budget is charged on
+    # exactly the text the model receives (§3.2).
+    redactor = PatternSecretRedactor()
     context_builder = ContextBuilder(
         retriever=HybridRetriever(
             embedder=embedder,
@@ -259,10 +264,11 @@ def _knowledge_stack(
         # F-4: charge evidence as rendered, not as bare text. Without this
         # the grounding message overruns the budget it was assembled against.
         assembler=HybridContextAssembler(
-            estimator, rendered_cost=RenderedEvidenceCost(estimator)
+            estimator, rendered_cost=RenderedEvidenceCost(estimator, redactor)
         ),
         budget_policy=budget_policy,
         estimator=estimator,
+        redactor=redactor,
         memory_retriever=memory_retriever,
         limit=evidence_limit,
     )

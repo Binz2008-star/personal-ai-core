@@ -16,7 +16,8 @@ charges stand at 500 tokens, the evidence budget falls to 220, and the
 preamble section alone costs 271 -- so there is no message left to audit.
 At the re-tuned window the same budget still binds: measured under the new
 calibration, the evidence budget is 470 tokens and the charged, rendered
-evidence is 437, with four of five passages dropped.
+evidence is 437, with four of five passages dropped. Re-tuned again on
+2026-10-01 for the longer ADR-018 preamble (see WINDOW below).
 """
 from __future__ import annotations
 
@@ -33,7 +34,10 @@ from .test_grounded_conversation import Recorder, evidence_message
 # per-character cost, so at 2000 nothing fit and there was no message to
 # test. 2250 is the smallest window where the budget still binds (four of
 # five passages dropped) while one passage and its rendering are admitted.
-WINDOW = 2250
+# Re-tuned from 2250 on 2026-10-01: the ADR-018 marker sentence lengthened
+# the preamble, and below 2280 no passage fits. At 2300 one passage is
+# admitted and four are dropped, as before.
+WINDOW = 2300
 
 
 def grounded_turn():
