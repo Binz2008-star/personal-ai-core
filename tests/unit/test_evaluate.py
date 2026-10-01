@@ -296,3 +296,46 @@ def test_a_decline_like_phrase_not_about_the_evidence_is_not_a_pass():
     # a decline phrase that still supplies an answer is a FAIL, not a PASS
     assert ev.check_declines("Your notes do not include it, but it is SN-48213.",
                              forbid=digits)[0] == ev.FAIL
+
+
+# --- language-rule experiment variants (eval only) --------------------------------
+
+
+def _system_text(model: "FakeModel") -> str:
+    return model.payloads[-1]["messages"][0]["content"]
+
+
+def test_variant_a_is_the_production_identity_unchanged(tmp_path):
+    from personal_ai_core.conversation.factory import build_in_memory_service
+
+    production = FakeModel("x")
+    service, _ = build_in_memory_service(transport=production)
+    service.send(session_id=service.start_session(service.create_user().id).id, content="hi")
+
+    variant_a = FakeModel("A thread shares memory.")
+    _run(tmp_path, variant_a, "--only", "lang-en-1", "--identity-variant", "A")
+    assert _system_text(variant_a) == _system_text(production)
+    assert "For Arabic" in _system_text(variant_a)
+
+
+@pytest.mark.parametrize("variant", ["B", "C"])
+def test_variants_replace_only_the_language_rule(tmp_path, variant):
+    model = FakeModel("A thread shares memory.")
+    _run(tmp_path, model, "--only", "lang-en-1", "--identity-variant", variant)
+    system = _system_text(model)
+    rule = ev.IDENTITY_VARIANTS[variant]
+    assert rule is not None
+    assert rule in system
+    assert "For Arabic" not in system
+    assert "Arabic" not in rule  # the hypothesis: name no language
+    # the rest of the identity is untouched: answer discipline and the five rules
+    assert "Do not pad the reply" in system
+    assert "Do not disclose secrets" in system
+    raw = json.loads((tmp_path / "results" / "raw-20260930T120000Z.json").read_text("utf-8"))
+    assert raw["header"]["identity_variant"] == variant
+    assert raw["header"]["language_rule"] == ev.IDENTITY_VARIANTS[variant]
+
+
+def test_an_unknown_variant_is_refused(tmp_path):
+    with pytest.raises(SystemExit):
+        _run(tmp_path, FakeModel("x"), "--identity-variant", "Z")

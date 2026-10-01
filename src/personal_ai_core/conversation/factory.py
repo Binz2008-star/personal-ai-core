@@ -38,7 +38,8 @@ from ..core.contracts import EventRepository, MemoryStore, SessionRepository
 from ..core.feedback import FEEDBACK_EVENT_TYPE, feedback_record_from_event
 from ..core.memory import MemoryReader
 from ..core.observation import Observation, UnobservedFeedback
-from ..identity import DefaultIdentityComposer
+from ..identity import RESPONSE_POLICY, DefaultIdentityComposer
+from ..core.identity import ResponsePolicy
 from ..memory import SimpleMemoryRetriever
 from ..persistence.memory_store import InMemoryMemoryRepository
 from ..knowledge import (
@@ -88,10 +89,22 @@ if TYPE_CHECKING:
     from ..persistence.postgres import Connection as ServerConnection
 
 
+def default_response_policy() -> ResponsePolicy:
+    """The policy every production builder composes (ADR-012).
+
+    Exposed so the evaluation harness can vary ONE field of it in an
+    experiment run without importing `identity/`, which `app/` may not.
+    `response_policy=` on the in-memory builders exists for that harness
+    only: `pac` never passes it, so production composes this default.
+    """
+    return RESPONSE_POLICY
+
+
 def build_in_memory_service(
     settings: Settings | None = None,
     *,
     transport: Transport | None = None,
+    response_policy: ResponsePolicy | None = None,
 ) -> tuple[ConversationService, InMemoryEventRepository]:
     """Build the ungrounded slice against in-process storage.
 
@@ -113,7 +126,9 @@ def build_in_memory_service(
     # same estimator the rest of the budget uses. ADR-005: a budget is derived
     # and its inputs recorded. Zero was the honest figure while identity/ did
     # not exist; any constant would be an invented one now that it does.
-    identity = DefaultIdentityComposer(profile=settings.profile)
+    identity = DefaultIdentityComposer(
+        profile=settings.profile, policy=response_policy or RESPONSE_POLICY
+    )
     budget_policy = ReserveBasedBudgetPolicy(
         identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
     )
@@ -541,6 +556,7 @@ def build_grounded_in_memory_service(
     transport: Transport | None = None,
     evidence_limit: int = 5,
     enable_memory: bool = False,
+    response_policy: ResponsePolicy | None = None,
 ) -> GroundedSlice:
     """Build the slice with retrieval wired in.
 
@@ -563,7 +579,9 @@ def build_grounded_in_memory_service(
     # needs it. Two policy instances would be two sources for the same number;
     # two composers would be two sources for the text the first was costed
     # from.
-    identity = DefaultIdentityComposer(profile=settings.profile)
+    identity = DefaultIdentityComposer(
+        profile=settings.profile, policy=response_policy or RESPONSE_POLICY
+    )
     budget_policy = ReserveBasedBudgetPolicy(
         identity_reserve=identity.tokens(ScriptAwareTokenEstimator())
     )

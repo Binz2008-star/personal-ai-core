@@ -35,6 +35,29 @@ Both files record:
 
 Commit both files unmodified. A later re-score goes in a new derived file that names its source.
 
+## Language-rule experiment
+
+The first rig run answered English questions in Arabic and mixed Chinese, Korean and
+Cyrillic into replies. The hypothesis is that the production language rule, which names
+Arabic, pulls the model towards Arabic. `--identity-variant` swaps that one rule inside an
+evaluation run only. `pac` and the product identity are unchanged.
+
+| Variant | Language rule |
+|---|---|
+| A | production text, unchanged |
+| B | names no language: reply in the language of the user's latest message, standard form, no switching |
+| C | B, plus: write every word in that language's own script, with no words from another language |
+
+```bat
+python -m personal_ai_core.app.evaluate --num-ctx 8192 --identity-variant A
+python -m personal_ai_core.app.evaluate --num-ctx 8192 --identity-variant B
+python -m personal_ai_core.app.evaluate --num-ctx 8192 --identity-variant C
+```
+
+Each run records `identity_variant` and the exact `language_rule` in its header. Adopting a
+variant would be a change to ADR-012's text, which is a separate owner decision. A
+better score is evidence for that decision, not the decision.
+
 ## Verdicts
 
 | Verdict | Meaning |
