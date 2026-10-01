@@ -13,6 +13,7 @@ from personal_ai_core.agent.tools import (
     ListDirectory,
     ReadFile,
     RunCommand,
+    FindFiles,
     SearchText,
     WriteFile,
     default_tools,
@@ -44,6 +45,7 @@ def test_the_declared_risk_levels_are_the_designs(ws):
     assert {t.spec.name: t.spec.risk_level for t in default_tools(ws)} == {
         "read_file": RiskLevel.LOW,
         "list_directory": RiskLevel.LOW,
+        "find_files": RiskLevel.LOW,
         "search_text": RiskLevel.LOW,
         "write_file": RiskLevel.MEDIUM,
         "run_command": RiskLevel.HIGH,
@@ -213,3 +215,44 @@ def test_a_real_command_really_runs(ws):
     process that ran, was captured, and reported its failure."""
     result = RunCommand(ws).run({"command": "git status"})
     assert not result.ok and result.error and result.error.startswith("exit code")
+
+
+# --- find_files ---------------------------------------------------------------
+
+
+def _tree(ws):
+    root = ws.root
+    (root / "evals" / "cases").mkdir(parents=True)
+    (root / "evals" / "results").mkdir(parents=True)
+    (root / "evals" / "README.md").write_text("x\n", encoding="utf-8")
+    for name in ("contract_v0.json", "contract_v1.json", "refusal_v1.json"):
+        (root / "evals" / "cases" / name).write_text("{}\n", encoding="utf-8")
+    for i in range(4):
+        (root / "evals" / "results" / f"raw-{i}.JSON").write_text("{}\n", encoding="utf-8")
+    return root
+
+
+def test_find_files_counts_by_name_in_every_subdirectory(ws):
+    """The 2026-10-01 rig run: asked to count the JSON files in evals, the
+    agent searched contents and answered 'none'. There were files below."""
+    _tree(ws)
+    result = FindFiles(ws).run({"pattern": "*.json", "path": "evals"})
+    assert result.ok
+    lines = result.output.splitlines()
+    assert lines[-1] == "7 file(s) match *.json"  # case-insensitive: .JSON counts
+    assert "evals/cases/refusal_v1.json" in lines
+    assert "evals/README.md" not in result.output
+
+
+def test_find_files_reports_no_match_and_rejects_an_empty_pattern(ws):
+    assert FindFiles(ws).run({"pattern": "*.xyz"}).output == "no files match *.xyz"
+    assert not FindFiles(ws).run({"pattern": "  "}).ok
+
+
+def test_find_files_skips_git_and_never_leaves_the_workspace(ws):
+    result = FindFiles(ws).run({"pattern": "config"})
+    assert "no files match" in result.output  # .git/config is not walked
+
+
+def test_search_text_says_it_searches_contents_not_names(ws):
+    assert "find_files" in SearchText(ws).spec.description

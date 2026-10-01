@@ -5,7 +5,8 @@ Each declares its risk level, and the policy gate reads that declaration
 
     read_file      LOW     read one text file
     list_directory LOW     list a directory
-    search_text    LOW     find lines containing a string
+    search_text    LOW     find lines containing a string (file contents)
+    find_files     LOW     find files by name pattern, in every subdirectory
     write_file     MEDIUM  create or overwrite a text file (never a secret)
     run_command    HIGH    run one allowlisted command -- ASKED every time
     delete_file    CRITICAL delete one file -- ASKED, and a rollback point first
@@ -23,6 +24,7 @@ command, and only with the owner's yes for each one.
 """
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 import subprocess
@@ -115,7 +117,10 @@ class SearchText:
         self._workspace = workspace
         self.spec = ToolSpec(
             name="search_text",
-            description="Find lines containing a string, in text files under a directory.",
+            description=(
+                "Find lines containing a string, in text files under a directory. "
+                "Searches file CONTENTS; to find files by name, use find_files."
+            ),
             risk_level=RiskLevel.LOW,
             input_schema={
                 "type": "object",
@@ -170,6 +175,73 @@ class SearchText:
         if not matches:
             return ToolResult(ok=True, output="no matches")
         return ToolResult(ok=True, output="\n".join(matches))
+
+
+class FindFiles:
+    """Files whose NAME matches a pattern, in a directory and all below it.
+
+    Added 2026-10-01: asked to count the JSON files in `evals`, the agent had
+    only list_directory (one level) and search_text (contents), searched
+    contents for "*.json" and answered "none" -- there were 39 in the
+    subfolders. Names only: nothing here opens a file.
+    """
+
+    def __init__(self, workspace: Workspace) -> None:
+        self._workspace = workspace
+        self.spec = ToolSpec(
+            name="find_files",
+            description=(
+                "Find files by name in a directory and all its subdirectories. "
+                "`pattern` is a shell-style pattern such as *.json or test_*.py. "
+                "Returns the relative paths and the total count."
+            ),
+            risk_level=RiskLevel.LOW,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "e.g. *.json"},
+                    "path": _PATH,
+                },
+                "required": ["pattern"],
+                "additionalProperties": False,
+            },
+            timeout_seconds=30,
+            idempotent=True,
+        )
+
+    def run(self, arguments: Mapping[str, Any]) -> ToolResult:
+        pattern = arguments["pattern"].strip()
+        if not pattern:
+            return ToolResult(ok=False, error="no pattern to match")
+        given = arguments.get("path", ".")
+        base = self._workspace.root if given in ("", ".") else self._workspace.resolve(given)
+        if not base.is_dir():
+            return ToolResult(ok=False, error=f"not a directory: {given}")
+        found: list[str] = []
+        for directory, subdirectories, files in os.walk(base):
+            subdirectories[:] = sorted(d for d in subdirectories if d.lower() != ".git")
+            for name in sorted(files):
+                if not fnmatch.fnmatch(name.lower(), pattern.lower()):
+                    continue
+                relative = os.path.relpath(
+                    os.path.join(directory, name), self._workspace.root
+                ).replace(os.sep, "/")
+                try:
+                    # Through the sandbox: reserved files (the database) and
+                    # symlinks out of the workspace are not reported.
+                    self._workspace.resolve(relative)
+                except SandboxError:
+                    continue
+                found.append(relative)
+        if not found:
+            return ToolResult(ok=True, output=f"no files match {pattern}")
+        truncated = len(found) > MAX_LIST_ENTRIES
+        shown = found[:MAX_LIST_ENTRIES]
+        return ToolResult(
+            ok=True,
+            output="\n".join(shown) + f"\n{len(found)} file(s) match {pattern}",
+            truncated=truncated,
+        )
 
 
 class WriteFile:
@@ -374,6 +446,7 @@ def default_tools(workspace: Workspace, checkpoints: Checkpoints | None = None) 
     tools: list = [
         ReadFile(workspace),
         ListDirectory(workspace),
+        FindFiles(workspace),
         SearchText(workspace),
         WriteFile(workspace, checkpoints),
         RunCommand(workspace),
