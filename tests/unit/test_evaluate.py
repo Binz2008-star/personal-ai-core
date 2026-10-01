@@ -502,18 +502,18 @@ def test_the_default_profile_sends_no_sampling_options(tmp_path):
     assert _header(tmp_path)["sampling_options"] == {}
 
 
-def test_the_qwen_profile_reaches_the_model_beside_the_budget(tmp_path):
+def test_the_model_card_profile_reaches_the_model_beside_the_budget(tmp_path):
     model = FakeModel("A thread shares memory.")
-    _run(tmp_path, model, "--only", "lang-en-1", "--sampling", "qwen")
+    _run(tmp_path, model, "--only", "lang-en-1", "--sampling", "model-card")
     options = model.payloads[-1]["options"]
-    for key, value in ev.SAMPLING_PROFILES["qwen"].items():
+    for key, value in ev.SAMPLING_PROFILES["model-card"].items():
         assert options[key] == value
     assert "num_predict" in options  # the budget still owns the output limit
-    assert _header(tmp_path)["sampling_options"] == dict(ev.SAMPLING_PROFILES["qwen"])
+    assert _header(tmp_path)["sampling_options"] == dict(ev.SAMPLING_PROFILES["model-card"])
 
 
 def test_a_sampling_profile_never_changes_the_identity(tmp_path):
     plain, tuned = FakeModel("x"), FakeModel("x")
     _run(tmp_path, plain, "--only", "lang-en-1")
-    _run(tmp_path / "t", tuned, "--only", "lang-en-1", "--sampling", "qwen")
+    _run(tmp_path / "t", tuned, "--only", "lang-en-1", "--sampling", "model-card")
     assert _system_text(plain) == _system_text(tuned)

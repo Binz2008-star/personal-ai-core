@@ -102,14 +102,14 @@ PRODUCTION_VARIANT = "B"
 # Every failure in the two runs on d65f4f7 was Chinese text inside an Arabic
 # reply, including ungrounded cases no prompt change of that day touched, so
 # the next suspect is the sampler rather than the wording. Core sends no
-# sampling options, so the model runs on Ollama's defaults. `qwen` is the
+# sampling options, so the model runs on Ollama's defaults. `model-card` is the
 # generation config the Qwen2.5 model card publishes; its narrower top_k and
 # top_p cut the low-probability tail where a stray script lives. Like the
 # identity variants, a profile exists only inside an evaluation run, and
 # adopting one is a separate owner decision.
 SAMPLING_PROFILES: Mapping[str, Mapping[str, Any]] = {
     "default": {},
-    "qwen": {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "repeat_penalty": 1.05},
+    "model-card": {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "repeat_penalty": 1.05},
 }
 
 PASS = "PASS"
