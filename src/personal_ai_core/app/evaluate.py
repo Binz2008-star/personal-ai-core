@@ -67,15 +67,21 @@ SCORER_VERSION = "contract-checks-v1"
 
 # Experiment variants of ONE field of the identity policy: the language
 # rule. The first rig run (2026-10-01) answered English questions in Arabic
-# and mixed in Chinese, Korean and Cyrillic. The hypothesis under test is that
-# the production rule, which names Arabic, pulls a 7B model towards Arabic.
-# A variant exists only inside an evaluation run; it changes nothing pac
-# composes, and adopting one is a separate owner decision (ADR-012).
-#   A  production text, unchanged (None means: use it as is)
-#   B  names no language at all
+# and mixed in Chinese, Korean and Cyrillic. The hypothesis under test was that
+# the rule then in production, which named Arabic, pulled a 7B model towards
+# Arabic. B won (ADR-012 amendment 1) and is now the production text.
+# Every variant is a literal, so a letter means the same text in every result
+# file, before and after the adoption.
+#   A  the first production text (ADR-012 as written), kept for comparison
+#   B  names no language at all -- production since ADR-012 amendment 1
 #   C  B, plus an explicit single-script instruction (still naming no script)
-IDENTITY_VARIANTS: Mapping[str, str | None] = {
-    "A": None,
+IDENTITY_VARIANTS: Mapping[str, str] = {
+    "A": (
+        "Reply in the language the user wrote in.\n"
+        "For Arabic, reply in Modern Standard Arabic. Do not use a regional "
+        "dialect unless the user has asked for one. Do not change language in the "
+        "middle of a reply."
+    ),
     "B": (
         "Reply in the language of the user's latest message, and only in that "
         "language. Use its standard written form, not a regional dialect, unless "
@@ -89,6 +95,7 @@ IDENTITY_VARIANTS: Mapping[str, str | None] = {
         "and quoted text from the evidence may stay as they are written."
     ),
 }
+PRODUCTION_VARIANT = "B"
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -442,8 +449,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--identity-variant",
         choices=sorted(IDENTITY_VARIANTS),
-        default="A",
-        help="experiment: the language rule to run with (A = production, unchanged)",
+        default=PRODUCTION_VARIANT,
+        help=f"experiment: the language rule to run with ({PRODUCTION_VARIANT} = production)",
     )
     parser.add_argument(
         "--rescore",
@@ -512,16 +519,13 @@ def main(
         "judge_model": "none (ADR-013)",
         "scorer": SCORER_VERSION,
         "identity_variant": args.identity_variant,
-        "language_rule": (
-            IDENTITY_VARIANTS[args.identity_variant]
-            or default_response_policy().language_and_register
-        ),
+        "language_rule": IDENTITY_VARIANTS[args.identity_variant],
     }
 
     variant_rule = IDENTITY_VARIANTS[args.identity_variant]
     policy = (
         dataclasses.replace(default_response_policy(), language_and_register=variant_rule)
-        if variant_rule is not None
+        if variant_rule != default_response_policy().language_and_register
         else None
     )
     records: list[dict[str, Any]] = []

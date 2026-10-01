@@ -69,6 +69,22 @@ def notes(tmp_path):
     return folder
 
 
+# Every passage label carries its source's absolute path, so the cost of a
+# passage -- and with it any window tuned to admit some passages and not
+# others -- moved with the length of tmp_path: one window failed on the Windows
+# runner and its replacement on the Linux runner. Padding the folder name so
+# the path is always this long takes the machine out of the measurement.
+FIXED_PATH_LENGTH = 180
+
+
+def fixed_length_folder(tmp_path):
+    padding = FIXED_PATH_LENGTH - len(str(tmp_path)) - 1
+    assert padding >= 1, f"tmp_path is longer than {FIXED_PATH_LENGTH} characters"
+    folder = tmp_path / ("n" * padding)
+    folder.mkdir()
+    return folder
+
+
 # --- it grounds -----------------------------------------------------------
 
 
@@ -221,20 +237,22 @@ def test_the_evidence_pac_sends_fits_the_budget_it_recorded(tmp_path):
     read back from SQLite, and the evidence message the model received fits
     the budget that event records."""
     database = tmp_path / "core.db"
-    folder = notes(tmp_path)
+    folder = fixed_length_folder(tmp_path)
     for i in range(12):
         (folder / f"note{i}.md").write_text(
             "\n\n".join(f"Rank fusion note {i}-{j}: {NOTE}" for j in range(4)),
             encoding="utf-8",
         )
     # A window small enough that the budget binds. At the default window
-    # everything fits, and "fits" would prove nothing. Hand-tuned three times;
-    # now the preamble's own cost plus a fixed allowance, so a wording change
-    # cannot leave no passage admitted. The allowance is wide because every
-    # passage label carries its source's absolute path, so the threshold also
-    # moves with the length of tmp_path (2420 once failed on Windows only);
-    # it was measured to bind for tmp_path lengths from 6 to 209 characters.
-    window = 3075 + ScriptAwareTokenEstimator().estimate(GROUNDING_PREAMBLE)
+    # everything fits, and "fits" would prove nothing. Re-tuned from 2000 on
+    # 2026-09-25: the estimator calibration raised the per-character cost, and
+    # at 2000 no passage fit at all. Since 2026-10-01 the folder path has a
+    # fixed length (see fixed_length_folder), and the window is the preamble's
+    # own cost plus a fixed allowance, so neither the machine nor a wording
+    # change moves the threshold. With the preamble of #108 this is 2900, the
+    # middle of the measured range (~2500-3400) where the budget binds with
+    # at least one passage admitted.
+    window = 2575 + ScriptAwareTokenEstimator().estimate(GROUNDING_PREAMBLE)
     code, output, transport = run(
         ["--database", str(database), "--documents", str(folder)],
         env={"PAC_BOSS_CONTEXT_WINDOW": str(window)},

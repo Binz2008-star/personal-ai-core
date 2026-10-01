@@ -305,35 +305,51 @@ def _system_text(model: "FakeModel") -> str:
     return model.payloads[-1]["messages"][0]["content"]
 
 
-def test_variant_a_is_the_production_identity_unchanged(tmp_path):
+def test_the_production_variant_is_the_production_identity_unchanged(tmp_path):
+    """The default run goes through the production composition root with no
+    policy override, so it measures exactly what `pac` sends."""
     from personal_ai_core.conversation.factory import build_in_memory_service
+    from personal_ai_core.identity.text import LANGUAGE_AND_REGISTER
+
+    assert ev.IDENTITY_VARIANTS[ev.PRODUCTION_VARIANT] == LANGUAGE_AND_REGISTER
 
     production = FakeModel("x")
     service, _ = build_in_memory_service(transport=production)
     service.send(session_id=service.start_session(service.create_user().id).id, content="hi")
 
-    variant_a = FakeModel("A thread shares memory.")
-    _run(tmp_path, variant_a, "--only", "lang-en-1", "--identity-variant", "A")
-    assert _system_text(variant_a) == _system_text(production)
-    assert "For Arabic" in _system_text(variant_a)
+    default = FakeModel("A thread shares memory.")
+    _run(tmp_path, default, "--only", "lang-en-1")
+    assert _system_text(default) == _system_text(production)
+    raw = json.loads((tmp_path / "results" / "raw-20260930T120000Z.json").read_text("utf-8"))
+    assert raw["header"]["identity_variant"] == ev.PRODUCTION_VARIANT
 
 
-@pytest.mark.parametrize("variant", ["B", "C"])
+def test_variant_a_is_still_the_first_production_text(tmp_path):
+    """A letter means the same text in every result file: A is the rule the
+    2026-10-01 runs measured as A, frozen, not "whatever production is"."""
+    model = FakeModel("A thread shares memory.")
+    _run(tmp_path, model, "--only", "lang-en-1", "--identity-variant", "A")
+    assert "For Arabic, reply in Modern Standard Arabic." in _system_text(model)
+
+
+@pytest.mark.parametrize("variant", ["A", "B", "C"])
 def test_variants_replace_only_the_language_rule(tmp_path, variant):
     model = FakeModel("A thread shares memory.")
     _run(tmp_path, model, "--only", "lang-en-1", "--identity-variant", variant)
     system = _system_text(model)
     rule = ev.IDENTITY_VARIANTS[variant]
-    assert rule is not None
     assert rule in system
-    assert "For Arabic" not in system
-    assert "Arabic" not in rule  # the hypothesis: name no language
+    for other, text in ev.IDENTITY_VARIANTS.items():
+        if text != rule and text not in rule:
+            assert text not in system, other
+    if variant != "A":
+        assert "Arabic" not in rule  # the hypothesis B and C test: name no language
     # the rest of the identity is untouched: answer discipline and the five rules
     assert "Do not pad the reply" in system
     assert "Do not disclose secrets" in system
     raw = json.loads((tmp_path / "results" / "raw-20260930T120000Z.json").read_text("utf-8"))
     assert raw["header"]["identity_variant"] == variant
-    assert raw["header"]["language_rule"] == ev.IDENTITY_VARIANTS[variant]
+    assert raw["header"]["language_rule"] == rule
 
 
 def test_an_unknown_variant_is_refused(tmp_path):
