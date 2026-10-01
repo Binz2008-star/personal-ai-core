@@ -594,6 +594,8 @@ claim written in one place with nothing that notices it going stale.
   #146 f2ee400  feat(eval): the comparison tool -- a candidate judged per case against a
                baseline (ADR-020 unit 3)
   #147 5a88b0c  test: the harness's own output is accepted by the comparison tool
+  #148 c47efb7  eval: ADR-020 unit 4 -- Boss self-comparison at 5a88b0c (FAILED the
+               first rule on identical weights; the evidence for amendment 1)
   #149 ee30f82  feat(eval): ADR-020 amendment 1 -- the gate recalibrated from alpha and
                effect size
   #150 e8d69ec  fix(eval): compare GPU share by a tolerance, not one-decimal rounding
@@ -601,6 +603,9 @@ claim written in one place with nothing that notices it going stale.
                files in the sandbox
   #152 f363df1  fix(eval): rescore never overwrites, refuses a cases file that
                misses the run; exact GPU percentage
+  #153 29abb4e  docs: the handoff refreshed and kept fresh -- state computed at
+               session start, lag checked in CI
+  #154 b1f80be  eval: ADR-020 acceptance self-comparison at 29abb4e -- PASS
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1066,7 +1071,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-01, main at f363df1)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at c47efb7)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1088,7 +1093,7 @@ Who decides
 ADR-020 (evaluating a candidate model) -- where it stands
   - Units 1-3 built: weights digest + provider (#142, verified live on the rig),
     --candidate (#145), the comparison tool (#146).
-  - Unit 4, Boss vs itself at 5a88b0c (#148, HELD, do not merge yet): FAILED
+  - Unit 4, Boss vs itself at 5a88b0c (#148, merged as evidence): FAILED
     under the first rule on identical weights -- the evidence that the rule was
     miscalibrated.
   - Amendment 1 (#149): alpha 10% family-wise (worst case, cases independent --
@@ -1097,10 +1102,17 @@ ADR-020 (evaluating a candidate model) -- where it stands
     refusal regresses. Unguarded groups are descriptive. "Fails every run" is
     gone. test_gate_calibration.py holds the constants to the targets.
   - GPU share is compared within 0.05, not by rounding (#150).
-  - NEXT: one acceptance self-comparison on the rig, from current main, 15
-    contract + 9 refusal runs per side (48 runs, about an hour), read once.
-    PASS opens candidate evaluation. FAIL is not re-run: alpha and the effect
-    size are revisited. #148 is merged with or after that result, as evidence.
+  - ACCEPTED: the acceptance self-comparison at 29abb4e (#154, 48 runs, read
+    once) PASSED. Rescored under contract-checks-v3 (this PR: a reply saying
+    the question lacks something is REVIEW, not a refusal) it still PASSES,
+    with no refusal on either side. The gate is calibrated.
+  - Open from #154: ground-decline-ar failed 2/15 vs 9/15 on identical weights
+    (p about 1% by chance; below the +8 threshold). The case is the noisiest
+    in the set; cause unresolved.
+  - NEXT: candidate evaluation is open. The first real candidate (a LoRA of
+    the Boss model) needs: its weights served by Ollama with an ADAPTER line
+    (so adapters are recorded), a fresh baseline at the same commit, and the
+    same 15 + 9 runs per side. Adoption still needs the owner (ADR-002, D4).
   - Not to be mixed into the gate work: ground-decline-ar's guard-on failures
     (#143 0/5 vs unit 4 5/10, cause unresolved) and the guard's blind spot for
     Hebrew and other "other" scripts (allowed by `{OTHER}` in check_reply).

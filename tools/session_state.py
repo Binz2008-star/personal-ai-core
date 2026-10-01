@@ -64,8 +64,10 @@ def handoff_lag(stated: str) -> int | None:
         git("merge-base", "--is-ancestor", stated, "HEAD")
     except subprocess.CalledProcessError:
         return None
-    return len(git("log", "--merges", "--first-parent", "--format=%h",
-                   f"{stated}..HEAD").split())
+    subjects = git("log", "--merges", "--first-parent", "--format=%s",
+                   f"{stated}..HEAD").splitlines()
+    # Only PR merges count: merging main into a branch is not a landing.
+    return sum(1 for subject in subjects if MERGE_SUBJECT.match(subject))
 
 
 def report() -> list[str]:

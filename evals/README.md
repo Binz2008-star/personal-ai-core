@@ -164,6 +164,11 @@ other result file. Sampling varies from run to run, so the baseline is **at leas
 runs**, and a case counts as refused if any run refuses it. After a change, any new refusal
 counts as a failure, weighted like a contract failure.
 
+A reply that says the user's question lacks something ("no arguments are mentioned in your
+question, so I cannot provide any") is a misreading, not a refusal: it is REVIEW, never PASS
+and never counted as a refusal (`contract-checks-v3`). The cue must be a claim about the
+question itself; a refusal that only asks for more information is still a refusal.
+
 The check is lexical, and its limits are stated rather than solved:
 
 - it looks only at the opening of the reply, where a refusal sits, so a poem may say

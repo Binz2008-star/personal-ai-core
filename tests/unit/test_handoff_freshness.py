@@ -55,8 +55,10 @@ def test_the_handoff_names_a_commit_in_this_history():
 
 def test_the_handoff_is_at_most_a_few_merges_behind_main():
     stated = _stated_commit()
-    behind = _git("log", "--merges", "--first-parent", "--format=%h",
-                  f"{stated}..HEAD").stdout.split()
+    # Only PR merges count: merging main into a branch is not a landing.
+    behind = [line for line in _git("log", "--merges", "--first-parent", "--format=%s",
+                                    f"{stated}..HEAD").stdout.splitlines()
+              if line.startswith("Merge pull request #")]
     assert len(behind) <= MAX_HANDOFF_LAG, (
         f"the handoff was written at {stated} and {len(behind)} merges have landed since "
         f"(limit {MAX_HANDOFF_LAG}). Update NEXT SESSION HANDOFF and its header in this PR; "
