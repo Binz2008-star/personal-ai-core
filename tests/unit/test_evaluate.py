@@ -339,3 +339,62 @@ def test_variants_replace_only_the_language_rule(tmp_path, variant):
 def test_an_unknown_variant_is_refused(tmp_path):
     with pytest.raises(SystemExit):
         _run(tmp_path, FakeModel("x"), "--identity-variant", "Z")
+
+
+# --- contract-v1: ADR-018 unit 3 cases --------------------------------------------
+
+CASES_V1 = REPO / "evals" / "cases" / "contract_v1.json"
+V1_NEW_IDS = {
+    "secret-control-en",
+    "secret-control-ar",
+    "secret-prose-en",
+    "secret-chunk-boundary",
+    "secret-marker-honest-en",
+}
+
+
+def test_v1_case_file_is_well_formed_and_the_default():
+    version, cases = ev.load_cases(CASES_V1)
+    assert version == "contract-v1"
+    assert len(cases) == 17 + len(V1_NEW_IDS)
+    assert V1_NEW_IDS <= {c.id for c in cases}
+    assert ev._parser().parse_args([]).cases == Path("evals/cases/contract_v1.json")
+
+
+def test_v1_keeps_every_v0_case_unchanged():
+    v0 = json.loads(CASES.read_text("utf-8"))["cases"]
+    v1 = {c["id"]: c for c in json.loads(CASES_V1.read_text("utf-8"))["cases"]}
+    for case in v0:
+        assert v1[case["id"]] == case, case["id"]
+    assert set(v1) - {c["id"] for c in v0} == V1_NEW_IDS
+
+
+def test_v1_controls_use_the_v0_secret_document():
+    v0 = {c["id"]: c for c in json.loads(CASES.read_text("utf-8"))["cases"]}
+    v1 = {c["id"]: c for c in json.loads(CASES_V1.read_text("utf-8"))["cases"]}
+    for case_id in ("secret-control-en", "secret-control-ar", "secret-marker-honest-en"):
+        assert v1[case_id]["documents"] == v0["secret-en"]["documents"]
+
+
+def test_the_chunk_boundary_case_really_straddles_a_chunk_boundary():
+    from personal_ai_core.core.knowledge import Document, DocumentVersion
+    from personal_ai_core.knowledge import FixedSizeChunker
+
+    case = next(c for c in ev.load_cases(CASES_V1)[1] if c.id == "secret-chunk-boundary")
+    content = case.documents[0]["content"]
+    key = "DB_PASSWORD="
+    value = content[content.index(key) + len(key):].split("\n", 1)[0]
+    head, tail = (spec["text"] for spec in case.checks if spec["type"] == "absent")
+    assert value.startswith(head) and value.endswith(tail)
+
+    document = Document(source_uri="file:///database.md")
+    version = DocumentVersion(document_id=document.id, content_hash="h")
+    # the chunker the grounded path is built with (conversation/factory.py)
+    chunks = FixedSizeChunker().chunk(document=document, version=version, content=content)
+
+    assert len(chunks) >= 2
+    assert not any(value in c.text for c in chunks)  # no chunk holds the whole value
+    assert [key in c.text for c in chunks] == [True] + [False] * (len(chunks) - 1)
+    assert [head in c.text for c in chunks] == [True] + [False] * (len(chunks) - 1)
+    # the tail sits in a later chunk with no key in front of it: the D6 limit
+    assert tail not in chunks[0].text and any(tail in c.text for c in chunks[1:])
