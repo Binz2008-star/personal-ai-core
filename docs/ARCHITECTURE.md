@@ -60,13 +60,13 @@ design background, not current architecture.
 | Measurement infrastructure | evaluation cases, scorer, harness, result files | git |
 
 - **[CURRENT]** Memory is the only state with a gate in code.
-- **[CURRENT]** The conversation database is SQLite by default and PostgreSQL by opt-in
-  (ADR-016). With `--ephemeral` nothing is stored. Of the durable backends, only SQLite
-  stores feedback.
+- **[CURRENT]** The conversation database is SQLite in `pac`. A PostgreSQL backend and its
+  builder exist (ADR-016); nothing in `src/` calls the builder. With `--ephemeral` nothing
+  is stored. Of the durable backends, only SQLite stores feedback.
 - **[CURRENT]** The knowledge corpus is not durable. Files are re-read on every run and the
   indexes live in process memory.
-- **[CURRENT]** The owner profile is a file. It is composed into every turn and has no
-  version, no gate and no event.
+- **[CURRENT]** The owner profile is a file, with an optional projects file beside it. Both
+  are composed into every turn and have no version, no gate and no event.
 - **[CURRENT]** Deployment shape: one user, one process, one writer, synchronous contracts.
 - **[OPEN]** Whether the owner profile is governed state (OD-5).
 - **[OPEN]** Whether configuration overrides from the environment and per-call options are
@@ -79,8 +79,9 @@ design background, not current architecture.
 - **[CURRENT]** `app` may import `core` and `conversation` only.
 - **[CURRENT]** `conversation/factory.py` is the one composition root and the only module
   that names concrete adapters.
-- **[CURRENT]** No model name appears outside `core/config.py`. No Ollama detail appears
-  outside `runtime/ollama/`.
+- **[CURRENT]** No model name appears outside `core/config.py`.
+- **[CURRENT]** No Ollama endpoint or client import appears outside `runtime/ollama/`. The
+  host setting lives in `core/config.py`, and the registry names the provider as a string.
 
 ## 5. Memory and event semantics
 
@@ -95,8 +96,9 @@ design background, not current architecture.
   (ADR-014, ADR-015) and no caller selects it.
 - **[CURRENT]** `SealedMemoryStore` exists and refuses every operation. Nothing in `src/`
   references it outside its own definition.
-- **[CURRENT]** Memory events share the `events` table with conversation events. They are
-  told apart by type and actor.
+- **[CURRENT]** Nothing separates memory events from conversation events in storage. A
+  pipeline given the same database writes to the same `events` table; the two are told
+  apart by type and actor.
 - **[CURRENT]** A held conflict writes an event and nothing else. `supersede` has no caller.
 - **[TARGET]** The permitted sources of a memory candidate are stated: which evidence, and
   whose text.
@@ -112,7 +114,8 @@ design background, not current architecture.
 - **[CURRENT]** `MemoryStore.write` accepts any record. The sole-writer guarantee is a test
   that matches call patterns in source.
 - **[CURRENT]** Code, identity rules, defaults, evaluation cases and the scorer change
-  through review in git.
+  through pull requests in git. Whether review is required is not enforced by the
+  repository.
 - **[CURRENT]** Nothing in the system adapts its own behaviour automatically.
 - **[TARGET]** A memory write is legitimate only as the result of a gate decision.
 - **[TARGET]** Every gate decision is recorded with the identity of the rule that made it,
@@ -122,8 +125,9 @@ design background, not current architecture.
 
 ## 7. Identity, provenance and replay
 
-- **[CURRENT]** Events and messages have stable ids and a stored order. Chunk ids and memory
-  ids are minted per run.
+- **[CURRENT]** Events and messages have stable ids and a stored order. Chunk ids are minted
+  per run. A memory id is random at creation and stable once stored. Neither can be
+  reproduced by replay.
 - **[CURRENT]** A `MemoryRecord` carries provenance, and its session must match its
   provenance's session.
 - **[CURRENT]** Retrieval results carry source, version, character range, method and rank.
@@ -150,9 +154,10 @@ design background, not current architecture.
 - **[CURRENT]** The harness scores the contract with mechanical checks and no judge model.
   Raw replies and verdicts are committed unmodified. Each result names the commit, the
   cases version and the scorer version.
-- **[CURRENT]** Two case sets exist: `contract_v1` (language and contract) and `refusal_v1`
-  (open-response). A `refusal_v1` baseline is committed: two runs at `c8738e9`, no
-  refusals. `evals/README.md` asks for at least three runs.
+- **[CURRENT]** Three case files exist: `contract_v0` (kept for comparison), `contract_v1`
+  (language and contract) and `refusal_v1` (open-response). A `refusal_v1` baseline is
+  committed: two runs at `c8738e9`, no refusals, one case scored REVIEW in one run.
+  `evals/README.md` asks for at least three runs.
 - **[CURRENT]** The harness refuses to run under any model name but the Boss model's.
 - **[CURRENT]** A result records a model name, not the weights that produced it.
 - **[TARGET]** Each reply and each evaluation run names the weights and the runtime that
@@ -167,7 +172,8 @@ Feedback:
 
 - **[CURRENT]** A judgement is stored as a `FEEDBACK_RECORDED` event. Its key is session,
   source event, outcome and actor, so a repeated outcome or a second correction on the same
-  reply is dropped. Only a session's latest reply can be judged.
+  reply is dropped. `pac --feedback` can judge only a session's latest reply;
+  `FeedbackRecorder` accepts any source event in the session.
 - **[CURRENT]** `derive_observations` reads feedback and stops at a read-only display.
 - **[TARGET]** Feedback on a reply is an ordered history. The last judgement is effective.
   Duplicate protection covers a retried submission, not an outcome value.
