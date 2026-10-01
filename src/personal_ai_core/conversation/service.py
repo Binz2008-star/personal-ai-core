@@ -268,6 +268,26 @@ class ConversationService:
             payload={**requested, "message_count": len(prompt) + 1, "attempt": 2},
             message_id=user_message.id,
         )
+        def guard_event(**delivered: Any) -> None:
+            self._recorder.record(
+                session_id=session_id,
+                type=EventType.REPLY_LANGUAGE_GUARD,
+                payload={
+                    "expected": first.expected,
+                    "reason": first.reason,
+                    "rejected_counts": dict(first.reply_counts),
+                    # What the verdict was computed on: quoted Latin removed.
+                    # With the reason, this reproduces the decision.
+                    "rejected_assessed_counts": dict(first.assessed_counts),
+                    # The rejected draft's cost; GENERATION_COMPLETED carries
+                    # the delivered reply's, so the two together are the turn's.
+                    "rejected_prompt_tokens": response.prompt_tokens,
+                    "rejected_completion_tokens": response.completion_tokens,
+                    **delivered,
+                },
+                message_id=user_message.id,
+            )
+
         try:
             retried = self._provider.generate(
                 model=spec.name, messages=[*prompt, note], options=options
@@ -279,23 +299,15 @@ class ConversationService:
                 payload={"model": spec.name, "error": str(exc), "attempt": 2},
                 message_id=user_message.id,
             )
+            # The trigger is recorded on this path too: a retry that never
+            # returned is still a guard firing, and its counts are evidence.
+            guard_event(delivered_counts=None, delivered_passed=None, retry_failed=True)
             raise
         second = check_reply(user_message.content, retried.text, evidence)
-        self._recorder.record(
-            session_id=session_id,
-            type=EventType.REPLY_LANGUAGE_GUARD,
-            payload={
-                "expected": first.expected,
-                "reason": first.reason,
-                "rejected_counts": dict(first.reply_counts),
-                "delivered_counts": dict(second.reply_counts),
-                "delivered_passed": not second.violation,
-                # The rejected draft's cost; GENERATION_COMPLETED carries the
-                # delivered reply's, so the two together are the turn's.
-                "rejected_prompt_tokens": response.prompt_tokens,
-                "rejected_completion_tokens": response.completion_tokens,
-            },
-            message_id=user_message.id,
+        guard_event(
+            delivered_counts=dict(second.reply_counts),
+            delivered_passed=not second.violation,
+            retry_failed=False,
         )
         return retried
 
