@@ -95,6 +95,16 @@ ALLOWED_SKIP_SOURCES = {
 # safety rules are split that way in the first place.
 MAX_NON_HARNESS_SKIPS = 57
 
+# Skips that say the MACHINE cannot do something, not that a test was turned
+# off. Windows refuses to create a symlink without Developer Mode or an
+# elevated shell, and the sandbox tests that need one skip with this reason.
+# Measured on the owner's rig 2026-10-01: 11 such skips made this audit fail
+# there while CI (which can create symlinks) was green. They are allowed from
+# any file and kept out of the structural count -- but only where symlinks are
+# genuinely unavailable: on Linux, where CI and every server run, the same
+# skip is still a failure (test_environment_skips_never_happen_on_linux).
+ENVIRONMENT_SKIP_REASONS = ("cannot create a symlink here",)
+
 pytestmark = pytest.mark.skipif(
     os.environ.get(NESTED_MARKER) == "1",
     reason="nested run started by the skip audit itself; not re-entered",
@@ -126,11 +136,16 @@ def skips() -> list[str]:
     return _skip_report()
 
 
+def _environmental(line: str) -> bool:
+    return any(reason in line for reason in ENVIRONMENT_SKIP_REASONS)
+
+
 def _unaccounted_for(lines: list[str]) -> list[str]:
     return [
         line
         for line in lines
         if not any(source in _normalize(line) for source in ALLOWED_SKIP_SOURCES)
+        and not _environmental(line)
     ]
 
 
@@ -150,13 +165,21 @@ def test_every_skip_comes_from_an_accounted_for_file(skips):
 def test_the_number_of_structural_skips_has_not_grown(skips):
     """The tokenizer harness may grow samples; the exemptions may not grow."""
     structural = [
-        line for line in skips if "test_token_estimator_validation.py" not in line
+        line for line in skips
+        if "test_token_estimator_validation.py" not in line and not _environmental(line)
     ]
     total = sum(_count(line) for line in structural)
     assert total <= MAX_NON_HARNESS_SKIPS, (
         f"expected at most {MAX_NON_HARNESS_SKIPS} structural skips, found "
         f"{total}: {structural}"
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the allowance below exists for Windows")
+def test_environment_skips_never_happen_on_linux(skips):
+    """The symlink allowance is for machines that cannot create one. On Linux
+    they always can, so a skip there means the tests stopped running."""
+    assert not [line for line in skips if _environmental(line)]
 
 
 def test_every_skip_states_a_usable_reason(skips):
