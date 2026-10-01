@@ -1,7 +1,8 @@
 # ADR-020 — Evaluating a candidate model
 
 **Status:** PROPOSED · writing authorized by the owner 2026-10-01 ("موافق على ADR-020") ·
-design only · nothing built · the decisions in §8 are open
+§8 decided 2026-10-01 ("موافق على الأربعة": D1 authorized, D2 and D3 as written, D4 required) ·
+units in §9 being built
 
 - Settles: `ARCHITECTURE.md` OD-8, "how a candidate model is named and admitted".
 - Serves:
@@ -162,7 +163,11 @@ The CURRENT lines change only when units are built.
 - **D4.** Whether a passed gate is required before adoption (proposed), or advisory. This is
   `ARCHITECTURE.md` OD-3, for models only.
 
-## 9. Proposed units, if authorized
+**Decided 2026-10-01.** The owner approved all four as proposed: the design is
+authorized, the regression rule and run counts stand as written, and a passed gate is
+required before a candidate is adopted.
+
+## 9. Units
 
 1. Weights digest and provider label (§3.1, §3.2): recorded in headers and events, with
    tests. No behaviour change.

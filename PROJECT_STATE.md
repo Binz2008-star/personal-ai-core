@@ -75,6 +75,8 @@ SINCE dff472c (2026-10-01), LIVE IN pac
 - Agent tool find_files (#129).
 - ADR-002 owner note: the open-response behaviour is intended and is a
   requirement for any model change (#127).
+- ADR-020, the candidate-model gate: design merged (5d2b2a3), D1-D4 approved;
+  not built yet, pac unchanged by it.
 
 Evaluation (ADR-013 harness; the harness is PROPOSED, it has been run many
 times):
@@ -90,7 +92,8 @@ OPEN REVIEW FINDINGS (independent review, 2026-10-01; verified at 297f001)
 Fixed: #130, #131, #132, #134. Open, each an owner decision, nothing done:
 - A candidate model cannot be evaluated under its own name: the harness
   refuses another PAC_BOSS_MODEL, and llama.cpp turns are recorded with
-  provider "ollama". Must be settled before any fine-tune run.
+  provider "ollama". DECIDED: ADR-020, D1-D4 approved 2026-10-01; units
+  being built (see NEXT SESSION HANDOFF).
 - `pac --remember` appends to profile.md outside the promotion lifecycle.
   The profile is owner-authored identity text, not a MemoryRecord; whether
   that is the intended boundary is unrecorded.
@@ -1044,52 +1047,72 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-09-23, main at 74a2ae2)
+NEXT SESSION HANDOFF (updated 2026-10-01, main at 5d2b2a3)
 ==========================================================
 
-State: everything through #58 is merged, and this records PR is the only one
-open. 691 passed / 14 skipped on Linux and Windows; ruff and pyright are clean.
-All findings F-1 to F-5 are closed. F-1's model-side question remains open, and
-only ADR-013's injection case can answer it.
+Who decides: the owner delegated engineering direction to the lead session
+("you got the all authority u need"). The lead merges on green CI. Owner
+decisions are still needed for: architecture and product direction, the Boss
+model, schema / migration / Neon / pgvector, branch protection, and anything
+on the rig's system settings.
 
-Owner's standing constraints:
-  - The ledger duplicate-row weakness stays in BACKLOG, with no implementation
-    until authorized.
-  - The owner reviews before any merge that changes behaviour. Do not say READY
-    or ACCEPTED; give evidence.
-  - ADR-010..013 and Phase 1 are PROPOSED / NOT ACCEPTED; accepting them is the
-    owner's call.
+State at 5d2b2a3:
+  - CI green on static, suite and suite-windows. Locally about 1640 passed.
+  - pac runs the Boss model with: ADR-018 redaction, ADR-012 rule B, model-card
+    sampling, and the ADR-019 language guard on (PAC_LANGUAGE_GUARD=0 turns it
+    off). See "SINCE dff472c, LIVE IN pac" above.
+  - #140 (ADR-020) was squash-merged as 5d2b2a3, by mistake: this repository
+    merges with merge commits, and the ledger reads only `Merge pull request`
+    commits, so #140 cannot have a ledger row. It is recorded in this sentence
+    instead. Merge with merge commits from here on.
 
-Done, owner-approved and merged: F-3 (#53), F-4 (#52), F-5 (#54), the docs
-alignment (#57), F-2 (#58), and Phase 5 (#69).
+ADR-020 (evaluating a candidate model): D1-D4 approved by the owner
+2026-10-01 ("موافق على الأربعة"): build the units; a contract case regresses
+at +2 failures in 5 runs or failing every candidate run, and any new refusal
+regresses; 5 contract + 3 refusal runs per side plus one unguarded pair of 5;
+a passed gate is REQUIRED before adoption. Units, one PR each:
+  1. weights digest and provider label in headers and events  -- IN PROGRESS
+     (branch feat/adr-020-unit1-weights-digest)
+  2. --candidate NAME, role: candidate
+  3. python -m personal_ai_core.app.compare BASELINE_DIR CANDIDATE_DIR
+  4. self-comparison of the Boss model on the rig, committed as results
+No fine-tune is judged before unit 4 passes against itself.
 
-What is next is not an agent's call to start. These are candidates, not a queue:
-  - ADR-013's harness, where a live model runs. Its injection case is now
-    reachable through `pac --documents`, and it is the only thing that can answer
-    F-1's model-side question.
-  - A semantic embedding provider behind EmbeddingProvider. The hashing embedder
-    returns neighbours whatever the meaning, so an English query also retrieved
-    an Arabic passage in the #58 smoke run.
-  - Memory recall in `pac`. It needs a promotion path on the pac side first, or it
-    reports a capability that returns nothing.
+The rig (owner's Windows PC, GTX 1060 6GB):
+  - Ollama runs on Vulkan with CUDA hidden from the server process (the CUDA
+    backend crashes on driver 560.94). About 85% GPU, about 2 min per
+    contract_v1 run. Results before the GPU baseline were CPU-only.
+  - In flight: 13 runs on 6565dd3 (5 contract guard on, 5 contract guard off,
+    3 refusal). The rig session opens one PR with the 26 result files. Review
+    it as results only (no code; PLANTED-* canaries are expected), merge it
+    with a merge commit, then report guard on vs off and GPU refusals.
+  - Rig session works in the worktree C:\Users\loyal\personal-ai-core-review.
+    Do not delete the locked pytest-of-loyal folder; use --basetemp.
+  - Keep Smart App Control on. No driver update, no OLLAMA_GPU_LAYERS change,
+    no system setting change without the owner. No CPU-heavy work during runs.
+  - Recommended to the owner, not done: stop the Ollama desktop app at startup
+    (it loads the model at 4096 context); write ~/.personal-ai-core/profile.md.
 
-Owner-only actions: make `suite-windows` a required check on main (no agent tool
-can change branch protection); accept the ADRs and Phase 1; build the ADR-013
-harness where a live model exists.
+Open, each an owner decision (see OPEN REVIEW FINDINGS and ARCHITECTURE.md
+OD-1..OD-10): `pac --remember` outside the lifecycle; ExperiencePipeline unwired
+and its 12-character conflict check; MemoryReader over a write-capable store;
+dead enum members. ADR-017 A2 Step B stays unbuilt.
 
-Mechanics that cost time last session:
-  - Branch protection requires a check named exactly `suite` and an up-to-date
-    branch. Merge main into the branch; never rebase or force-push.
-  - Before every push run: python3 -m pytest -q; python3 -m ruff check .;
-    python3 -m pyright. CI runs all three.
-  - The merge ledger fails CI once more than 3 merges are unrecorded. A line
-    that starts with two spaces and "#<number> " is parsed as a ledger row.
-  - Commit before running mutation tests, and restore with git checkout -- <file>.
-  - CLEAR __pycache__ BEFORE EVERY MUTANT RUN (and set PYTHONDONTWRITEBYTECODE=1).
-    Two same-size mutants applied within one second reused stale bytecode
-    and reported a wrong count. This was caught while doing F-5.
-  - Write commit messages to a file and use git commit -F; the harness blocks a
-    heredoc combined with commit and push.
+Mechanics that cost time:
+  - Required checks are `suite` and `static`, and the branch must be up to
+    date: merge main into the branch (or update_pull_request_branch). Never
+    rebase or force-push a shared branch.
+  - Before every push: python3 -m pytest -q; python3 -m ruff check .;
+    python3 -m pyright.
+  - The ledger fails CI once more than 3 merges are unrecorded. Put the rows
+    for earlier merges into the next PR. A line starting with two spaces and
+    "#<number> " is parsed as a row.
+  - Budget-window tests derive from the preamble and GUARD_NOTE estimates;
+    path-length tests use a fixed-length folder (Windows paths differ).
+  - Mutation tests: commit first, PYTHONDONTWRITEBYTECODE=1, clear
+    __pycache__ before every mutant.
+  - The model-name guard test rejects the model family name in src/.
+  - Write commit messages to a file and use git commit -F.
 
 DOCUMENTATION DISCIPLINE
 ========================

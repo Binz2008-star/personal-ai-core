@@ -170,9 +170,10 @@ design background, not current architecture.
 - **[TARGET]** A candidate is evaluated under its own name and digest, without changing
   what `pac` runs. It is judged per case over several runs, against a baseline taken with
   the same cases version, scorer version and settings (ADR-020 §3.3 to §3.6).
-- **[OPEN]** Whether an evaluation result blocks anything (OD-3); for models, ADR-020 D4.
-- **[OPEN]** How a candidate model is named and admitted (OD-8). Proposed in ADR-020,
-  which is not yet authorized.
+- **[DECIDED]** For models, a passed ADR-020 gate is required before adoption (ADR-020
+  D4, 2026-10-01). Whether other evaluation results block anything stays open (OD-3).
+- **[DECIDED]** How a candidate model is named and admitted (OD-8): ADR-020, D1-D4
+  approved 2026-10-01. Not built yet; the TARGET lines above stay TARGET until it is.
 
 ## 9. Feedback, erasure and forget semantics
 
@@ -256,6 +257,6 @@ Marked conflicts with ADRs:
 | OD-5 | Whether the owner profile is governed state, and its gate |
 | OD-6 | Whether source evidence may be deleted |
 | OD-7 | Whether assistant or agent text may be a memory candidate source |
-| OD-8 | How a candidate model is named and admitted. Proposed: ADR-020 |
+| OD-8 | How a candidate model is named and admitted. Decided: ADR-020 (D1-D4 approved 2026-10-01) |
 | OD-9 | Whether ungated configuration overrides are acceptable |
 | OD-10 | Accept the built-but-proposed ADRs, or let this document supersede them |
