@@ -162,18 +162,19 @@ class ConversationService:
         if grounding is not None and grounding.message is not None:
             prompt = [identity_message, grounding.message, *history]
 
+        requested = {
+            "model": spec.name,
+            "provider": spec.provider,
+            "message_count": len(prompt),
+            "grounded": grounding is not None and grounding.message is not None,
+            "evidence_chunks": grounding.used if grounding is not None else 0,
+            "generation_limit": self._generation_limit(spec=spec, grounding=grounding),
+            "sampling": dict(self._sampling),
+        }
         self._recorder.record(
             session_id=session_id,
             type=EventType.GENERATION_REQUESTED,
-            payload={
-                "model": spec.name,
-                "provider": spec.provider,
-                "message_count": len(prompt),
-                "grounded": grounding is not None and grounding.message is not None,
-                "evidence_chunks": grounding.used if grounding is not None else 0,
-                "generation_limit": self._generation_limit(spec=spec, grounding=grounding),
-                "sampling": dict(self._sampling),
-            },
+            payload=requested,
             message_id=user_message.id,
         )
 
@@ -209,6 +210,7 @@ class ConversationService:
                 spec=spec,
                 options=generation_options,
                 response=response,
+                requested=requested,
             )
 
         reply = Message(
@@ -241,6 +243,7 @@ class ConversationService:
         spec: ModelSpecLike,
         options: Mapping[str, Any],
         response: Any,
+        requested: Mapping[str, Any],
     ) -> Any:
         """ADR-019 §3.2: one retry on a language violation, then deliver.
 
@@ -256,6 +259,14 @@ class ConversationService:
             role=Role.SYSTEM,
             content=GUARD_NOTE,
             language=UNDETERMINED_LANGUAGE,
+        )
+        # ADR-019 §3.3: the second generation is requested on the record like
+        # the first, so a turn's cost can be read from its events.
+        self._recorder.record(
+            session_id=session_id,
+            type=EventType.GENERATION_REQUESTED,
+            payload={**requested, "message_count": len(prompt) + 1, "attempt": 2},
+            message_id=user_message.id,
         )
         try:
             retried = self._provider.generate(
@@ -279,6 +290,10 @@ class ConversationService:
                 "rejected_counts": dict(first.reply_counts),
                 "delivered_counts": dict(second.reply_counts),
                 "delivered_passed": not second.violation,
+                # The rejected draft's cost; GENERATION_COMPLETED carries the
+                # delivered reply's, so the two together are the turn's.
+                "rejected_prompt_tokens": response.prompt_tokens,
+                "rejected_completion_tokens": response.completion_tokens,
             },
             message_id=user_message.id,
         )

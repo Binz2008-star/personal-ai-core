@@ -63,6 +63,27 @@ def test_a_chinese_draft_is_generated_again_and_the_arabic_reply_delivered():
     assert event.payload["expected"] == "arabic"
     assert event.payload["delivered_passed"] is True
     assert event.payload["rejected_counts"]["han"] > 0
+    assert "rejected_prompt_tokens" in event.payload
+    assert "rejected_completion_tokens" in event.payload
+
+
+def test_the_retry_is_requested_on_the_record_as_attempt_two():
+    """ADR-019 §3.3, which the first implementation did not follow: the second
+    generation records its own GENERATION_REQUESTED with attempt 2."""
+    model = Scripted(CHINESE, ARABIC)
+    _, events, _, _ = turn(model)
+    requested = [e for e in events if e.type is EventType.GENERATION_REQUESTED]
+    assert len(requested) == 2
+    first, second = (dict(e.payload) for e in requested)
+    assert "attempt" not in first and second["attempt"] == 2
+    assert second["message_count"] == first["message_count"] + 1
+    assert second["sampling"] == first["sampling"]
+
+
+def test_a_good_reply_is_requested_once():
+    model = Scripted(ARABIC)
+    _, events, _, _ = turn(model)
+    assert len([e for e in events if e.type is EventType.GENERATION_REQUESTED]) == 1
 
 
 def test_the_guard_event_carries_counts_never_text():
