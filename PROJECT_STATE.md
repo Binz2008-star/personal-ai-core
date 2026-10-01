@@ -509,6 +509,7 @@ claim written in one place with nothing that notices it going stale.
                runs
   #119 70b9698  eval: contract_v1 at f953828, --sampling model-card, num_ctx 8192,
                two runs
+  #120 1cd892b  feat(config): send the Boss model's sampling on every turn
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
