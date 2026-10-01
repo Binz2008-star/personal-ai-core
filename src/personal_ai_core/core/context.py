@@ -85,8 +85,11 @@ class ContextAllocation:
     overhead: int
     history: int
     identity: int = 0
+    # ADR-019: the reply-language guard's note, reserved on every turn while
+    # the guard is on so a retry cannot overflow the window. Zero when off.
+    guard: int = 0
 
-    SHARES = ("generation_reserve", "overhead", "history", "identity")
+    SHARES = ("generation_reserve", "overhead", "history", "identity", "guard")
 
     def __post_init__(self) -> None:
         for name in ("context_window", *self.SHARES):

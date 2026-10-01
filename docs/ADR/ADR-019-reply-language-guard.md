@@ -1,7 +1,8 @@
 # ADR-019 — A mechanical guard for the reply language
 
 **Status:** PROPOSED · direction approved by the owner 2026-10-01 ("موافق على الاثنين")
-· the decisions in §6 are open · unit 1 (the pure check) built; nothing wired
+· §6 decided 2026-10-01 as recommended (D1 retry, D2 as written, D3 the list, D4 on;
+the owner left the choice to the lead) · units 1 and 2 built
 
 - Contract text this design serves: the language rule, ADR-012 amendment 1: "Reply in
   the language of the user's latest message, and only in that language … Do not change
@@ -143,6 +144,15 @@ The guard must not fight the user. It does nothing when:
 
 The author's recommendation is D1 retry, D2 as written, D3 the list, and D4 on by
 default. These are recommendations; the owner decides.
+
+**Decided 2026-10-01.** Asked for D1-D4, the owner answered "idk" and left the
+engineering choice to the lead, who took the recommendations above. Each is reversible:
+`PAC_LANGUAGE_GUARD=0` turns the guard off, and the thresholds are parameters.
+
+**Unit 2 notes.** The note's tokens are reserved as their own budget share, `guard`, which
+`CONTEXT_ASSEMBLED` records as `guard_reserve` and `budget_source` names as `guard=N`.
+Folding them into `identity` would have mislabelled that share. A retry that fails at the
+provider is recorded as `GENERATION_FAILED` with `attempt: 2`.
 
 ## 7. Proposed units, if authorized
 

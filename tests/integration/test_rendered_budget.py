@@ -24,6 +24,7 @@ from __future__ import annotations
 from personal_ai_core.context import ScriptAwareTokenEstimator
 from personal_ai_core.conversation.factory import build_grounded_in_memory_service
 from personal_ai_core.conversation.grounding import GROUNDING_PREAMBLE
+from personal_ai_core.conversation.language_guard import GUARD_NOTE
 from personal_ai_core.core.config import Settings
 from personal_ai_core.core.domain import EventType
 from personal_ai_core.core.knowledge import Document
@@ -36,7 +37,11 @@ from .test_grounded_conversation import Recorder, evidence_message
 # moved the threshold. Now the window is the preamble's own cost plus a fixed
 # allowance: one passage and its rendering are admitted, four of five are
 # dropped, whatever the preamble says. The assertions below still check both.
-WINDOW = 1975 + ScriptAwareTokenEstimator().estimate(GROUNDING_PREAMBLE)
+# The guard's note (ADR-019) is reserved on every turn while the guard is on,
+# so it is added the same way: the allowance stays what the evidence gets.
+WINDOW = 1975 + ScriptAwareTokenEstimator().estimate(GROUNDING_PREAMBLE) + (
+    ScriptAwareTokenEstimator().estimate(GUARD_NOTE)
+)
 
 
 def grounded_turn():

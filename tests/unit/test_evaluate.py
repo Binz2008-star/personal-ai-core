@@ -533,3 +533,11 @@ def test_a_sampling_profile_never_changes_the_identity(tmp_path):
     _run(tmp_path, plain, "--only", "lang-en-1", "--sampling", "none")
     _run(tmp_path / "t", tuned, "--only", "lang-en-1", "--sampling", "model-card")
     assert _system_text(plain) == _system_text(tuned)
+
+
+def test_a_run_records_whether_the_language_guard_was_on(tmp_path):
+    _run(tmp_path, FakeModel("A thread shares memory."), "--only", "lang-en-1")
+    assert _header(tmp_path)["language_guard"] is True
+    _run(tmp_path / "off", FakeModel("x"), "--only", "lang-en-1", "--no-language-guard")
+    raw = json.loads((tmp_path / "off" / "results" / "raw-20260930T120000Z.json").read_text("utf-8"))
+    assert raw["header"]["language_guard"] is False

@@ -130,6 +130,9 @@ class EventType(str, Enum):
     # promotion event, so a leak into the conversation stream cannot
     # masquerade as one. Produced only through core/feedback.as_feedback_event.
     FEEDBACK_RECORDED = "feedback.recorded"
+    # ADR-019: a reply failed the language check and was generated again.
+    # Counts only, never text. Emitted only by conversation/service.py.
+    REPLY_LANGUAGE_GUARD = "reply.language_guard"
 
 
 # Language is a Phase 1 field by decision, not a Phase 2 feature: messages are

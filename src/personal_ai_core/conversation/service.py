@@ -39,6 +39,7 @@ from ..core.domain import (
 from ..core.errors import ProviderError
 from .events import EventRecorder
 from .grounding import ContextBuilder, Grounding, summarize
+from .language_guard import GUARD_NOTE, check_reply
 
 
 class ConversationService:
@@ -55,6 +56,7 @@ class ConversationService:
         identity: IdentityComposer,
         context_builder: ContextBuilder | None = None,
         sampling: Mapping[str, Any] | None = None,
+        language_guard: bool = False,
     ) -> None:
         self._users = users
         self._sessions = sessions
@@ -69,6 +71,9 @@ class ConversationService:
         self._context_builder = context_builder
         # Sent on every generation, beneath any option the caller names.
         self._sampling = dict(sampling or {})
+        # ADR-019. The factory turns it on from Settings; the budget reserves
+        # GUARD_NOTE's tokens whenever it is on, so a retry cannot overflow.
+        self._language_guard = language_guard
         self._recorder = EventRecorder(events)
 
     @property
@@ -193,6 +198,19 @@ class ConversationService:
             )
             raise
 
+        if self._language_guard:
+            response = self._guard_language(
+                session_id=session_id,
+                user_message=user_message,
+                prompt=prompt,
+                evidence=(grounding.message.content,)
+                if grounding is not None and grounding.message is not None
+                else (),
+                spec=spec,
+                options=generation_options,
+                response=response,
+            )
+
         reply = Message(
             session_id=session_id,
             role=Role.ASSISTANT,
@@ -212,6 +230,59 @@ class ConversationService:
             message_id=reply.id,
         )
         return reply
+
+    def _guard_language(
+        self,
+        *,
+        session_id: str,
+        user_message: Message,
+        prompt: Sequence[Message],
+        evidence: Sequence[str],
+        spec: ModelSpecLike,
+        options: Mapping[str, Any],
+        response: Any,
+    ) -> Any:
+        """ADR-019 §3.2: one retry on a language violation, then deliver.
+
+        The rejected draft is not shown to the model and is not persisted;
+        only its letter counts are recorded. The second reply is delivered
+        whatever it is, and the event says whether it passed.
+        """
+        first = check_reply(user_message.content, response.text, evidence)
+        if not first.violation:
+            return response
+        note = Message(
+            session_id=session_id,
+            role=Role.SYSTEM,
+            content=GUARD_NOTE,
+            language=UNDETERMINED_LANGUAGE,
+        )
+        try:
+            retried = self._provider.generate(
+                model=spec.name, messages=[*prompt, note], options=options
+            )
+        except ProviderError as exc:
+            self._recorder.record(
+                session_id=session_id,
+                type=EventType.GENERATION_FAILED,
+                payload={"model": spec.name, "error": str(exc), "attempt": 2},
+                message_id=user_message.id,
+            )
+            raise
+        second = check_reply(user_message.content, retried.text, evidence)
+        self._recorder.record(
+            session_id=session_id,
+            type=EventType.REPLY_LANGUAGE_GUARD,
+            payload={
+                "expected": first.expected,
+                "reason": first.reason,
+                "rejected_counts": dict(first.reply_counts),
+                "delivered_counts": dict(second.reply_counts),
+                "delivered_passed": not second.violation,
+            },
+            message_id=user_message.id,
+        )
+        return retried
 
     def _generation_limit(
         self, *, spec: ModelSpecLike, grounding: Grounding | None
