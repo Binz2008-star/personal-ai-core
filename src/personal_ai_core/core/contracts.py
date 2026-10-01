@@ -36,6 +36,7 @@ from .memory import (
     MemoryRecord,
     PromotionOutcome,
 )
+from .redaction import Redaction
 
 
 @runtime_checkable
@@ -512,6 +513,29 @@ class HybridContextAssembler(Protocol):
         memories: Sequence[MemoryEvidence],
         budget: ContextBudget,
     ) -> HybridBudgetedContext: ...
+
+
+@runtime_checkable
+class SecretRedactor(Protocol):
+    """Withholds secret values from text before it is rendered (ADR-018).
+
+    A render step, never a storage step: the stored chunk, the index and the
+    history are untouched, and a false positive costs one rendered value,
+    not the user's text.
+
+    `redact` must be deterministic and idempotent -- redacting its own output
+    changes nothing and counts nothing -- and must replace the secret VALUE
+    only, so the rest of a passage stays usable. The text it substitutes
+    for a value must never contain a run of 16 hex digits, because the
+    grounding renderer prices such runs as boundary tokens (ADR-018
+    section 3.4).
+
+    On any failure it raises `RedactionError`, which carries a stable
+    classification and never the text. It must not fall back to returning
+    the input unchanged.
+    """
+
+    def redact(self, text: str) -> Redaction: ...
 
 
 # --- Agent contracts (AGENT_ARCHITECTURE.md section 2) ----------------------
