@@ -18,6 +18,7 @@ from personal_ai_core.context.redaction import (
     KIND_AUTHORIZATION,
     KIND_PEM,
     KIND_PREFIX_TOKEN,
+    KIND_PROSE,
     KIND_URL_USERINFO,
     REDACTION_KINDS,
     REDACTION_MARKER,
@@ -50,9 +51,9 @@ def test_null_redactor_satisfies_the_protocol():
     assert isinstance(NullRedactor(), SecretRedactor)
 
 
-def test_kind_names_are_the_five_detectors():
+def test_kind_names_are_the_six_detectors():
     assert set(REDACTION_KINDS) == {
-        "pem", "assignment", "authorization", "url_userinfo", "prefix_token"
+        "pem", "assignment", "authorization", "url_userinfo", "prefix_token", "prose"
     }
 
 
@@ -462,3 +463,81 @@ def test_null_redactor_returns_the_text_unchanged_with_empty_counts():
     assert out.text == _MIXED
     assert dict(out.counts) == {}
     assert isinstance(out.counts, MappingProxyType)
+
+
+# --- prose (ADR-018 amendment 1) -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # the contract_v1 case that failed in every rig run
+        ("The staging password is hunter2-PLANTED-71c3.",
+         f"The staging password is {M}."),
+        ("The password for the staging server is now Xy7!kq9z, rotate monthly.",
+         f"The password for the staging server is now {M}, rotate monthly."),
+        ("Your PIN is 482913.", f"Your PIN is {M}."),
+        ("The API key is 'abc'.", f"The API key is '{M}'."),
+        ("the passphrase was `open-sesame-42`", f"the passphrase was `{M}`"),
+        ("The access token is set to t0k3n_value_9", f"The access token is set to {M}"),
+        ("password is hunter2 and token is abcdef12",
+         f"password is {M} and token is {M}"),
+        ("كلمة المرور لخادم الاختبار هي hunter2-PLANTED-71c3",
+         f"كلمة المرور لخادم الاختبار هي {M}"),
+        ("الرمز السري هو: 99887766.", f"الرمز السري هو: {M}."),
+        ("كلمة السر هي «Qw3rty-55»", None),  # guillemets are not quotes here: see below
+    ],
+)
+def test_prose_withholds_a_value_named_in_a_sentence(redactor, text, expected):
+    out = redactor.redact(text)
+    if expected is None:
+        assert "Qw3rty-55" not in out.text
+    else:
+        assert out.text == expected
+    assert out.counts.get(KIND_PROSE, 0) >= 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The staging password is required.",
+        "The password is stored in the vault.",
+        "The token is valid for 3600 seconds.",
+        "The secret is to practise daily.",
+        "The password is at least 12 characters long.",
+        "The tokenizer is gpt2-large-v1.",
+        "The PIN is 4 digits.",
+        "The token is v2 of the format.",
+        "The password was 2FA.",
+        "passwords is easy",
+        "كلمة المرور هي مطلوبة",
+        "كلمة المرور هي سرية ولا تشاركها",
+    ],
+)
+def test_prose_leaves_a_sentence_about_a_secret_alone(redactor, text):
+    """Prose is where false positives live: the value must look like a
+    credential (quoted, or six or more characters with a digit or symbol)."""
+    out = redactor.redact(text)
+    assert out.text == text
+    assert dict(out.counts) == {}
+
+
+def test_prose_does_not_double_count_what_an_earlier_detector_took(redactor):
+    out = redactor.redact("The access key is AKIAABCDEFGHIJKLMNOP.")
+    assert out.text == f"The access key is {M}."
+    assert dict(out.counts) == {KIND_PREFIX_TOKEN: 1}
+
+
+def test_prose_redaction_is_idempotent(redactor):
+    once = redactor.redact("The staging password is hunter2-PLANTED-71c3.")
+    twice = redactor.redact(once.text)
+    assert twice.text == once.text
+    assert dict(twice.counts) == {}
+
+
+def test_a_letters_only_password_in_prose_is_the_stated_limit(redactor):
+    """ADR-018 §4: a value with no digit or symbol is indistinguishable from
+    an ordinary word, so it is left to rule 3. If this ever starts passing,
+    the limit in the ADR is out of date."""
+    out = redactor.redact("The wifi password is sunflower.")
+    assert out.text == "The wifi password is sunflower."

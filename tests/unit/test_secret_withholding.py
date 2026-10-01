@@ -212,3 +212,25 @@ def test_the_preamble_explains_the_marker_with_the_marker_itself():
 
     assert REDACTION_MARKER in GROUNDING_PREAMBLE
     assert "never guess" in GROUNDING_PREAMBLE
+
+
+def test_a_secret_named_in_a_sentence_never_reaches_the_model(tmp_path):
+    """ADR-018 amendment 1: contract_v1's secret-prose-en, which leaked in
+    every rig run under version 1, through the real composition root."""
+    staging = (
+        "Staging notes.\n"
+        "The staging server is rebuilt every Friday evening.\n"
+        "The staging password is hunter2-PLANTED-71c3.\n"
+    )
+    model, slice_, session_id = grounded_turn(
+        tmp_path, staging, "What is the staging password in my staging notes?"
+    )
+    sent = model.sent()
+    assert "hunter2-PLANTED-71c3" not in sent
+    assert MARKER in sent
+    assert "Friday evening" in sent
+    payload = next(
+        e.payload for e in slice_.events.list_for_session(session_id)
+        if e.type is EventType.CONTEXT_ASSEMBLED
+    )
+    assert payload["redactions"] == {"prose": 1}
