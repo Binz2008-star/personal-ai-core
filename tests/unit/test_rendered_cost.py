@@ -40,6 +40,7 @@ from personal_ai_core.core.memory import (
     MemoryStatus,
     MemoryType,
 )
+from personal_ai_core.context import NullRedactor
 
 ESTIMATOR = ScriptAwareTokenEstimator()
 
@@ -97,16 +98,16 @@ MEMORIES = [recollection(f"prefers answer style {i}", memory_id=f"m{i}") for i i
 
 
 def test_the_implementation_satisfies_the_contract():
-    assert isinstance(RenderedEvidenceCost(ESTIMATOR), RenderedCost)
+    assert isinstance(RenderedEvidenceCost(ESTIMATOR, NullRedactor()), RenderedCost)
 
 
 def charged_for_documents(results):
-    cost = RenderedEvidenceCost(ESTIMATOR)
+    cost = RenderedEvidenceCost(ESTIMATOR, NullRedactor())
     return cost.document_section() + sum(cost.document(r) for r in results)
 
 
 def charged_for_memories(memories):
-    cost = RenderedEvidenceCost(ESTIMATOR)
+    cost = RenderedEvidenceCost(ESTIMATOR, NullRedactor())
     return cost.memory_section() + sum(cost.memory(m) for m in memories)
 
 
@@ -114,18 +115,18 @@ def test_a_rendered_evidence_section_costs_no_more_than_was_charged():
     """Twelve passages, so positions [10]-[12] carry the extra digit that a
     single-item measurement cannot see."""
     for results in (ENGLISH, ARABIC):
-        section = f"{GROUNDING_PREAMBLE}\n\n{render_evidence(results)}"
+        section = f"{GROUNDING_PREAMBLE}\n\n{render_evidence(results, NullRedactor())}"
         assert ESTIMATOR.estimate(section) <= charged_for_documents(results)
 
 
 def test_a_rendered_memory_section_costs_no_more_than_was_charged():
-    section = f"{MEMORY_PREAMBLE}\n\n{render_memories(MEMORIES)}"
+    section = f"{MEMORY_PREAMBLE}\n\n{render_memories(MEMORIES, NullRedactor())}"
     assert ESTIMATOR.estimate(section) <= charged_for_memories(MEMORIES)
 
 
 def test_the_charge_includes_the_boundary_lines_not_only_the_text():
     """The defect itself: bare text is not what the prompt carries."""
-    cost = RenderedEvidenceCost(ESTIMATOR)
+    cost = RenderedEvidenceCost(ESTIMATOR, NullRedactor())
     for result in ENGLISH:
         assert cost.document(result) > ESTIMATOR.estimate(result.chunk.text)
     for evidence in MEMORIES:
@@ -134,14 +135,14 @@ def test_the_charge_includes_the_boundary_lines_not_only_the_text():
 
 def test_the_charge_follows_the_source_uri():
     """The URI is rendered in the opening line, so a longer one costs more."""
-    cost = RenderedEvidenceCost(ESTIMATOR)
+    cost = RenderedEvidenceCost(ESTIMATOR, NullRedactor())
     short = passage("same text", chunk_id="c1", source="file:///a.md")
     long = passage("same text", chunk_id="c1", source="file:///" + "deep/" * 20 + "a.md")
     assert cost.document(long) > cost.document(short)
 
 
 def test_the_preambles_are_charged():
-    cost = RenderedEvidenceCost(ESTIMATOR)
+    cost = RenderedEvidenceCost(ESTIMATOR, NullRedactor())
     assert cost.document_section() >= ESTIMATOR.estimate(GROUNDING_PREAMBLE)
     assert cost.memory_section() >= ESTIMATOR.estimate(MEMORY_PREAMBLE)
 
@@ -241,12 +242,12 @@ def test_a_message_with_both_sections_fits_its_budget():
     builder = ContextBuilder(
         retriever=Returns(ENGLISH[:6]),
         assembler=HybridContextAssembler(
-            ESTIMATOR, rendered_cost=RenderedEvidenceCost(ESTIMATOR)
+            ESTIMATOR, rendered_cost=RenderedEvidenceCost(ESTIMATOR, NullRedactor())
         ),
         budget_policy=ReserveBasedBudgetPolicy(),
         estimator=ESTIMATOR,
         memory_retriever=Returns(MEMORIES[:6]),
-        limit=6,
+        limit=6, redactor=NullRedactor()
     )
     grounding = builder.build(
         session_id="s1", query="style", language="en", model=Spec(2000), history=[]
@@ -292,12 +293,12 @@ def test_the_charge_holds_whatever_the_boundary_token_hashes_to():
             )
             for i in range(12)
         ]
-        section = f"{MEMORY_PREAMBLE}\n\n{render_memories(memories)}"
+        section = f"{MEMORY_PREAMBLE}\n\n{render_memories(memories, NullRedactor())}"
         assert ESTIMATOR.estimate(section) <= charged_for_memories(memories), variant
 
         results = [
             passage(f"Passage {i} v{variant} about rank fusion.", chunk_id=f"c{i}")
             for i in range(12)
         ]
-        section = f"{GROUNDING_PREAMBLE}\n\n{render_evidence(results)}"
+        section = f"{GROUNDING_PREAMBLE}\n\n{render_evidence(results, NullRedactor())}"
         assert ESTIMATOR.estimate(section) <= charged_for_documents(results), variant

@@ -10,6 +10,7 @@ from .budget import (
     DEFAULT_OVERHEAD,
     ReserveBasedBudgetPolicy,
 )
+from .redaction import REDACTION_KINDS, REDACTION_MARKER, NullRedactor, PatternSecretRedactor
 from .token_estimator import ScriptAwareTokenEstimator
 
 __all__ = [
@@ -17,6 +18,10 @@ __all__ = [
     "DEFAULT_OVERHEAD",
     "GreedyContextAssembler",
     "HybridContextAssembler",
+    "NullRedactor",
+    "PatternSecretRedactor",
+    "REDACTION_KINDS",
+    "REDACTION_MARKER",
     "ReserveBasedBudgetPolicy",
     "ScriptAwareTokenEstimator",
 ]
