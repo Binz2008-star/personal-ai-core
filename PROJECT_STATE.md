@@ -486,6 +486,10 @@ claim written in one place with nothing that notices it going stale.
   #103 3e8f554  docs(adr): ADR-018 (PROPOSED) -- withhold secrets at render time,
                revision 3
   #104 fbc6d4c  feat(eval): language-rule experiment -- --identity-variant A/B/C
+  #105 b7fdc0d  docs(adr): ADR-018 version 1 authorized (D1); ledger #103 #104
+  #106 aa21f90  feat(eval): contract-v1 case file with ADR-018 unit 3 cases
+  #107 2cec1bc  feat(context): ADR-018 unit 1 -- SecretRedactor contract and
+               PatternSecretRedactor
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
