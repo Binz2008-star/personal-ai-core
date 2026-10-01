@@ -50,6 +50,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence, TextIO
 
 from ..conversation.factory import (
+    LLAMACPP_GRAMMARS,
+    build_llamacpp_provider,
     build_grounded_in_memory_service,
     build_in_memory_service,
     default_response_policy,
@@ -396,12 +398,12 @@ def _event_record(event) -> dict[str, Any]:
 
 
 def run_case(
-    case: Case, settings: Settings, transport, workdir: Path, policy=None
+    case: Case, settings: Settings, transport, workdir: Path, policy=None, provider=None
 ) -> dict[str, Any]:
     """One case, in a fresh in-memory system, through the pac builders."""
     if case.path == GROUNDED:
         slice_ = build_grounded_in_memory_service(
-            settings, transport=transport, response_policy=policy
+            settings, transport=transport, response_policy=policy, provider=provider
         )
         service, events = slice_.service, slice_.events
         folder = workdir / case.id
@@ -414,7 +416,7 @@ def run_case(
         _ingest(slice_.ingestion, sorted(files), io.StringIO())
     else:
         service, events = build_in_memory_service(
-            settings, transport=transport, response_policy=policy
+            settings, transport=transport, response_policy=policy, provider=provider
         )
     session = service.start_session(service.create_user().id)
     record: dict[str, Any] = {"id": case.id, "rule": case.rule, "path": case.path,
@@ -487,6 +489,29 @@ def _loaded(probe: Probe | None, host: str, model: str) -> dict[str, Any]:
     return {"probed": True, "context_length": None, "reason": "model not loaded"}
 
 
+def _loaded_llamacpp(probe: Probe | None, host: str) -> dict[str, Any]:
+    """llama-server's own report, from `/props`: context size and model file.
+
+    The model file's name is recorded so a run can be checked against the
+    GGUF blob Ollama serves for the Boss model -- the same weights, or not.
+    """
+    if probe is None:
+        return {"probed": False, "reason": "no probe (test transport)"}
+    try:
+        data = probe(f"{host.rstrip('/')}/props")
+    except Exception as exc:  # noqa: BLE001 -- recorded, never fatal
+        return {"probed": False, "reason": type(exc).__name__}
+    settings = data.get("default_generation_settings") or {}
+    n_ctx = data.get("n_ctx", settings.get("n_ctx"))
+    path = str(data.get("model_path") or "")
+    return {
+        "probed": True,
+        "context_length": n_ctx if isinstance(n_ctx, int) else None,
+        "gpu_share": None,
+        "model_file": path.replace("\\", "/").rsplit("/", 1)[-1] or None,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m personal_ai_core.app.evaluate",
@@ -512,6 +537,23 @@ def _parser() -> argparse.ArgumentParser:
         choices=sorted(SAMPLING_PROFILES),
         default="production",
         help="experiment: sampling options to run with (production = what pac sends)",
+    )
+    parser.add_argument(
+        "--runtime",
+        choices=("ollama", "llamacpp"),
+        default="ollama",
+        help="experiment: serve the Boss model's GGUF through llama-server instead",
+    )
+    parser.add_argument(
+        "--llamacpp-host",
+        default="http://127.0.0.1:8080",
+        help="llama-server address (with --runtime llamacpp)",
+    )
+    parser.add_argument(
+        "--grammar",
+        choices=LLAMACPP_GRAMMARS,
+        default="none",
+        help="experiment: GBNF grammar for llama-server (with --runtime llamacpp)",
     )
     parser.add_argument(
         "--no-language-guard",
@@ -560,6 +602,19 @@ def main(
     # No profile: the owner's profile.md would make every result depend on
     # what it says today. The contract is what is under test.
     settings = dataclasses.replace(settings, profile="")
+    if args.grammar != "none" and args.runtime != "llamacpp":
+        print("--grammar needs --runtime llamacpp: Ollama cannot apply a grammar", file=out)
+        return 2
+    provider = (
+        build_llamacpp_provider(
+            args.llamacpp_host,
+            grammar=args.grammar,
+            timeout_seconds=settings.request_timeout_seconds,
+            transport=transport,
+        )
+        if args.runtime == "llamacpp"
+        else None
+    )
     if args.no_language_guard:
         settings = dataclasses.replace(settings, language_guard=False)
     profile_options = SAMPLING_PROFILES[args.sampling]
@@ -595,6 +650,8 @@ def main(
         "sampling": args.sampling,
         "sampling_options": dict(settings.boss_sampling),
         "language_guard": settings.language_guard,
+        "runtime": args.runtime,
+        "grammar": args.grammar,
     }
 
     variant_rule = IDENTITY_VARIANTS[args.identity_variant]
@@ -607,14 +664,15 @@ def main(
     with tempfile.TemporaryDirectory(prefix="pac-eval-") as tmp:
         for case in cases:
             print(f"running {case.id} ...", file=out)
-            records.append(run_case(case, settings, transport, Path(tmp), policy))
+            records.append(run_case(case, settings, transport, Path(tmp), policy, provider))
 
     # Asked after the cases, while the model is still loaded. A real run
     # (no injected transport) probes the real server unless told otherwise.
-    loaded = _loaded(
-        probe if probe is not None else (_http_probe if transport is None else None),
-        settings.ollama_host,
-        settings.boss_model,
+    chosen_probe = probe if probe is not None else (_http_probe if transport is None else None)
+    loaded = (
+        _loaded_llamacpp(chosen_probe, args.llamacpp_host)
+        if args.runtime == "llamacpp"
+        else _loaded(chosen_probe, settings.ollama_host, settings.boss_model)
     )
     header["ollama_loaded"] = loaded
     measured = loaded.get("context_length")
@@ -651,7 +709,11 @@ def main(
         f"ERROR {summary['ERROR']}",
         file=out,
     )
-    print(f"variant: {args.identity_variant}  sampling: {args.sampling}", file=out)
+    print(
+        f"variant: {args.identity_variant}  sampling: {args.sampling}  "
+        f"runtime: {args.runtime}  grammar: {args.grammar}",
+        file=out,
+    )
     print(f"loaded: {_describe(loaded)}", file=out)
     print(f"raw:    {raw_path}", file=out)
     print(f"scored: {scored_path}", file=out)

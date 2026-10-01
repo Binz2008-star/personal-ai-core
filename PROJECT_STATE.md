@@ -514,6 +514,8 @@ claim written in one place with nothing that notices it going stale.
                language
   #122 7af61eb  feat(conversation): ADR-019 unit 1 -- check_reply, the pure
                reply-language check
+  #123 af574a2  feat(conversation): ADR-019 unit 2 -- generate again once when the
+               reply leaves the user's language
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped

@@ -541,3 +541,64 @@ def test_a_run_records_whether_the_language_guard_was_on(tmp_path):
     _run(tmp_path / "off", FakeModel("x"), "--only", "lang-en-1", "--no-language-guard")
     raw = json.loads((tmp_path / "off" / "results" / "raw-20260930T120000Z.json").read_text("utf-8"))
     assert raw["header"]["language_guard"] is False
+
+
+# --- llama.cpp experiment (evaluation runs only) -----------------------------------
+
+
+class FakeLlamaServer:
+    def __init__(self, reply="A thread shares memory."):
+        self.reply = reply
+        self.calls: list[tuple[str, dict]] = []
+
+    def __call__(self, url, payload, timeout):
+        self.calls.append((url, payload))
+        return {"model": "boss.gguf",
+                "choices": [{"message": {"content": self.reply}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+
+
+def test_the_llamacpp_runtime_sends_the_grammar_and_records_it(tmp_path):
+    from personal_ai_core.conversation.factory import LLAMACPP_GRAMMARS
+
+    assert "no-foreign-script" in LLAMACPP_GRAMMARS
+    server = FakeLlamaServer()
+    code, _ = _run(tmp_path, server, "--only", "lang-en-1", "--runtime", "llamacpp",
+                   "--grammar", "no-foreign-script")
+    assert code == 0
+    url, payload = server.calls[-1]
+    assert url.endswith("/v1/chat/completions")
+    assert "root ::=" in payload["grammar"]
+    assert "max_tokens" in payload  # the budget's num_predict, renamed
+    header = _header(tmp_path)
+    assert header["runtime"] == "llamacpp" and header["grammar"] == "no-foreign-script"
+
+
+def test_a_grammar_without_llamacpp_is_refused(tmp_path):
+    code, output = _run(tmp_path, FakeModel("x"), "--only", "lang-en-1",
+                        "--grammar", "no-foreign-script")
+    assert code == 2 and "--runtime llamacpp" in output
+
+
+def test_ollama_stays_the_default_runtime(tmp_path):
+    _run(tmp_path, FakeModel("A thread shares memory."), "--only", "lang-en-1")
+    assert _header(tmp_path)["runtime"] == "ollama"
+    assert _header(tmp_path)["grammar"] == "none"
+
+
+def test_llama_server_reports_its_context_and_model_file(tmp_path):
+    def props(url):
+        assert url.endswith("/props")
+        return {"default_generation_settings": {"n_ctx": 8192},
+                "model_path": "C:\\Users\\x\\.ollama\\models\\blobs\\sha256-abc"}
+
+    out = io.StringIO()
+    code = ev.main(
+        ["--cases", str(CASES), "--out", str(tmp_path / "results"), "--only", "lang-en-1",
+         "--runtime", "llamacpp", "--num-ctx", "8192"],
+        transport=FakeLlamaServer(), stdout=out, env={}, now=lambda: FIXED,
+        commit="abc1234", probe=props,
+    )
+    assert code == 0
+    loaded = _header(tmp_path)["ollama_loaded"]
+    assert loaded["context_length"] == 8192 and loaded["model_file"] == "sha256-abc"
