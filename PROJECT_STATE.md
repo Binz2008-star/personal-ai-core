@@ -494,6 +494,10 @@ claim written in one place with nothing that notices it going stale.
                model sees evidence
   #109 095bec3  eval: language-rule variants A/B/C, contract_v0, num_ctx 8192, one
                run each
+  #110 17cb5cb  chore: ignore local credential files; ledger #108 #109
+  #111 7762468  feat(identity): adopt language rule B -- name no language (ADR-012
+               amendment 1)
+  #112 b8ebcd5  feat(grounding): the evidence note does not set the reply language
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
