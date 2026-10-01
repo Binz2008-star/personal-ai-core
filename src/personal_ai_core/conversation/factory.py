@@ -35,7 +35,7 @@ from ..context import (
     ScriptAwareTokenEstimator,
 )
 from ..core.config import Settings
-from ..core.contracts import EventRepository, MemoryStore, SessionRepository
+from ..core.contracts import EventRepository, MemoryStore, ModelProvider, SessionRepository
 from ..core.feedback import FEEDBACK_EVENT_TYPE, feedback_record_from_event
 from ..core.memory import MemoryReader
 from ..core.observation import Observation, UnobservedFeedback
@@ -79,6 +79,7 @@ from ..persistence.postgres import (
     connect as server_connect,
 )
 from ..runtime.model_registry import ModelRegistry
+from ..runtime.llamacpp import GRAMMARS, LlamaCppProvider
 from ..runtime.ollama.provider import OllamaProvider, Transport
 from .grounding import ContextBuilder, RenderedEvidenceCost
 from .language_guard import GUARD_NOTE
@@ -106,6 +107,29 @@ def _budget_policy(identity: DefaultIdentityComposer, settings: Settings) -> Res
     )
 
 
+def build_llamacpp_provider(
+    host: str,
+    *,
+    grammar: str = "none",
+    timeout_seconds: int = 120,
+    transport: Transport | None = None,
+) -> ModelProvider:
+    """Experiment: the llama.cpp adapter, for the evaluation harness only.
+
+    Lives here because naming a concrete adapter is the composition root's
+    job; `app/` may not import `runtime/`. `pac` never calls it. `grammar`
+    names one of `runtime.llamacpp.GRAMMARS`.
+    """
+    if grammar not in GRAMMARS:
+        raise ValueError(f"unknown grammar: {grammar}")
+    return LlamaCppProvider(
+        host, timeout_seconds=timeout_seconds, transport=transport, grammar=GRAMMARS[grammar]
+    )
+
+
+LLAMACPP_GRAMMARS: tuple[str, ...] = tuple(GRAMMARS)
+
+
 def default_response_policy() -> ResponsePolicy:
     """The policy every production builder composes (ADR-012).
 
@@ -122,6 +146,7 @@ def build_in_memory_service(
     *,
     transport: Transport | None = None,
     response_policy: ResponsePolicy | None = None,
+    provider: ModelProvider | None = None,
 ) -> tuple[ConversationService, InMemoryEventRepository]:
     """Build the ungrounded slice against in-process storage.
 
@@ -133,7 +158,7 @@ def build_in_memory_service(
     """
     settings = settings or Settings.from_env()
     registry = ModelRegistry.from_settings(settings)
-    provider = OllamaProvider(
+    provider = provider or OllamaProvider(
         settings.ollama_host,
         timeout_seconds=settings.request_timeout_seconds,
         transport=transport,
@@ -579,6 +604,7 @@ def build_grounded_in_memory_service(
     evidence_limit: int = 5,
     enable_memory: bool = False,
     response_policy: ResponsePolicy | None = None,
+    provider: ModelProvider | None = None,
 ) -> GroundedSlice:
     """Build the slice with retrieval wired in.
 
@@ -591,7 +617,7 @@ def build_grounded_in_memory_service(
     """
     settings = settings or Settings.from_env()
     registry = ModelRegistry.from_settings(settings)
-    provider = OllamaProvider(
+    provider = provider or OllamaProvider(
         settings.ollama_host,
         timeout_seconds=settings.request_timeout_seconds,
         transport=transport,

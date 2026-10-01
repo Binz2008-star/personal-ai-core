@@ -94,6 +94,33 @@ python -m personal_ai_core.app.evaluate --num-ctx 8192 --sampling none
 
 The header records `sampling` and the exact `sampling_options` sent.
 
+## llama.cpp experiment: forbid the script during decoding
+
+Ollama cannot apply a grammar (its PR #2404 is unmerged). `llama-server` can, and it runs
+the same GGUF file. `--runtime llamacpp --grammar no-foreign-script` sends a GBNF grammar
+that forbids CJK, Kana, Hangul, fullwidth forms and Cyrillic, so the model cannot write
+them at all. Arabic, Latin, digits and punctuation are untouched. This is for evaluation
+runs only: `pac` cannot select it.
+
+Setup on the rig (Windows):
+
+1. Download a CUDA build of llama.cpp from its GitHub releases (`llama-*-bin-win-cuda-*-x64.zip`).
+2. Find the Boss model's GGUF file. The `FROM` line of this command is its path:
+   `ollama show --modelfile huihui_ai/qwen2.5-abliterate:7b`
+3. Stop Ollama, so the two servers do not compete for memory. Then start:
+   `llama-server -m <that path> -c 8192 -ngl 99 --jinja --port 8080`
+   If the GPU runs out of memory, lower `-ngl` (for example 20).
+4. Run without the grammar, then with it:
+
+```bat
+python -m personal_ai_core.app.evaluate --num-ctx 8192 --runtime llamacpp
+python -m personal_ai_core.app.evaluate --num-ctx 8192 --runtime llamacpp --grammar no-foreign-script
+```
+
+The header records `runtime` and `grammar`. The `loaded:` line then comes from llama-server's
+`/props` and includes the model file's name, so you can check that it is the same blob Ollama
+serves.
+
 ## Loaded context
 
 `--num-ctx` is what you say the server uses. After the cases, the harness asks Ollama
