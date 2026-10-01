@@ -124,6 +124,24 @@ def test_application_layer_imports_no_http_or_driver(path):
     assert not offenders, f"{path.name} reaches infrastructure: {sorted(offenders)}"
 
 
+def test_only_the_llamacpp_adapter_knows_llama_servers_endpoints():
+    """ARCHITECTURE.md section 4, as narrowed after review: a server's
+    endpoints live in its adapter. llama-server's are /v1/chat/completions
+    and /props."""
+    allowed = SRC / "runtime" / "llamacpp"
+    offenders = []
+    for path in SRC.rglob("*.py"):
+        if allowed in path.parents:
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or stripped.startswith('"'):
+                continue
+            if "/props" in line or "/v1/chat/completions" in line:
+                offenders.append(f"{path.relative_to(SRC)}: {stripped[:60]}")
+    assert not offenders, f"llama-server detail leaked outside its adapter: {offenders}"
+
+
 def test_only_the_ollama_adapter_knows_about_ollama():
     """ARCHITECTURE.md §4: no Ollama knowledge outside runtime/ollama/."""
     allowed = SRC / "runtime" / "ollama"
