@@ -176,7 +176,10 @@ design background, not current architecture.
   judges a candidate per case over several runs against a baseline with the same cases
   version, scorer, commit and settings. It refuses mixed inputs and names the field that
   differs, reads result files only, calls no model, and writes one new report (ADR-020
-  §3.3 to §3.5, §3.7, unit 3). Not yet run on real candidate results.
+  §3.3 to §3.5, §3.7, unit 3). Its thresholds are amendment 1's: 15 guarded contract runs
+  at +8 and 9 refusal runs at +6 or any new refusal; unguarded groups are descriptive.
+  The Boss self-comparison under the first rule failed (#148); the amended gate's
+  acceptance self-comparison is pending.
 - **[DECIDED]** For models, a passed ADR-020 gate is required before adoption (ADR-020
   D4, 2026-10-01). Whether other evaluation results block anything stays open (OD-3).
 - **[DECIDED]** How a candidate model is named and admitted (OD-8): ADR-020, D1-D4

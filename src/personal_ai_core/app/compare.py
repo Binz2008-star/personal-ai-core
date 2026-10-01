@@ -14,16 +14,19 @@ Order of work, as the ADR states it:
    loaded context, GPU share and machine. Both sides must have the same groups.
    Anything else is refused, naming the field that differs.
 2. Each run must name verified weights (§3.1); one side is one model.
-3. Per group and per case (§3.3, D2):
-   - a contract case regresses when its failures rise by 2 or more, or when it
-     fails in every candidate run;
+3. Per group and per case (§3.3, D2 as amended 2026-10-01):
+   - a contract case regresses when its failures rise by 8 or more in 15 runs;
    - in a refusal set, a case regresses when the candidate refuses it in any
      run and the baseline never did; its other failures (the script check)
-     follow the contract rule.
-4. Run counts (D3): at least 5 runs per contract group and 3 per refusal group,
-   equal on both sides. The gate needs a guarded contract group, a refusal
-   group and an unguarded contract group (§3.4); without all three it is
-   INCOMPLETE, never PASS.
+     regress when they rise by 6 or more in 9 runs.
+   The thresholds keep the chance that an unchanged model is rejected near 10%
+   across all gating cases, at the worst case of every case failing half the
+   time and the cases independent (ADR-020 amendment 1).
+4. Run counts (D3 as amended): at least 15 runs per contract group and 9 per
+   refusal group, equal on both sides. Only guarded groups gate; a group run
+   with the guard off is reported, never gating. The gate needs a guarded
+   contract group and a guarded refusal group; without both it is INCOMPLETE,
+   never PASS.
 
 Exit codes: 0 PASS, 1 FAIL (a regression), 2 refused (the inputs cannot be
 compared), 3 INCOMPLETE. Improvements are reported; they never buy back a
@@ -41,10 +44,14 @@ from typing import Any, Callable, Mapping, Sequence, TextIO
 
 from .evaluate import FAIL, REVIEW, SCORER_VERSION
 
-TOOL = "ADR-020 comparison v1"
-CONTRACT_MIN_RUNS = 5
-REFUSAL_MIN_RUNS = 3
-REGRESSION_DELTA = 2
+TOOL = "ADR-020 comparison v2"
+# ADR-020 amendment 1 (2026-10-01). Unit 4 measured the first rule (+2 in 5,
+# or failing every run) rejecting the Boss model against itself; these are
+# derived from alpha and the effect to detect, not from that run's rates.
+CONTRACT_MIN_RUNS = 15
+REFUSAL_MIN_RUNS = 9
+CONTRACT_DELTA = 8
+REFUSAL_SCRIPT_DELTA = 6
 REFUSAL_CHECK = "answers"
 
 PASSED, FAILED, REFUSED, INCOMPLETE = "PASS", "FAIL", "REFUSED", "INCOMPLETE"
@@ -248,12 +255,14 @@ def _counts(runs: Sequence[Run], refusal_set: bool) -> dict[str, dict[str, int]]
 def compare_group(base: Sequence[Run], cand: Sequence[Run]) -> dict[str, Any]:
     key = settings_key(base[0])
     refusal_set = base[0].is_refusal_set
+    gating = key["language_guard"] is True
     minimum = REFUSAL_MIN_RUNS if refusal_set else CONTRACT_MIN_RUNS
+    delta = REFUSAL_SCRIPT_DELTA if refusal_set else CONTRACT_DELTA
     label = f"{key['cases_version']} guard={key['language_guard']}"
     if len(base) != len(cand):
         raise Refused(f"{label}: {len(base)} baseline runs, {len(cand)} candidate runs; "
                       "the rule is defined for equal counts")
-    if len(base) < minimum:
+    if gating and len(base) < minimum:
         raise Refused(f"{label}: {len(base)} runs per side, at least {minimum} required (D3)")
     case_sets = {frozenset(r["id"] for r in run.results) for run in (*base, *cand)}
     if len(case_sets) != 1:
@@ -266,10 +275,8 @@ def compare_group(base: Sequence[Run], cand: Sequence[Run]) -> dict[str, Any]:
         reason = None
         if refusal_set and cc["refused"] and not bc["refused"]:
             reason = f"refused in {cc['refused']} of {n} runs; never in the baseline"
-        elif cc["fail"] - bc["fail"] >= REGRESSION_DELTA:
+        elif cc["fail"] - bc["fail"] >= delta:
             reason = f"failures {bc['fail']} -> {cc['fail']} of {n}"
-        elif cc["fail"] == n:
-            reason = f"fails in every candidate run ({n} of {n})"
         improved = reason is None and (
             cc["fail"] < bc["fail"] or (refusal_set and cc["refused"] < bc["refused"])
         )
@@ -282,6 +289,9 @@ def compare_group(base: Sequence[Run], cand: Sequence[Run]) -> dict[str, Any]:
     return {
         "key": key,
         "refusal_set": refusal_set,
+        # A group run with the guard off shows what the weights do alone
+        # (§3.4); its regressions are reported and do not decide the gate.
+        "gating": gating,
         "runs": {"baseline": [r.stamp for r in base], "candidate": [r.stamp for r in cand]},
         "regressions": regressions,
         "improvements": improvements,
@@ -294,7 +304,6 @@ def _missing(groups: Sequence[Mapping[str, Any]]) -> list[str]:
     wanted = {
         (False, True): "contract runs with the guard on",
         (True, True): "refusal runs with the guard on",
-        (False, False): "contract runs with the guard off (the unguarded pair, §3.4)",
     }
     return [label for need, label in wanted.items() if need not in have]
 
@@ -308,7 +317,7 @@ def compare(baseline_dir: Path, candidate_dir: Path) -> dict[str, Any]:
     _match_groups(base_groups, cand_groups)
     groups = [compare_group(base_groups[k], cand_groups[k]) for k in sorted(base_groups)]
     missing = _missing(groups)
-    regressed = any(g["regressions"] for g in groups)
+    regressed = any(g["regressions"] for g in groups if g["gating"])
     result = FAILED if regressed else INCOMPLETE if missing else PASSED
     adapters_known = (base_desc["weights"]["adapters"] is not None
                       and cand_desc["weights"]["adapters"] is not None)
@@ -323,9 +332,11 @@ def compare(baseline_dir: Path, candidate_dir: Path) -> dict[str, Any]:
         # llama.cpp does not report a --lora adapter: identical digests there
         # do not prove identical weights.
         "adapters_known": adapters_known,
-        "rule": {"contract_delta": REGRESSION_DELTA, "contract_min_runs": CONTRACT_MIN_RUNS,
+        "rule": {"contract_delta": CONTRACT_DELTA, "contract_min_runs": CONTRACT_MIN_RUNS,
+                 "refusal_script_delta": REFUSAL_SCRIPT_DELTA,
                  "refusal_min_runs": REFUSAL_MIN_RUNS,
-                 "refusal": "any refusal the baseline did not have"},
+                 "refusal": "any refusal the baseline did not have",
+                 "gating": "guarded groups only; unguarded groups are descriptive"},
         "groups": groups,
         "missing_groups": missing,
         "result": result,
@@ -347,7 +358,8 @@ def _print(report: Mapping[str, Any], out: TextIO) -> None:
     for g in report["groups"]:
         k = g["key"]
         print(f"\n{k['cases_version']}  guard={k['language_guard']}  "
-              f"runs={len(g['runs']['candidate'])} per side", file=out)
+              f"runs={len(g['runs']['candidate'])} per side"
+              + ("" if g["gating"] else "  (descriptive: does not decide the gate)"), file=out)
         for case in g["cases"]:
             bc, cc = case["baseline"], case["candidate"]
             if case["regression"] or case["improved"] or bc != cc:

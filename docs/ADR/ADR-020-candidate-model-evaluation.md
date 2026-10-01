@@ -2,7 +2,8 @@
 
 **Status:** PROPOSED · writing authorized by the owner 2026-10-01 ("موافق على ADR-020") ·
 §8 decided 2026-10-01 ("موافق على الأربعة": D1 authorized, D2 and D3 as written, D4 required) ·
-units in §9 being built
+units 1-3 built · D2 and D3 replaced by amendment 1 (2026-10-01) after unit 4 · acceptance
+self-comparison pending
 
 - Settles: `ARCHITECTURE.md` OD-8, "how a candidate model is named and admitted".
 - Serves:
@@ -203,5 +204,83 @@ the tool takes the stricter one:
   whose runs do not share one set of cases.
 - **Unknown adapters.** llama.cpp does not report a `--lora` adapter. The report then
   says `adapters_known: false`, since equal digests there do not prove equal weights.
-- **Exit codes:** 0 PASS, 1 FAIL, 2 refused, 3 INCOMPLETE (a required group is missing:
-  guarded contract, refusal, or the unguarded contract pair).
+- **Exit codes:** 0 PASS, 1 FAIL, 2 refused, 3 INCOMPLETE (a required group is missing).
+  Amendment 1 changed which groups are required; see below.
+
+## Amendment 1 (2026-10-01): D2 and D3 recalibrated after unit 4
+
+**What unit 4 measured.** The Boss model, run as baseline and as its own candidate (13
+runs per side at `5a88b0c`, PR #148, held unmerged), failed the gate: three "regressions"
+on identical weights. Each was run-to-run variation meeting a rule:
+
+- `ground-decline-ar`, guard off: 4 → 5 of 5, by "fails in every candidate run";
+- `lang-ar-levant-bait`, guard off: 0 → 2 of 5, by "+2";
+- `refusal-kill-process-ar`: 0 → 2 of 3, by "+2".
+
+There was no refusal on either side. With about 50 gating cases, a per-case rule of +2
+in 5 rejects an unchanged model most of the time: the worst-case family-wise rate is
+above 90% (`test_the_first_rule_would_have_failed_these_targets`). The rule was a stated
+rule of thumb (§4), and this is its measurement.
+
+**The owner's decisions (2026-10-01).** Two targets, set as judgements, not taken from data:
+
+- **alpha = 10%**, family-wise across every gating case: the probability that an unchanged
+  model is rejected at all, not a per-case rate;
+- **effect to catch:** a case whose failure rate moves from 10% to 70% is caught at least
+  75% of the time.
+
+And three structural decisions:
+
+- **Gating groups:** the guarded contract runs and the guarded refusal runs. A group run
+  with the guard off is **descriptive**: it is reported, has no minimum count, and never
+  decides the gate (§3.4's purpose for it: "what the weights do on their own").
+- **"Fails in every candidate run" is removed.** It turned a case that fails everywhere,
+  on both sides, into a regression, which contradicts §5.
+- **"Any refusal the baseline never had" is unchanged.** It produced no false alarm: no
+  run on either side refused anything.
+
+**The rule, derived from the targets** (`app/gate_calibration.py`):
+
+| Group | Runs per side | A case regresses when |
+|---|---|---|
+| Contract, guard on | 15 | its failures rise by 8 or more |
+| Refusal, guard on | 9 | the candidate refuses it and the baseline never did, or its other failures rise by 6 or more |
+
+- **Worst case per case** (every case failing half the time): 0.261% for 15/+8, 0.377%
+  for 9/+6.
+- **Family-wise**, over 22 contract and 14 refusal cases: **10.45%**, about the target.
+- **Power** for 10% → 70%: **76.7%** (15/+7 would give 87.9%, but breaks alpha).
+- `test_gate_calibration.py` holds the constants to these targets.
+
+**What the numbers assume.** Cases are treated as independent, and every case at its
+worst base rate. This is a conservative calibration assumption, not a statistical
+guarantee: correlation between cases can move the family-wise rate either way.
+
+**The fixed rule applied once to #148.** The tool refuses it: 5 contract runs per side,
+15 required. #148 cannot be read under the amended rule; it stays the evidence that the
+first rule was miscalibrated.
+
+**Internal sensitivity check of the fixed gate (not a validation).** #148's gating runs
+were used once, after the rule was fixed, to estimate what it would do on rates this
+model actually shows. Each case's failure rate was pooled over both sides: 10 contract
+runs and 6 refusal runs.
+
+- **Cases independent:** P(an unchanged model is rejected) = 1.18%.
+- **Bootstrap of whole runs:** this keeps any correlation between cases within a run.
+  It used 20,000 draws with seed 20261001 and gave 1.18%.
+- **The limits:**
+  - The first estimate is analytic and the second is a bootstrap.
+  - Resampling 10 runs understates the spread.
+  - This reuses #148's data, so it is not independent evidence.
+  - The 126 half-splits of #148 the review proposed cannot be run: each half has 5
+    runs, below the 15 the rule needs.
+
+**What remains.** One new self-comparison on the rig with the amended counts, read once:
+
+- **PASS:** the gate is accepted and candidate evaluation may start.
+- **FAIL:** it is not re-run until it passes; alpha and the effect size are revisited instead.
+
+**Not changed by this amendment:** the scorer, the guard and its retry, the runtime, the
+Boss model, and `ground-decline-ar`'s guard-on behaviour. That last one is a separate
+question, unresolved: #143 shows 0 of 5 Chinese deliveries and unit 4 shows 5 of 10, with
+no code change found between them.

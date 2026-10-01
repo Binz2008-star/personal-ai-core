@@ -196,11 +196,14 @@ Runs for a comparison use the same cases files, scorer, sampling, variant, guard
 ### Comparing a candidate with the baseline
 
 Each side's runs go in a folder of their own, written with `--out`. A comparison needs, on
-both sides and at the same commit:
+both sides and at the same commit (ADR-020 amendment 1):
 
-- 5 contract runs with the guard on;
-- 5 contract runs with `--no-language-guard` (the unguarded pair);
-- 3 runs of `refusal_v2.json`.
+- 15 contract runs with the guard on;
+- 9 runs of `refusal_v2.json`;
+- optionally, contract runs with `--no-language-guard`. They are reported and never
+  decide the gate.
+
+That is 48 runs per comparison, about an hour on the rig's GPU.
 
 ```bat
 python -m personal_ai_core.app.compare evals\comparisons\NAME\baseline evals\comparisons\NAME\candidate
