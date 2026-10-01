@@ -51,6 +51,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence, TextIO
 from ..conversation.factory import (
     build_grounded_in_memory_service,
     build_in_memory_service,
+    default_response_policy,
 )
 from ..core.config import DEFAULT_BOSS_MODEL, Settings
 from ..core.errors import ProviderError
@@ -63,6 +64,31 @@ from .cli import _ingest
 #   v0  the harness as first merged (#91)
 #   v1  a third script is a language switch; more decline phrasings
 SCORER_VERSION = "contract-checks-v1"
+
+# Experiment variants of ONE field of the identity policy: the language
+# rule. The first rig run (2026-10-01) answered English questions in Arabic
+# and mixed in Chinese, Korean and Cyrillic. The hypothesis under test is that
+# the production rule, which names Arabic, pulls a 7B model towards Arabic.
+# A variant exists only inside an evaluation run; it changes nothing pac
+# composes, and adopting one is a separate owner decision (ADR-012).
+#   A  production text, unchanged (None means: use it as is)
+#   B  names no language at all
+#   C  B, plus an explicit single-script instruction (still naming no script)
+IDENTITY_VARIANTS: Mapping[str, str | None] = {
+    "A": None,
+    "B": (
+        "Reply in the language of the user's latest message, and only in that "
+        "language. Use its standard written form, not a regional dialect, unless "
+        "the user asks for one. Do not change language in the middle of a reply."
+    ),
+    "C": (
+        "Reply in the language of the user's latest message, and only in that "
+        "language. Use its standard written form, not a regional dialect, unless "
+        "the user asks for one. Write every word in that language's own script; "
+        "do not insert words or characters from any other language. Names, code "
+        "and quoted text from the evidence may stay as they are written."
+    ),
+}
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -345,10 +371,14 @@ def _event_record(event) -> dict[str, Any]:
     return {"type": event.type.value, "payload": dict(event.payload)}
 
 
-def run_case(case: Case, settings: Settings, transport, workdir: Path) -> dict[str, Any]:
+def run_case(
+    case: Case, settings: Settings, transport, workdir: Path, policy=None
+) -> dict[str, Any]:
     """One case, in a fresh in-memory system, through the pac builders."""
     if case.path == GROUNDED:
-        slice_ = build_grounded_in_memory_service(settings, transport=transport)
+        slice_ = build_grounded_in_memory_service(
+            settings, transport=transport, response_policy=policy
+        )
         service, events = slice_.service, slice_.events
         folder = workdir / case.id
         folder.mkdir(parents=True)
@@ -359,7 +389,9 @@ def run_case(case: Case, settings: Settings, transport, workdir: Path) -> dict[s
             files.append(target)
         _ingest(slice_.ingestion, sorted(files), io.StringIO())
     else:
-        service, events = build_in_memory_service(settings, transport=transport)
+        service, events = build_in_memory_service(
+            settings, transport=transport, response_policy=policy
+        )
     session = service.start_session(service.create_user().id)
     record: dict[str, Any] = {"id": case.id, "rule": case.rule, "path": case.path,
                               "prompt": case.prompt}
@@ -407,6 +439,12 @@ def _parser() -> argparse.ArgumentParser:
         help="the context window you measured with `ollama show` (recorded, not sent)",
     )
     parser.add_argument("--only", action="append", default=[], help="run only this case id")
+    parser.add_argument(
+        "--identity-variant",
+        choices=sorted(IDENTITY_VARIANTS),
+        default="A",
+        help="experiment: the language rule to run with (A = production, unchanged)",
+    )
     parser.add_argument(
         "--rescore",
         type=Path,
@@ -473,13 +511,24 @@ def main(
         "profile": "none (deliberately empty)",
         "judge_model": "none (ADR-013)",
         "scorer": SCORER_VERSION,
+        "identity_variant": args.identity_variant,
+        "language_rule": (
+            IDENTITY_VARIANTS[args.identity_variant]
+            or default_response_policy().language_and_register
+        ),
     }
 
+    variant_rule = IDENTITY_VARIANTS[args.identity_variant]
+    policy = (
+        dataclasses.replace(default_response_policy(), language_and_register=variant_rule)
+        if variant_rule is not None
+        else None
+    )
     records: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="pac-eval-") as tmp:
         for case in cases:
             print(f"running {case.id} ...", file=out)
-            records.append(run_case(case, settings, transport, Path(tmp)))
+            records.append(run_case(case, settings, transport, Path(tmp), policy))
 
     args.out.mkdir(parents=True, exist_ok=True)
     name = stamp.strftime("%Y%m%dT%H%M%SZ")
@@ -509,6 +558,7 @@ def main(
         f"ERROR {summary['ERROR']}",
         file=out,
     )
+    print(f"variant: {args.identity_variant}", file=out)
     print(f"raw:    {raw_path}", file=out)
     print(f"scored: {scored_path}", file=out)
     return 0
