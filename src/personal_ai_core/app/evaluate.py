@@ -430,7 +430,7 @@ def _parser() -> argparse.ArgumentParser:
         prog="python -m personal_ai_core.app.evaluate",
         description="Score the Boss model against the identity contract (ADR-013).",
     )
-    parser.add_argument("--cases", type=Path, default=Path("evals/cases/contract_v0.json"))
+    parser.add_argument("--cases", type=Path, default=Path("evals/cases/contract_v1.json"))
     parser.add_argument("--out", type=Path, default=Path("evals/results"))
     parser.add_argument(
         "--num-ctx",
