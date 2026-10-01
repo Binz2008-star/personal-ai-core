@@ -228,10 +228,13 @@ def test_the_evidence_pac_sends_fits_the_budget_it_recorded(tmp_path):
             encoding="utf-8",
         )
     # A window small enough that the budget binds. At the default window
-    # everything fits, and "fits" would prove nothing. Hand-tuned twice as the
-    # preamble grew; now the preamble's own cost plus a fixed allowance, so a
-    # wording change cannot leave no passage admitted.
-    window = 2095 + ScriptAwareTokenEstimator().estimate(GROUNDING_PREAMBLE)
+    # everything fits, and "fits" would prove nothing. Hand-tuned three times;
+    # now the preamble's own cost plus a fixed allowance, so a wording change
+    # cannot leave no passage admitted. The allowance is wide because every
+    # passage label carries its source's absolute path, so the threshold also
+    # moves with the length of tmp_path (2420 once failed on Windows only);
+    # it was measured to bind for tmp_path lengths from 6 to 209 characters.
+    window = 3075 + ScriptAwareTokenEstimator().estimate(GROUNDING_PREAMBLE)
     code, output, transport = run(
         ["--database", str(database), "--documents", str(folder)],
         env={"PAC_BOSS_CONTEXT_WINDOW": str(window)},
