@@ -498,6 +498,12 @@ claim written in one place with nothing that notices it going stale.
   #111 7762468  feat(identity): adopt language rule B -- name no language (ADR-012
                amendment 1)
   #112 b8ebcd5  feat(grounding): the evidence note does not set the reply language
+  #113 a937945  eval: language-rule variants B/A/B/A, contract_v1, num_ctx 8192, two
+               runs each
+  #114 d65f4f7  feat(context): ADR-018 amendment 1 -- withhold a secret named in a
+               sentence
+  #115 30ef40e  feat(eval): record the context Ollama actually loaded
+  #116 4fd6d80  feat(eval): --sampling profiles, starting with the model card's config
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
