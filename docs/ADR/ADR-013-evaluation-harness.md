@@ -1,6 +1,6 @@
 # ADR-013 — Evaluation harness
 
-**Status:** PROPOSED · harness v0 built (owner-authorized 2026-09-30) · not yet run against the Boss model · not accepted
+**Status:** PROPOSED · harness built (owner-authorized 2026-09-30) and run against the Boss model many times since 2026-10-01 (`evals/results/`) · not accepted
 
 - Harness: **PROPOSED**, not accepted
 - Implementation: **AUTHORIZED 2026-09-30** by the owner. The owner decided to move from

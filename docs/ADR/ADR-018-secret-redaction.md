@@ -1,6 +1,6 @@
 # ADR-018 — A mechanical guard for rule 3: secrets are withheld from the prompt
 
-**Status:** PROPOSED · revision 3 (author's review and an independent review, section 9) · version 1 AUTHORIZED by the owner 2026-10-01 (D1) · nothing built yet
+**Status:** PROPOSED · revision 3 (author's review and an independent review, section 9) · version 1 AUTHORIZED by the owner 2026-10-01 (D1) · built and wired (#107, #108); amendment 1 built (#114)
 
 - Contract decision this design serves: rule 3, strict reading, decided by the owner on
   2026-10-01 (`PROJECT_STATE.md`, Identity). Rule 3 covers every secret, including one in
