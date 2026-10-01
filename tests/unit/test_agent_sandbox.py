@@ -7,7 +7,12 @@ from __future__ import annotations
 
 import pytest
 
-from personal_ai_core.agent.sandbox import SandboxError, Workspace, is_protected
+from personal_ai_core.agent.sandbox import (
+    SandboxError,
+    Workspace,
+    is_protected,
+    windows_alias_reason,
+)
 
 
 def link(path, target):
@@ -98,3 +103,99 @@ def test_templates_stay_writable(workspace):
 
 def test_the_relative_path_is_posix(workspace):
     assert workspace.relative(workspace.root / "a" / "b.txt") == "a/b.txt"
+
+
+# --- other spellings of a protected name -----------------------------------
+#
+# On Windows, `.git.` and `.git ` are `.git`, `.git::$INDEX_ALLOCATION` is
+# `.git`, and `.env::$DATA` is `.env`. Measured on the owner's machine: through
+# the real executor and the default policy, with no confirmation asked,
+# `write_file` created `.git/hooks/pre-commit` by way of `.git./hooks/...` and
+# created a protected `.env` by way of `.env::$DATA`, and `read_file` read
+# `.git/config`. The name checks compare spellings, so each spelling had to be
+# refused, not only the plain one.
+
+
+@pytest.fixture
+def windows_names(monkeypatch):
+    """Switch the Windows spelling rule on, so the rule is tested on every
+    platform rather than only where the filesystem would have aliased the name."""
+    monkeypatch.setattr("personal_ai_core.agent.sandbox._windows_names_apply", lambda: True)
+
+
+@pytest.mark.parametrize(
+    "part",
+    [".git.", ".git ", "notes.", "notes ", "...", ".env::$DATA", ".git::$INDEX_ALLOCATION",
+     "file.txt:stream", "a:b"],
+)
+def test_a_name_windows_would_read_as_another_has_a_reason(part):
+    assert windows_alias_reason(part)
+
+
+@pytest.mark.parametrize(
+    "part",
+    ["", ".", "notes.txt", ".env", ".git", ".github", "a b", "v1.2", "my notes.md", "ملاحظات.txt",
+     "file-name_1", ".gitignore"],
+)
+def test_an_ordinary_name_has_no_reason(part):
+    assert windows_alias_reason(part) is None
+
+
+@pytest.mark.parametrize(
+    "path",
+    [".git./config", ".git /config", ".git::$INDEX_ALLOCATION/config", "sub/.git./hooks/pre-commit",
+     "sub/.GIT ./config"],
+)
+def test_other_spellings_of_git_are_refused(workspace, windows_names, path):
+    with pytest.raises(SandboxError):
+        workspace.resolve(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [".env::$DATA", "config/.env::$DATA", "credentials.json::$DATA", "config/.env.", "config/.env ",
+     "server.pem::$DATA"],
+)
+def test_other_spellings_of_a_protected_file_cannot_be_written(workspace, windows_names, path):
+    with pytest.raises(SandboxError):
+        workspace.resolve_for_write(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["notes.txt", "a b/c d.txt", "v1.2/readme.md", ".github/workflows/tests.yml", ".gitignore",
+     "ملاحظات/ملف.txt", "src/./main.py"],
+)
+def test_ordinary_paths_still_resolve_with_the_rule_on(workspace, windows_names, path):
+    assert workspace.resolve(path).is_relative_to(workspace.root)
+
+
+def test_a_link_to_git_inside_the_workspace_is_refused(workspace):
+    """What a spelling check cannot see through is judged by where it resolves.
+    The same property holds for an 8.3 short name such as `GIT~1`."""
+    (workspace.root / ".git").mkdir()
+    link(workspace.root / "alias", workspace.root / ".git")
+    with pytest.raises(SandboxError, match=r"\.git"):
+        workspace.resolve("alias/config")
+
+
+def test_a_short_name_for_git_is_refused_where_the_volume_has_one(workspace):
+    """Only meaningful on a Windows volume that makes 8.3 names; elsewhere
+    `GIT~1` does not exist and there is nothing to refuse. Not a skip: an
+    unmet condition here must not read as a skipped test in the audit."""
+    (workspace.root / ".git").mkdir()
+    if (workspace.root / "GIT~1").exists():
+        with pytest.raises(SandboxError, match=r"\.git"):
+            workspace.resolve("GIT~1/config")
+
+
+def test_an_existing_protected_file_reached_by_its_short_name_is_still_refused(workspace):
+    """`is_protected` judges the RESOLVED path, so the long name decides and
+    `ENV~1` is the same file as `.env`. Same condition as above: only where the
+    volume makes 8.3 names, and not a skip."""
+    config = workspace.root / "config"
+    config.mkdir()
+    (config / ".env").write_text("x", encoding="utf-8")
+    if (config / "ENV~1").exists():
+        with pytest.raises(SandboxError, match="protected"):
+            workspace.resolve_for_write("config/ENV~1")
