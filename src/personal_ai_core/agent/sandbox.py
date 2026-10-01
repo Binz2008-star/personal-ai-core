@@ -59,6 +59,30 @@ WRITEABLE_TEMPLATES = frozenset({".env.example", ".env.template", ".env.sample"}
 _DRIVE = re.compile(r"^[a-zA-Z]:[\\/]")
 
 
+def _windows_names_apply() -> bool:
+    """Whether this platform reads a path component as something other than its
+    spelling. A function, so a test can switch it on anywhere."""
+    return os.name == "nt"
+
+
+def windows_alias_reason(part: str) -> str | None:
+    """Why Windows would read `part` as another name, or None for an ordinary one.
+
+    The checks below compare names as written, and Windows maps several
+    spellings onto one file: it drops trailing dots and spaces (`.git.` is
+    `.git`), and reads `name:stream` as an NTFS alternate data stream of `name`
+    (`.env::$DATA` is `.env`, `.git::$INDEX_ALLOCATION` is `.git`). None of
+    these is a name a file can really have, so none is allowed through.
+    """
+    if part in ("", "."):
+        return None
+    if ":" in part:
+        return "a ':' in a path component names an NTFS stream, not a file"
+    if part.endswith((".", " ")):
+        return "Windows drops a trailing dot or space, so this is another name"
+    return None
+
+
 def is_protected(path: Path) -> bool:
     name = path.name.lower()
     if name in WRITEABLE_TEMPLATES:
@@ -129,6 +153,11 @@ class Workspace:
             raise SandboxError(f"path traversal not allowed: {path}")
         if any(part.lower() == ".git" for part in parts):
             raise SandboxError(f".git is not reachable from the workspace: {path}")
+        if _windows_names_apply():
+            for part in parts:
+                reason = windows_alias_reason(part)
+                if reason is not None:
+                    raise SandboxError(f"{reason}: {path}")
 
         # Symlinks first, so an escape through one is reported as that and not
         # as a generic escape: the fix for the two is different.
@@ -136,6 +165,11 @@ class Workspace:
         resolved = (self.root / normalized).resolve()
         if not resolved.is_relative_to(self.root):
             raise SandboxError(f"path escapes the workspace: {path}")
+        # The spelling was checked above; this checks what it resolved to. A
+        # name the spelling check cannot see through -- an 8.3 short name
+        # (`GIT~1`), or a link to the directory -- resolves to the real one.
+        if any(part.lower() == ".git" for part in resolved.relative_to(self.root).parts):
+            raise SandboxError(f".git is not reachable from the workspace: {path}")
         if self.is_reserved(resolved):
             raise SandboxError(
                 f"the Core's own database is not reachable from the workspace: {path}"
