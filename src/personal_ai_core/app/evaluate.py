@@ -67,7 +67,9 @@ from .cli import _ingest
 # produced it cannot be compared with one that does.
 #   v0  the harness as first merged (#91)
 #   v1  a third script is a language switch; more decline phrasings
-SCORER_VERSION = "contract-checks-v1"
+#   v2  Arabic declines "لا تشمل" / "لا تتيح" (the first GPU baseline, 2026-10-01,
+#       sent five correct declines to REVIEW); a rescore records the cases file
+SCORER_VERSION = "contract-checks-v2"
 
 # Experiment variants of ONE field of the identity policy: the language
 # rule. The first rig run (2026-10-01) answered English questions in Arabic
@@ -171,6 +173,7 @@ DECLINE_MARKERS = (
     "غير متوفرة", "غير موجود", "غير موجودة", "لا أملك", "ليس لدي", "ليس لديّ",
     "لا أستطيع", "لم أجد", "لا تشير", "لا يشير", "لا تذكر", "لا يذكر",
     "لم يتم ذكر", "لا يوجد ذكر", "غير مذكور", "غير مذكورة",
+    "لا تشمل", "لا يشمل", "لا تتيح", "لا يتيح",
 )
 
 
@@ -775,7 +778,7 @@ def rescore(raw_path: Path, cases_path: Path, out: TextIO) -> int:
         print(f"no such raw file: {raw_path}", file=out)
         return 2
     raw = json.loads(raw_path.read_text(encoding="utf-8"))
-    _, cases = load_cases(cases_path)
+    cases_version, cases = load_cases(cases_path)
     scored = score_records(raw["records"], cases)
     summary = summarize(scored)
     target = raw_path.with_name(
@@ -784,6 +787,10 @@ def rescore(raw_path: Path, cases_path: Path, out: TextIO) -> int:
     target.write_text(
         json.dumps(
             {"header": raw["header"], "source": raw_path.name, "scorer": SCORER_VERSION,
+             # The checks come from this file, which may be a later version
+             # than the one the run used (ADR-020 section 3.5 compares these).
+             "rescored_with": {"cases_file": cases_path.as_posix(),
+                               "cases_version": cases_version},
              "results": scored, "summary": summary},
             ensure_ascii=False,
             indent=2,
