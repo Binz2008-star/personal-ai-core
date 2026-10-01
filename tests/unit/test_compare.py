@@ -482,3 +482,55 @@ def test_the_harness_output_is_accepted_by_the_comparison(tmp_path):
     assert report["same_weights"] is True and report["missing_groups"] == []
     assert sorted((g["refusal_set"], g["key"]["language_guard"]) for g in report["groups"]) == [
         (False, False), (False, True), (True, True)]
+
+
+# --- GPU share: a tolerance, not rounding (B2, the rig's sweep 2026-10-01) ----------
+
+
+def _loaded(share):
+    return {"probed": True, "context_length": 8192, "gpu_share": share}
+
+
+def _with_shares(tmp_path, base_share, cand_share, cand_first=None):
+    base, cand = _sides(tmp_path)
+    for side, share in ((base, base_share), (cand, cand_share)):
+        for i in range(NC):
+            first = cand_first if (side is cand and i == 0 and cand_first is not None) else share
+            side.run(CONTRACT, ollama_loaded=_loaded(first))
+        for _ in range(NR):
+            side.run(REFUSAL, ollama_loaded=_loaded(share))
+
+
+def test_a_one_point_gpu_share_drift_is_not_a_different_setting(tmp_path):
+    # 0.85 and 0.86 rounded to one decimal are 0.8 and 0.9: the first tool
+    # refused this comparison.
+    _with_shares(tmp_path, 0.85, 0.86)
+    code, _, report = _compare(tmp_path)
+    assert code == 0, _
+    assert _group(report, False)["gpu_share"] == {"min": 0.85, "max": 0.86}
+
+
+def test_a_gpu_share_exactly_at_the_tolerance_is_accepted(tmp_path):
+    _with_shares(tmp_path, 0.80, 0.85)
+    assert _compare(tmp_path)[0] == 0
+
+
+@pytest.mark.parametrize("base_share, cand_share", [(0.80, 0.86), (0.0, 0.85), (0.5, 0.85)])
+def test_a_gpu_share_beyond_the_tolerance_is_refused(tmp_path, base_share, cand_share):
+    _with_shares(tmp_path, base_share, cand_share)
+    assert "gpu_share ranges" in _refused(tmp_path)
+
+
+def test_a_spread_inside_one_side_is_refused_too(tmp_path):
+    _with_shares(tmp_path, 0.85, 0.85, cand_first=0.0)
+    assert "gpu_share ranges 0.00-0.85" in _refused(tmp_path)
+
+
+def test_a_gpu_share_missing_for_some_runs_is_refused(tmp_path):
+    _with_shares(tmp_path, 0.85, 0.85, cand_first=None)
+    base, cand = _sides(tmp_path)
+    cand.n = 1000  # new stamps beside the ones already written
+    base.n = 1000
+    base.run(CONTRACT, ollama_loaded=_loaded(0.85))
+    cand.run(CONTRACT, ollama_loaded={"probed": True, "context_length": 8192, "gpu_share": None})
+    assert "reported for some runs and not others" in _refused(tmp_path)
