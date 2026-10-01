@@ -42,12 +42,18 @@ class ModelRegistry:
         self._active_id: str | None = None
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "ModelRegistry":
+    def from_settings(cls, settings: Settings, *, provider: str) -> "ModelRegistry":
+        """The Boss model, labelled with the adapter that will serve it.
+
+        `provider` is the serving adapter's `name`, passed by the composition
+        root. It was a constant "ollama", which filed llama.cpp runs as Ollama
+        runs (ADR-020 section 3.2).
+        """
         registry = cls()
         registry.register(
             ModelSpec(
                 id="model-001",
-                provider="ollama",
+                provider=provider,
                 name=settings.boss_model,
                 context_window=settings.boss_context_window,
                 role=ModelRole.BOSS,

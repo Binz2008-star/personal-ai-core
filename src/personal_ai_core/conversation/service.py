@@ -164,7 +164,8 @@ class ConversationService:
 
         requested = {
             "model": spec.name,
-            "provider": spec.provider,
+            # The adapter that serves this turn, not a label (ADR-020 section 3.2).
+            "provider": self._provider.name,
             "message_count": len(prompt),
             "grounded": grounding is not None and grounding.message is not None,
             "evidence_chunks": grounding.used if grounding is not None else 0,

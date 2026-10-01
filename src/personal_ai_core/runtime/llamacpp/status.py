@@ -6,24 +6,31 @@ Never fails: a server that cannot answer is recorded as not confirmed.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from .digest import gguf_weights, unverified
 
 # A probe takes a URL and returns the decoded JSON of a GET to it.
 Probe = Callable[[str], Mapping[str, Any]]
 
 
-def loaded_status(probe: Probe | None, host: str) -> dict[str, Any]:
+def loaded_status(
+    probe: Probe | None, host: str, digest_cache: Path | None = None
+) -> dict[str, Any]:
     """llama-server's own report, from `/props`: context size and model file.
 
-    The model file's name is recorded so a run can be checked against the
-    GGUF blob Ollama serves for the Boss model -- the same weights, or not.
+    `weights` is the file's digest (ADR-020 section 3.1). The file name is kept
+    for reading, but it is not what identifies the weights.
     """
     if probe is None:
-        return {"probed": False, "reason": "no probe (test transport)"}
+        return {"probed": False, "reason": "no probe (test transport)",
+                "weights": unverified("no probe (test transport)")}
     try:
         data = probe(f"{host.rstrip('/')}/props")
     except Exception as exc:  # noqa: BLE001 -- recorded, never fatal
-        return {"probed": False, "reason": type(exc).__name__}
+        return {"probed": False, "reason": type(exc).__name__,
+                "weights": unverified(f"server not probed ({type(exc).__name__})")}
     settings = data.get("default_generation_settings") or {}
     n_ctx = data.get("n_ctx", settings.get("n_ctx"))
     path = str(data.get("model_path") or "")
@@ -32,4 +39,5 @@ def loaded_status(probe: Probe | None, host: str) -> dict[str, Any]:
         "context_length": n_ctx if isinstance(n_ctx, int) else None,
         "gpu_share": None,
         "model_file": path.replace("\\", "/").rsplit("/", 1)[-1] or None,
+        "weights": gguf_weights(path, digest_cache),
     }

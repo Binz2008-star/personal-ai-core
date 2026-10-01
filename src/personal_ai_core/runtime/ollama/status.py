@@ -7,11 +7,32 @@ Never fails: a server that cannot answer is recorded as not confirmed.
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from typing import Any, Callable, Mapping
 
 # A probe takes a URL and returns the decoded JSON of a GET to it.
 Probe = Callable[[str], Mapping[str, Any]]
+
+_DIGEST = re.compile(r"^(?:sha256:)?([0-9a-f]{64})$")
+
+
+def _unverified(reason: str) -> dict[str, Any]:
+    return {"digest": None, "source": None, "verified": False, "reason": reason}
+
+
+def _weights(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """The digest Ollama reports for the loaded model (ADR-020 section 3.1).
+
+    It is the manifest's digest: it changes when the weights change, and also
+    when the template or parameters bundled with them do. A tag can be
+    re-pointed; this cannot.
+    """
+    match = _DIGEST.match(str(entry.get("digest") or ""))
+    if match is None:
+        return _unverified("no digest reported")
+    return {"digest": f"sha256:{match.group(1)}", "source": "ollama-manifest",
+            "verified": True}
 
 
 def http_probe(url: str) -> Mapping[str, Any]:
@@ -28,11 +49,13 @@ def loaded_status(probe: Probe | None, host: str, model: str) -> dict[str, Any]:
     never fails the run: a probe that cannot answer says so in the header.
     """
     if probe is None:
-        return {"probed": False, "reason": "no probe (test transport)"}
+        return {"probed": False, "reason": "no probe (test transport)",
+                "weights": _unverified("no probe (test transport)")}
     try:
         data = probe(f"{host.rstrip('/')}/api/ps")
     except Exception as exc:  # noqa: BLE001 -- recorded, never fatal
-        return {"probed": False, "reason": type(exc).__name__}
+        return {"probed": False, "reason": type(exc).__name__,
+                "weights": _unverified(f"server not probed ({type(exc).__name__})")}
     for entry in data.get("models", []) or []:
         if model in (entry.get("name"), entry.get("model")):
             size, vram = entry.get("size"), entry.get("size_vram")
@@ -44,5 +67,7 @@ def loaded_status(probe: Probe | None, host: str, model: str) -> dict[str, Any]:
                     if isinstance(size, int) and isinstance(vram, int) and size
                     else None
                 ),
+                "weights": _weights(entry),
             }
-    return {"probed": True, "context_length": None, "reason": "model not loaded"}
+    return {"probed": True, "context_length": None, "reason": "model not loaded",
+            "weights": _unverified("model not loaded")}

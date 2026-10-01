@@ -253,7 +253,7 @@ def test_identity_is_never_persisted():
         messages=messages,
         events=InMemoryEventRepository(),
         provider=OllamaProvider("http://unused", transport=transport),
-        registry=ModelRegistry.from_settings(Settings()),
+        registry=ModelRegistry.from_settings(Settings(), provider="ollama"),
         budget_policy=ReserveBasedBudgetPolicy(),
         identity=DefaultIdentityComposer(),
     )

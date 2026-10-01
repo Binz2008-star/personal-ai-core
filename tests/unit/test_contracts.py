@@ -116,7 +116,7 @@ def test_event_repository_exposes_no_mutation():
 
 
 def test_concrete_registry_satisfies_the_protocol():
-    registry = ConcreteRegistry.from_settings(Settings.from_env({}))
+    registry = ConcreteRegistry.from_settings(Settings.from_env({}), provider="ollama")
     assert isinstance(registry, ModelRegistry)
     assert isinstance(registry.active, ModelSpecLike)
 
@@ -208,4 +208,6 @@ def test_the_service_accepts_any_protocol_compatible_registry():
     assert reply.role is Role.ASSISTANT
     requested = next(e for e in events.all() if e.type is EventType.GENERATION_REQUESTED)
     assert requested.payload["model"] == "stub-model:1b"
-    assert requested.payload["provider"] == "stub"
+    # The event names the adapter that served the turn, not the registry's
+    # label for it (ADR-020 section 3.2): here a stub registry says "stub".
+    assert requested.payload["provider"] == "ollama"

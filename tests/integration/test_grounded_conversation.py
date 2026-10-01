@@ -339,7 +339,7 @@ def test_a_retrieval_failure_is_recorded_and_fails_the_turn(transport):
         messages=InMemoryMessageRepository(),
         events=events,
         provider=OllamaProvider("http://unused", transport=transport),
-        registry=ModelRegistry.from_settings(Settings()),
+        registry=ModelRegistry.from_settings(Settings(), provider="ollama"),
         budget_policy=budget_policy,
         identity=DefaultIdentityComposer(),
         context_builder=ContextBuilder(

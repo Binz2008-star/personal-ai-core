@@ -58,6 +58,7 @@ from ..conversation.factory import (
 )
 from ..core.config import DEFAULT_BOSS_MODEL, Settings
 from ..core.errors import ProviderError
+from ..core.domain import EventType
 from .cli import _ingest
 
 # Which version of the checks produced a verdict. Recorded in every scored
@@ -465,6 +466,9 @@ def _event_record(event) -> dict[str, Any]:
     return {"type": event.type.value, "payload": dict(event.payload)}
 
 
+DIGEST_CACHE = Path.home() / ".personal-ai-core" / "digest-cache.json"
+
+
 def run_case(
     case: Case, settings: Settings, transport, workdir: Path, policy=None, provider=None
 ) -> dict[str, Any]:
@@ -683,8 +687,26 @@ def main(
         model=settings.boss_model,
         probe=probe,
         live=transport is None,
+        # A real run remembers a hashed GGUF file, so it is read once, not once
+        # per run. A test run writes nothing outside its own folders.
+        digest_cache=DIGEST_CACHE if transport is None else None,
     )
     header["ollama_loaded"] = loaded
+    # ADR-020 section 3.1: which weights, by digest. A comparison refuses a run
+    # whose weights are unverified.
+    weights = loaded.get("weights") or {"verified": False, "reason": "not reported"}
+    header["weights"] = weights
+    header["weights_unverified"] = not weights.get("verified", False)
+    # Section 3.2: the adapter that served the turns, read from the turns.
+    served = sorted(
+        {
+            str(e["payload"].get("provider"))
+            for r in records
+            for e in r.get("events", [])
+            if e["type"] == EventType.GENERATION_REQUESTED.value and "provider" in e["payload"]
+        }
+    )
+    header["provider"] = served[0] if len(served) == 1 else (served or None)
     measured = loaded.get("context_length")
     mismatch = (
         args.num_ctx is not None and isinstance(measured, int) and measured != args.num_ctx
