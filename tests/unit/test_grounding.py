@@ -344,3 +344,14 @@ def test_a_lexical_only_result_contributes_no_embedder(make_chunk):
         session_id="s1", query="q", language="en", model=Spec(), history=[]
     )
     assert summarize(grounding)["embedding_model_ids"] == []
+
+
+def test_the_preamble_does_not_set_the_reply_language():
+    """ground-decline-ar (2026-10-01): an Arabic question got an English or
+    Chinese decline in every run, after this English note. The note says the
+    reply follows the user's message, and names no language itself."""
+    from personal_ai_core.conversation.grounding import GROUNDING_PREAMBLE
+
+    assert "language of the user's message" in GROUNDING_PREAMBLE
+    for name in ("Arabic", "English", "Chinese"):
+        assert name not in GROUNDING_PREAMBLE

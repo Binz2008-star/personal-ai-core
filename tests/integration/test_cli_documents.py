@@ -247,12 +247,15 @@ def test_the_evidence_pac_sends_fits_the_budget_it_recorded(tmp_path):
     # everything fits, and "fits" would prove nothing. Re-tuned from 2000 on
     # 2026-09-25: the estimator calibration raised the per-character cost, and
     # at 2000 no passage fit at all. Since 2026-10-01 the folder path has a
-    # fixed length (see fixed_length_folder), and the budget binds with at
-    # least one passage admitted for windows from about 2500 to 3400; 2900
-    # sits in the middle, so a short preamble edit does not move it out.
+    # fixed length (see fixed_length_folder), and the window is the preamble's
+    # own cost plus a fixed allowance, so neither the machine nor a wording
+    # change moves the threshold. With the preamble of #108 this is 2900, the
+    # middle of the measured range (~2500-3400) where the budget binds with
+    # at least one passage admitted.
+    window = 2575 + ScriptAwareTokenEstimator().estimate(GROUNDING_PREAMBLE)
     code, output, transport = run(
         ["--database", str(database), "--documents", str(folder)],
-        env={"PAC_BOSS_CONTEXT_WINDOW": "2900"},
+        env={"PAC_BOSS_CONTEXT_WINDOW": str(window)},
     )
     assert code == 0
 
