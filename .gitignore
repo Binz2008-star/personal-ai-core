@@ -7,3 +7,8 @@ dist/
 .venv/
 venv/
 .DS_Store
+# Local credentials: never committed (.neon is the Neon CLI's project link).
+.env
+.env.*
+!.env.example
+.neon

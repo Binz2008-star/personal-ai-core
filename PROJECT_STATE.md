@@ -490,6 +490,10 @@ claim written in one place with nothing that notices it going stale.
   #106 aa21f90  feat(eval): contract-v1 case file with ADR-018 unit 3 cases
   #107 2cec1bc  feat(context): ADR-018 unit 1 -- SecretRedactor contract and
                PatternSecretRedactor
+  #108 4557099  feat(conversation): ADR-018 unit 2 -- withhold secrets before the
+               model sees evidence
+  #109 095bec3  eval: language-rule variants A/B/C, contract_v0, num_ctx 8192, one
+               run each
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
