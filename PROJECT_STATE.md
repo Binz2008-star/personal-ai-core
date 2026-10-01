@@ -573,6 +573,8 @@ claim written in one place with nothing that notices it going stale.
   #133 fded060  eval: refusal_v1 baseline at c8738e9, unchanged Boss model, two runs
   #134 8527b7d  fix(eval): close the refusal check's blind spots before a baseline
                exists
+  #135 d2fd7d0  docs: reconcile PROJECT_STATE and ADR statuses at 8527b7d
+  #136 0ea3914  docs: replace ARCHITECTURE.md with the current architecture model
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
