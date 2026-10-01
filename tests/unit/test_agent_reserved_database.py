@@ -219,3 +219,12 @@ def test_without_a_reserved_database_nothing_is_reserved(tmp_path):
     root.mkdir()
     (root / "core.db").write_bytes(b"not ours")
     assert not Workspace(root).is_reserved(root / "core.db")
+
+
+def test_find_files_does_not_report_the_database(home):
+    root, database = home
+    database.write_text("x", encoding="utf-8")
+    (root / "notes.db").write_text("y", encoding="utf-8")
+    result = run(agent(root, database), "find_files", pattern="*.db")
+    assert result.ok and "notes.db" in result.output
+    assert DB not in result.output

@@ -18,6 +18,7 @@ from .recovery import ActionBudget, Checkpoints
 from .sandbox import SandboxError, Workspace, is_protected
 from .tools import (
     DeleteFile,
+    FindFiles,
     ListDirectory,
     ReadFile,
     RunCommand,
@@ -38,6 +39,7 @@ __all__ = [
     "Checkpoints",
     "DeleteFile",
     "Expectation",
+    "FindFiles",
     "Verifier",
     "find_secrets",
     "CommandRejected",
