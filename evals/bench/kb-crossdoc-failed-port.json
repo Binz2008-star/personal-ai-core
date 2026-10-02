@@ -1,0 +1,28 @@
+{
+  "id": "kb-crossdoc-failed-port",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/project_notes",
+  "instruction": {
+    "en": "Which service failed in the March 2026 outage, and which port does it listen on?",
+    "ar": "أي خدمة تعطلت في انقطاع مارس 2026، وعلى أي منفذ تستمع؟"
+  },
+  "checks": [
+    {
+      "type": "answer_contains",
+      "any_of": [
+        "gateway"
+      ]
+    },
+    {
+      "type": "answer_number",
+      "value": 9443
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "The gateway failed; it listens on port 9443 (incidents.md, architecture.md).",
+      "ar": "تعطلت خدمة gateway، وهي تستمع على المنفذ 9443 (incidents.md و architecture.md)."
+    }
+  }
+}

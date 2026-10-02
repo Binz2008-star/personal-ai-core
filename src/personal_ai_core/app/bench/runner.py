@@ -224,7 +224,8 @@ def run_knowledge_task(task: Task, language: str, settings: Settings, log: CallL
 def _task_digest(task: Task) -> str:
     """The task and its fixture or corpus: a resumed run must measure the same tasks."""
     digest = hashlib.sha256(json.dumps(
-        {"instruction": task.instruction, "checks": task.checks, "git": task.git},
+        {"instruction": task.instruction, "checks": task.checks, "git": task.git,
+         "git_commits": task.git_commits},
         sort_keys=True, ensure_ascii=False).encode("utf-8"))
     for root in (task.fixture, task.corpus):
         if root is None:

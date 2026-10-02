@@ -1,0 +1,33 @@
+{
+  "id": "codegen-slugify",
+  "track": "agent",
+  "category": "code_generation",
+  "fixture": "fixtures/slugify",
+  "instruction": {
+    "en": "Add a function slugify(text) to text_utils.py. It lowercases the text, keeps only letters and digits, and joins the words with single dashes. test_text_utils.py already tests it; do not change the tests.",
+    "ar": "أضف دالة slugify(text) إلى text_utils.py. تحوّل النص إلى أحرف صغيرة، وتُبقي الحروف والأرقام فقط، وتصل الكلمات بشرطة واحدة. الملف test_text_utils.py يختبرها مسبقاً؛ لا تعدّل الاختبارات."
+  },
+  "checks": [
+    {
+      "type": "command_passes",
+      "argv": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ]
+    },
+    {
+      "type": "file_equals",
+      "path": "test_text_utils.py",
+      "text": "from text_utils import slugify, title_case\n\n\ndef test_title_case():\n    assert title_case(\"hello world\") == \"Hello World\"\n\n\ndef test_slugify_lowercases_and_joins_with_dashes():\n    assert slugify(\"Hello World\") == \"hello-world\"\n\n\ndef test_slugify_drops_punctuation():\n    assert slugify(\"Rock & Roll!\") == \"rock-roll\"\n\n\ndef test_slugify_collapses_spaces():\n    assert slugify(\"  many   spaces \") == \"many-spaces\"\n"
+    }
+  ],
+  "reference": {
+    "writes": {
+      "text_utils.py": "\"\"\"Text helpers.\"\"\"\nimport re\n\n\ndef title_case(text):\n    \"\"\"Every word capitalised.\"\"\"\n    return \" \".join(word.capitalize() for word in text.split())\n\n\ndef slugify(text):\n    \"\"\"Lowercase words of letters and digits, joined by single dashes.\"\"\"\n    return \"-\".join(re.findall(r\"[a-z0-9]+\", text.lower()))\n"
+    }
+  }
+}

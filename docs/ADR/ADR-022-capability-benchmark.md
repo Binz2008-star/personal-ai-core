@@ -1,7 +1,7 @@
 # ADR-022 — A capability benchmark: does the system do the task?
 
 **Status:** ACCEPTED · direction approved by the owner 2026-10-02 ("put item 10 first") ·
-§8 decided 2026-10-02 (D1 24 tasks, D2 5 runs, D3 containment as in §3.5) · units 1-2 built
+§8 decided 2026-10-02 (D1 24 tasks, D2 5 runs, D3 containment as in §3.5) · units 1-3 built (the v0 set: 24 tasks)
 
 - Serves the owner's order of 2026-10-02: measurement first, then targeted improvement
   against measured gaps. LoRA or fine-tuning is considered only if this baseline shows a

@@ -1,0 +1,29 @@
+{
+  "id": "kb-incident-cause",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/project_notes",
+  "instruction": {
+    "en": "What caused the gateway outage on 14 March 2026?",
+    "ar": "ما سبب انقطاع خدمة gateway في 14 مارس 2026؟"
+  },
+  "checks": [
+    {
+      "type": "answer_contains",
+      "any_of": [
+        "certificate",
+        "شهادة"
+      ]
+    },
+    {
+      "type": "cites",
+      "document": "incidents.md"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "The gateway's TLS certificate had expired (incidents.md).",
+      "ar": "انتهت صلاحية شهادة TLS الخاصة بخدمة gateway (incidents.md)."
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "debug-word-count",
+  "track": "agent",
+  "category": "debugging",
+  "fixture": "fixtures/word_count",
+  "instruction": {
+    "en": "The tests in test_words.py fail. Find the bug in words.py and fix it. Do not change the tests.",
+    "ar": "الاختبارات في test_words.py تفشل. اعثر على الخطأ في words.py وأصلحه. لا تعدّل الاختبارات."
+  },
+  "checks": [
+    {
+      "type": "command_passes",
+      "argv": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ]
+    },
+    {
+      "type": "file_equals",
+      "path": "test_words.py",
+      "text": "from words import word_count\n\n\ndef test_simple():\n    assert word_count(\"one two three\") == 3\n\n\ndef test_newlines_and_tabs():\n    assert word_count(\"one\\ntwo\\tthree\") == 3\n\n\ndef test_empty():\n    assert word_count(\"\") == 0\n\n\ndef test_repeated_spaces():\n    assert word_count(\"a  b\") == 2\n"
+    }
+  ],
+  "reference": {
+    "writes": {
+      "words.py": "\"\"\"Word statistics.\"\"\"\n\n\ndef word_count(text):\n    \"\"\"How many words the text has; words are separated by any whitespace.\"\"\"\n    return len(text.split())\n"
+    }
+  }
+}

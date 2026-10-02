@@ -1,0 +1,44 @@
+{
+  "id": "git-commit-release",
+  "track": "agent",
+  "category": "git",
+  "fixture": "fixtures/release",
+  "git": true,
+  "instruction": {
+    "en": "Change VERSION from 1.4.0 to 1.5.0 and commit the change with the message: Release 1.5.0",
+    "ar": "غيّر محتوى VERSION من 1.4.0 إلى 1.5.0 ثم احفظ التغيير في git (commit) بالرسالة: Release 1.5.0"
+  },
+  "checks": [
+    {
+      "type": "file_equals",
+      "path": "VERSION",
+      "text": "1.5.0\n"
+    },
+    {
+      "type": "git_log_contains",
+      "text": "Release 1.5.0"
+    },
+    {
+      "type": "git_clean"
+    }
+  ],
+  "reference": {
+    "writes": {
+      "VERSION": "1.5.0\n"
+    },
+    "commands": [
+      [
+        "git",
+        "add",
+        "-A"
+      ],
+      [
+        "git",
+        "commit",
+        "-q",
+        "-m",
+        "Release 1.5.0"
+      ]
+    ]
+  }
+}
