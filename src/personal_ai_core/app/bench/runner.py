@@ -172,7 +172,7 @@ def _contract(task: Task, language: str) -> AgentTaskContract:
 
 
 def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
-                   workspace: Path) -> dict[str, Any]:
+                   workspace: Path, *, environment_context: bool = False) -> dict[str, Any]:
     workspace.mkdir(parents=True)
     materialize(task, workspace)
     confirm = BenchmarkConfirm()
@@ -183,13 +183,16 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
     answer = None
     steps: tuple = ()
     try:
-        agent = build_agent(settings, workspace=workspace, transport=log, confirm=confirm)
+        agent = build_agent(settings, workspace=workspace, transport=log, confirm=confirm,
+                            environment_context=environment_context)
         outcome = agent.loop.run(_contract(task, language), session_id="bench")
         answer, steps = outcome.answer, outcome.steps
         record["stop"] = "answered" if outcome.finished else "budget"
         record["stopped_reason"] = outcome.stopped_reason
         record["protocol_errors"] = outcome.protocol_errors
         record["action_rejections"] = outcome.action_rejections
+        if outcome.environment is not None:
+            record["environment"] = dict(outcome.environment)
     except ProviderError as exc:
         record["stop"], record["error"] = "error", str(exc)
     record["seconds"] = round(time.perf_counter() - started, 3)
@@ -300,6 +303,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--only", nargs="+", metavar="TASK_ID")
     parser.add_argument("--languages", nargs="+", choices=LANGUAGES, default=list(LANGUAGES))
     parser.add_argument("--num-ctx", type=int, help="the context Ollama was started with")
+    parser.add_argument("--environment-context", action="store_true",
+                        help="give each agent run the environment facts the program read "
+                             "(ADR-023 §2.1, unit 2). Off by default, so a run is comparable "
+                             "with the baseline and with unit 1 alone")
     parser.add_argument("--resume", type=Path, help="continue an interrupted result file")
     parser.add_argument("--report", type=Path, help="print the summary of a result file")
     parser.add_argument("--rescore", type=Path,
@@ -377,6 +384,7 @@ def main(
         "num_ctx_measured_by_owner": args.num_ctx,
         "num_ctx_sent_by_core": False,
         "profile": "none (deliberately empty)",
+        "environment_context": args.environment_context,
         "contract": "each agent task file states action_required and the runner passes an "
                     "AgentTaskContract built from it (ADR-023 §8.3); a file without this key "
                     "ran without a contract",
@@ -396,8 +404,9 @@ def main(
     if args.resume is not None:
         previous = _read(args.resume)
         old = previous[0] if previous and previous[0].get("kind") == "header" else {}
-        for key in ("commit", "model", "tasks", "runs", "languages"):
-            if old.get(key) != header[key]:
+        for key in ("commit", "model", "tasks", "runs", "languages", "environment_context"):
+            # A file from before the flag existed ran without the context.
+            if (bool(old.get(key)) if key == "environment_context" else old.get(key)) != header[key]:
                 print(f"refusing to resume: {key} differs from the file's header", file=out)
                 return 2
         done = {(r["task"], r["language"], r["run"]) for r in previous if r.get("kind") == "run"}
@@ -420,8 +429,11 @@ def main(
             if (task.id, language, run) in done:
                 continue
             workspace = Path(tmp) / f"{task.id}-{language}-{run}"
-            runner = run_agent_task if task.track == "agent" else run_knowledge_task
-            record = runner(task, language, settings, log, workspace)
+            if task.track == "agent":
+                record = run_agent_task(task, language, settings, log, workspace,
+                                        environment_context=args.environment_context)
+            else:
+                record = run_knowledge_task(task, language, settings, log, workspace)
             calls = log.take()
             record = {"kind": "run", "task": task.id, "track": task.track,
                       "category": task.category, "language": language, "run": run,

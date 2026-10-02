@@ -641,8 +641,12 @@ claim written in one place with nothing that notices it going stale.
                recorded, next steps for the owner
   #174 d2b6cac  feat(agent): ADR-023 unit 1 -- action enforcement: an answer with
                no executed tool call is rejected when action is required
+  #175 aedc27f  docs: record #174 and #176 -- handoff at de5a79e, ADR-023
+               status (the owner's commit folded in), #162 diagnosed
   #176 de5a79e  feat(bench): ADR-023 section 8.3 -- agent tasks state
                action_required; the runner passes the contract
+  #177 5d681b4  feat(bench): ADR-023 section 5 -- compare two result files:
+               what moved, never a verdict
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1108,7 +1112,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at de5a79e)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at 5d681b4)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1120,9 +1124,38 @@ PR, as with the ledger.
 
 WHERE THINGS STAND (2026-10-02)
   - Since 6d4fe15: #167 (ADR-023 accepted), #173 (the previous handoff),
-    #174 (unit 1) and #176 (the section 8.3 benchmark change) merged; main is
-    de5a79e. Open: #177 (draft, the comparison tool, see "Next" below) and
-    #162 (stale, "Open, not ours" below).
+    #174 (unit 1), #176 (the section 8.3 benchmark change), #175 (the record
+    of those two) and #177 (the comparison tool) merged; main is 5d681b4.
+    Open: #178 (unit 2, environment context, off by default) and #162 (stale,
+    "Open, not ours" below).
+  - main went red for one run (2026-10-02, the #176 merge) and was fixed by
+    #175: after #174 the ledger and the handoff were exactly 3 merges behind,
+    and #176 made it 4. A PR cannot count its own merge, so its CI could not
+    warn. The rule below ("update this header in any PR that finds it 3 merges
+    behind") is the one that was not applied; merge the PR that refreshes the
+    header BEFORE, or WITH, the one that makes it 4.
+  - Built, open (#178): ADR-023 unit 2, environment context, section 2.1.
+    OFF unless asked for: `build_agent(environment_context=True)` and the
+    benchmark flag `--environment-context`; `pac --agent` is not changed
+    (adopting a control there is the owner's, on the measured result, section
+    4). At the start of a run the program reads the system and what its shell
+    does with quotes and wildcards, the runtime, whether the workspace is a
+    repository, the supported test command and what run_command accepts, and
+    shows them to the model in one extra system block of at most 400 tokens
+    (about 5% of an 8192 window). The test command is resolved in the ADR's
+    order (contract, caller, verified configuration, discovery) and is offered
+    only if the command policy already accepts it. It reads files only: it
+    does NOT run `git status`, which can execute programs a repository's own
+    config names (core.fsmonitor, filters). Not built: the contract and caller
+    inputs have no plumbing, and the verification rules of section 2.1 belong
+    to unit 3. Built under the owner's standing instruction of 2026-10-02 to
+    the lead to decide and handle merges; NOT measured.
+  - Merged: #177, `python -m personal_ai_core.app.bench.compare BASELINE NEW`:
+    ADR-023 section 5 as one command. Its failure classes are computed from
+    the records and reproduce section 1.2 exactly on the baseline (52, 43, 14,
+    2 of 111, by language); a test pins that. It warns when two files are not
+    comparable (model, scorer, num_ctx, runs, languages, weights, task set, a
+    digest the contract does not explain) and decides nothing.
   - Merged: #176 (feat/bench-action-required-contract, 2026-10-02, 16 files,
     +238/-13, CI green: suite, static, suite-windows; merged on the owner's
     instruction). ADR-023 section 8.3 and nothing else: the 12 agent task
@@ -1185,9 +1218,9 @@ WHERE THINGS STAND (2026-10-02)
     rejected, the model told once, one failure from the global budget of 3.
     The owner chose it ahead of environment context (decision 4's order)
     because it targets Class 1, the largest.
-  - Not authorized yet: every other ADR-023 control (unit 2, environment
-    context, and later). Each needs the owner's approval as its own PR. The
-    benchmark change that lets unit 1 be measured is built (#176).
+  - Not authorized yet: every other ADR-023 control (unit 3, verification, and
+    later). Each needs the owner's approval as its own PR. Built: the
+    benchmark change that lets unit 1 be measured (#176) and unit 2 (#178).
   - The capability baseline is done and is the reference for every later
     measurement:
       raw   evals/results/bench/bench-20261002T081707Z.jsonl  (#165, a609f69,
@@ -1264,9 +1297,14 @@ WHERE THINGS STAND (2026-10-02)
          minutes; it writes a new file and never touches the baseline);
          commit the new file unmodified as an eval PR, as #165 did. Read it
          against the baseline by failure class, never by a target score
-         (ADR-023 section 5): #177 (draft) adds `python -m
-         personal_ai_core.app.bench.compare BASELINE NEW`, which reproduces
-         the ADR's 52/43/14/2 on the baseline and decides nothing.
+         (ADR-023 section 5): `python -m personal_ai_core.app.bench.compare
+         BASELINE NEW` (#177) reproduces the ADR's 52/43/14/2 on the baseline
+         and decides nothing.
+      5. Then, the owner's, on the rig: the same run with
+         `--environment-context` (unit 1 + unit 2, the same code and one flag),
+         compared with the unit-1 file. Class 3 is the one expected to move;
+         read the Arabic rows (the English block sits in a system message, not
+         the latest user message, but that is an inference, not an observation).
   - Rules learned today: update this header in any PR that finds it 3 merges
     behind (main went red after #163 when it slipped to 4); a scorer fix is
     the smallest rule that fixes the defect, proved by re-judging the same

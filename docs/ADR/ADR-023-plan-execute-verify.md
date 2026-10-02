@@ -1,15 +1,15 @@
 # ADR-023 — Planning, execution/test and verification in the agent loop
 
-**Status:** ACCEPTED (2026-10-02) — unit 1 (§8.2) built and merged (#174, `d2b6cac`), not yet measured
+**Status:** ACCEPTED (2026-10-02) — unit 1 (§8.2) built and merged (#174, `d2b6cac`); unit 2 (§2.1) built, off by default (#178); not yet measured
 
 | Stage | State |
 |---|---|
 | Proposed | yes: this document, 2026-10-02 |
 | Design questions | decided by the owner, 2026-10-02 (§6) |
 | Accepted | **yes**, by the owner, 2026-10-02, with the first unit (§8) |
-| Authorized | **acceptance, the specification of unit 1, unit 1's implementation** (#174) **and the benchmark change that lets it be measured** (§8.3, #176), each merged on the owner's instruction, 2026-10-02. Unit 2 and every later control each need their own approval (§4, §8) |
-| Implemented | **the contract (#172) and unit 1, action enforcement (#174, `d2b6cac`)**, enforced for `action_required=true`. No other control in §2 exists in the code |
-| Verified | **tests and CI only** (§8.4). **Not measured**: since #176 the benchmark passes the contract, so unit 1 engages there, but the 240 runs have not been made |
+| Authorized | **acceptance, the specification of unit 1, unit 1's implementation** (#174) **and the benchmark change that lets it be measured** (§8.3, #176), each merged on the owner's instruction, 2026-10-02. **Unit 2** (§2.1, #178) was built and merged under the owner's standing instruction of 2026-10-02 to the lead to decide and handle merges, **off by default and not exposed in `pac --agent`**. Unit 3 and every later control each need their own approval (§4, §8) |
+| Implemented | **the contract (#172), unit 1, action enforcement (#174, `d2b6cac`)**, enforced for `action_required=true`, **and unit 2, environment context (#178)**, which runs only with the benchmark flag `--environment-context` or `build_agent(environment_context=True)`. No other control in §2 exists in the code |
+| Verified | **tests and CI only** (§8.4). **Not measured**: since #176 the benchmark passes the contract, so unit 1 engages there, and since #178 the same run can be made with and without unit 2, but the 240 runs have not been made |
 
 - Serves the owner's order after the capability baseline: Planning, then Execution/Test,
   then Verification, built against measured gaps.
@@ -135,7 +135,7 @@ or how its tests run.
 
 ## 2. Proposed controls
 
-These are proposals. Only action enforcement (§2.2) is implemented, in #174 (§8.4). The
+These are proposals. Action enforcement (§2.2) is implemented, in #174 (§8.4), and environment context (§2.1), off by default, in #178. The
 order below is the order of the loop and the proposed order of implementation (§6,
 decision 4):
 
@@ -188,6 +188,22 @@ that counts as verification (§2.3) is a run of that command.
     `tests_passed`.
   - In the baseline, one attempt edited the test file it was told to leave alone (§1.2).
 - **A task that needs no test is not blocked** merely because no test command exists.
+
+**Status (2026-10-02): built in #178, off by default, not measured.** `agent/environment.py`
+reads the facts and renders the block; `AgentLoop` shows it as one extra system message
+between the protocol and the task when it is given an `EnvironmentContext`, and records
+it (counts and names) on the outcome and the `AGENT_FINISHED` event. Set at
+implementation, as this section asks: **400 tokens**, about 5% of an 8192 window, by the
+project's estimator; the longest block is about 300, so nothing is dropped today, and the
+measurement may revise the figure. Lines are dropped from the least to the most important
+(git, project, the command list, tests). The test command is offered only if
+`validate_command` accepts it, so this never widens the command policy; a contract or
+caller command the policy refuses means no supported command and not a fallback. It reads
+files only: **it does not run `git status`**, which can execute programs a repository's
+own configuration names, so the repository is read from `.git` and its state is left to
+`run_command`. **Not built:** the contract and caller inputs have no plumbing, and the
+last three bullets above (a modified test file is not independent evidence; no test
+command means no `tests_passed` claim) belong to §2.3, unit 3.
 
 ### 2.2 Action enforcement: no action, no completion
 

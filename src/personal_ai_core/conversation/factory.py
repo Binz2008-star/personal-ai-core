@@ -25,6 +25,7 @@ from ..agent import (
     Workspace,
     default_tools,
 )
+from ..agent.environment import EnvironmentContext
 from ..agent.executor import Confirm
 from ..agent.loop import AgentLoop
 from ..agent.web import Fetch
@@ -729,6 +730,7 @@ def build_agent(
     database: str | Path | None = None,
     session_exists: Callable[[str], bool] | None = None,
     web_fetch: Fetch | None = None,
+    environment_context: bool = False,
 ) -> AgentSlice:
     """The agent of AGENT_ARCHITECTURE.md, wired to the Boss model.
 
@@ -748,6 +750,11 @@ def build_agent(
     conversation service's `has_session`. Events recorded against a session
     nobody started are evidence about nothing (F-2); with it, the agent
     refuses an unknown session exactly as `send` does.
+
+    `environment_context` (ADR-023 §2.1, unit 2) is OFF unless asked for: when on,
+    each run starts with facts the program read from the machine and the workspace
+    (system, shell, runtime, git, the supported test command, what `run_command`
+    accepts), counted against a fixed budget. Off, the agent is what it was.
     """
     if events is not None and session_exists is None:
         raise ValueError(
@@ -783,5 +790,10 @@ def build_agent(
         identity=DefaultIdentityComposer(profile=settings.profile),
         events=events,
         session_exists=session_exists,
+        environment=(
+            EnvironmentContext(sandbox.root, estimate=ScriptAwareTokenEstimator().estimate)
+            if environment_context
+            else None
+        ),
     )
     return AgentSlice(loop=loop, executor=executor, checkpoints=checkpoints, workspace=sandbox)
