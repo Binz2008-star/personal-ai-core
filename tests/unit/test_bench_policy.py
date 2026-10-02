@@ -29,6 +29,8 @@ def _ask(confirm: BenchmarkConfirm, tool: str, **arguments: str) -> bool:
     "pytest -q",
     "python -m pytest -q tests/test_calc.py",
     "python3 -m pytest",
+    "python -m mypy calc.py",
+    "python -m ruff check .",
     "python check.py --verbose",
     "python scripts/check.py",
 ])
@@ -54,6 +56,8 @@ def test_local_git_and_python_on_workspace_files_are_approved(command):
     ("python -c pass", "nothing else"),
     ("python -m pip install requests", "nothing else"),
     ("python -m http.server", "nothing else"),
+    ("python -m", "nothing else"),
+    ("python -m pydoc -p 0", "nothing else"),
     ("python", "nothing else"),
     ("python /etc/x.py", "outside the workspace"),
     ("python ../x.py", "outside the workspace"),

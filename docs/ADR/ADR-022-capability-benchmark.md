@@ -134,7 +134,9 @@ reason:
     commit, mv, rm, restore), no option before the subcommand, and none of `--exec`,
     `--upload-pack`, `--receive-pack`, `--output`, `--ext-diff`, `--git-dir`,
     `--work-tree`, `--template`;
-  - `pytest ...`, `python -m pytest ...`, `python FILE.py ...`;
+  - `pytest ...`, `python -m pytest|ruff|mypy ...` (the checks `run_command` already
+    allows by name; added after the smoke run, which found `python -m mypy` refused
+    while `mypy` was allowed), `python FILE.py ...`;
   - no shell metacharacters (`| ; & $ \` ! { } ( ) [ ] < > % ^ * ?`, newline), no
     absolute, `~` or `..` path, a command named by name; on Windows no single quote, which
     cmd does not read as a quote.
@@ -222,6 +224,11 @@ instructions when it is built.
 - **Recorded per run:** success or failure; each check's verdict; tools used, in order;
   commands executed; verification result; stop reason; latency; tokens; the sampling
   settings actually sent; the final workspace and git state.
+- **Citation is reported, not required (2026-10-02, after the smoke run).** A knowledge
+  task succeeds on the fact, or on a correct decline. The `cites` check is
+  `informational`: judged, recorded, and reported as its own rate, but not part of
+  success. The grounding prompt never asks the model to name its source, so requiring
+  it would have scored a missing prompt sentence as a retrieval failure.
 - **After the baseline:** stop and report before implementing the next capability
   improvement. No LoRA or fine-tuning work until the benchmark shows that
   architecture, tool and model changes are insufficient.

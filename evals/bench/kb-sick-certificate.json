@@ -20,7 +20,8 @@
     },
     {
       "type": "cites",
-      "document": "sick-leave.md"
+      "document": "sick-leave.md",
+      "informational": true
     }
   ],
   "reference": {

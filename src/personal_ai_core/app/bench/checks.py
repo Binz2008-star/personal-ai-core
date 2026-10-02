@@ -234,14 +234,23 @@ CHECKS: Mapping[str, Check] = {
 }
 
 
-def judge(ev: RunEvidence, checks: Sequence[Mapping[str, Any]]) -> tuple[bool, list[dict[str, str]]]:
-    """Every check's verdict, and whether the task succeeded (all PASS)."""
-    results = []
+def judge(ev: RunEvidence, checks: Sequence[Mapping[str, Any]]) -> tuple[bool, list[dict[str, Any]]]:
+    """Every check's verdict, and whether the task succeeded.
+
+    A check marked `"informational": true` is judged and recorded but does not
+    decide success: it measures something the system is not asked to do, and
+    is reported as its own rate (the citation check, after the 2026-10-02
+    smoke run: the grounding prompt never asks the model to name its source).
+    """
+    results: list[dict[str, Any]] = []
     for spec in checks:
-        params = {k: v for k, v in spec.items() if k != "type"}
+        params = {k: v for k, v in spec.items() if k not in ("type", "informational")}
         try:
             verdict, detail = CHECKS[spec["type"]](ev, **params)
         except ValueError as exc:
             verdict, detail = FAIL, str(exc)
-        results.append({"check": spec["type"], "verdict": verdict, "detail": detail})
-    return all(r["verdict"] == PASS for r in results), results
+        result: dict[str, Any] = {"check": spec["type"], "verdict": verdict, "detail": detail}
+        if spec.get("informational"):
+            result["informational"] = True
+        results.append(result)
+    return all(r["verdict"] == PASS for r in results if not r.get("informational")), results

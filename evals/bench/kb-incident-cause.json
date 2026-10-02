@@ -17,7 +17,8 @@
     },
     {
       "type": "cites",
-      "document": "incidents.md"
+      "document": "incidents.md",
+      "informational": true
     }
   ],
   "reference": {

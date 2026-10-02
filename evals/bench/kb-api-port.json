@@ -14,7 +14,8 @@
     },
     {
       "type": "cites",
-      "document": "architecture.md"
+      "document": "architecture.md",
+      "informational": true
     }
   ],
   "reference": {
