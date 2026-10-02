@@ -628,6 +628,11 @@ claim written in one place with nothing that notices it going stale.
                the baseline
   #168 3128fb9  docs: handoff at 1449930 -- the baseline done, ADR-023 a draft,
                nothing in progress
+  #169 641707e  docs: handoff -- the fixture digest difference explained; the
+               17 claims made exact
+  #170 9c77078  fix(bench): the task digest orders fixture files by their
+               relative path as text
+  #171 2ac9994  test: the state-script test reads and writes UTF-8 on both ends
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1093,7 +1098,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at 3128fb9)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at 2ac9994)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1103,10 +1108,19 @@ holds only what git cannot know. tests/unit/test_handoff_freshness.py fails CI
 when the header above is more than 3 merges behind main: update it in the next
 PR, as with the ledger.
 
-WHERE THINGS STAND (2026-10-02) -- STOPPED by the owner, nothing in progress
-  - No implementation is authorized. Do not start one from ADR-023, from #167,
-    or from anything below. A change to #167 is reviewed against ADR-023 and
-    the invariants and reported; it is not a reason to implement.
+WHERE THINGS STAND (2026-10-02)
+  - Implemented with the owner's approval (#172): the caller-owned
+    `AgentTaskContract(task_text, action_required)` in core/agent.py, and the
+    strict per-line `pac --agent` prefix `[action_required=true|false] TASK`.
+    Owner decisions: a missing or malformed prefix is rejected before any
+    model call, the next line continues, the session exits 2; `false` means
+    only "action not required" (tools stay under RiskPolicy); AgentLoop.run
+    still takes a plain string (bench runner, tests), recorded as "no
+    contract" in AGENT_* payloads. The contract is RECORDED, NOT ENFORCED.
+  - Not authorized: any enforcement of action_required in the loop or any
+    other ADR-023 control. Do not start one from ADR-023, from #167, or from
+    anything below. A change to #167 is reviewed against ADR-023 and the
+    invariants and reported; it is not a reason to implement.
   - The capability baseline is done and is the reference for every later
     measurement:
       raw   evals/results/bench/bench-20261002T081707Z.jsonl  (#165, a609f69,
@@ -1152,20 +1166,16 @@ WHERE THINGS STAND (2026-10-02) -- STOPPED by the owner, nothing in progress
     the owner's approval BEFORE the baseline, which was measured on it. No
     prompt, Boss model, benchmark task, Neon/pgvector/schema or legacy-repo
     change.
-  - Explained: `file-create-settings` has digest 150017ff71cb768d on Windows
-    and 96fce7417d36a103 on Linux, from identical tracked content (two files,
-    no extra file anywhere). Cause: `_task_digest` in app/bench/runner.py
-    iterates `sorted(paths)`, and Windows paths compare case-insensitively, so
-    README.md and check_settings.py are hashed in a different order. Line
-    endings are not the cause (the digest already normalises CRLF). Verified
-    by recomputing on Linux with the Windows ordering: 150017ff71cb768d, the
-    rig's value. Only this task of the 24 is affected (the only fixture mixing
-    an upper-case and a lower-case file name). It did not affect the rescore
-    (that task has no answer checks). Consequence until fixed: --resume or
-    --rescore across platforms refuses this task. Proposed fix, NOT
-    authorized (a benchmark tool change): sort by the relative POSIX path
-    string, with a test for mixed-case names; best done before the next
-    measurement.
+  - Fixed (#170): the task digest orders fixture files by their relative
+    POSIX path as text, so every platform gives `file-create-settings`
+    96fce7417d36a103. The raw baseline header keeps 150017ff71cb768d, the
+    pre-fix Windows digest; recorded in ADR-022 section 10. The other 23
+    digests are unchanged; the #166 rescore is unaffected.
+  - Rig notes: run pytest with PYTEST_DEBUG_TEMPROOT set to a writable folder
+    (the default temp root is locked there). Claude Code's shell on the rig
+    sets PYTHONIOENCODING=utf-8 with a cp1252 locale; #171 made the one test
+    that broke on it independent of that. One session per worktree: Codex
+    works in personal-ai-core-codex, never in the shared checkout.
   - Rules learned today: update this header in any PR that finds it 3 merges
     behind (main went red after #163 when it slipped to 4); a scorer fix is
     the smallest rule that fixes the defect, proved by re-judging the same
