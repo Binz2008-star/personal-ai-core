@@ -618,6 +618,7 @@ claim written in one place with nothing that notices it going stale.
   #160 3b2af21  feat(bench): ADR-022 unit 2 -- the benchmark runner
   #161 5bc81a1  feat(bench): ADR-022 unit 3 -- the v0 task set, 24 tasks in two
                languages
+  #162 ab3926f  docs(brand): add personal-ai-core logo assets
   #163 cf629a2  fix(bench): what the rig smoke run found, fixed before the
                baseline
   #164 a609f69  fix(agent): a command gets no input, and a timeout ends its
@@ -657,6 +658,7 @@ claim written in one place with nothing that notices it going stale.
                merge below the limit
   #182 3196641  feat(app): pac --documents says which files a directory walk
                passed over
+  #183 56dfa81  docs: record #181 and #182; handoff at 3196641
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1122,7 +1124,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at 3196641)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at ab3926f)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1137,8 +1139,11 @@ WHERE THINGS STAND (2026-10-02)
     #174 (unit 1), #176 (the section 8.3 benchmark change), #175 (the record
     of those two), #177 (the comparison tool), #179 (README: the agent line
     prefix), #178 (unit 2), #180 (PostgreSQL in CI), #181 (the lag gates)
-    and #182 (`pac --documents` names the files a directory walk skipped)
-    merged; main is 3196641. Open: #162 (stale, "Open, not ours" below).
+    and #182 (`pac --documents` names the files a directory walk skipped),
+    #183 (the record of those) and #162 (the brand assets, below) merged; main
+    is ab3926f. Open pull requests: none. Open issue: #76 (the 2026-09-25
+    ADR-017 review checkpoint; the persistence it asked for is built and
+    tested, 55 PostgreSQL tests in CI -- the owner closes it).
   - Merged (#182): `pac --documents DIR` used to read only the `.md` and
     `.txt` files in DIR and drop the rest without a word. It now prints one
     line before the `documents:` summary naming the kinds passed over and how
@@ -1318,13 +1323,16 @@ WHERE THINGS STAND (2026-10-02)
     sets PYTHONIOENCODING=utf-8 with a cp1252 locale; #171 made the one test
     that broke on it independent of that. One session per worktree: Codex
     works in personal-ai-core-codex, never in the shared checkout.
-  - Open, not ours: #162 (docs/brand logo assets, branch ccr-4d137493-sqp6vv)
-    is based on cf629a2. Diagnosed from its CI logs: suite and suite-windows
-    each fail one test, test_the_handoff_is_at_most_a_few_merges_behind_main
-    (the header then named 8fcfa88, 4 merges behind), and nothing else; the
-    static job passes. The cause is a stale branch, not its assets or code.
-    Merging main into the branch gives it the current handoff header and a
-    fresh CI run; the owner decides whether it goes ahead.
+  - Merged (#162, ab3926f): docs/brand logo assets only -- five SVGs, two PNGs
+    and a brand README; nothing under src/, tests/, evals/ or any workflow. It
+    had sat open since the morning on a stale branch: its CI failed only on
+    the handoff-lag gate (the header then named 8fcfa88, 4 merges behind), not
+    on its assets. Reviewed before merging: 8 files, all under docs/brand/;
+    the SVGs are plain paths (no script, event handler or external
+    reference); the PNGs are valid at 512x512 and 32x32; the 512 icon was
+    looked at. Branch updated with main by a merge commit (no history
+    rewrite), CI green on suite, static and suite-windows, then merged under
+    the owner's standing instruction.
   - Next, for the owner to decide (nothing is in progress):
       1. Done: ADR-023 accepted with unit 1 (#167).
       2. Done: unit 1, action enforcement in agent/loop.py (ADR-023
@@ -1353,10 +1361,16 @@ WHERE THINGS STAND (2026-10-02)
     recorded runs both ways.
 
 Who decides
-  - The owner delegated engineering direction to the lead session. In practice
-    the owner approves each merge; the lead reviews, tests and merges on the
-    owner's word, with merge commits (never squash: the ledger reads only
-    "Merge pull request" commits; #140 was squashed by mistake and has no row).
+  - The owner delegated engineering direction to the lead session, and on
+    2026-10-02 told the lead to stop asking before merging: merge pull requests
+    and decide, without asking each time. The lead therefore merges, with merge
+    commits (never squash: the ledger reads only "Merge pull request" commits;
+    #140 was squashed by mistake and has no row), and only when suite and
+    static -- and suite-windows, which is not required but is waited for --
+    are all green on the pull request's current head, with the merge pinned to
+    that head's SHA. Merges are sequential because branch protection requires
+    an up-to-date branch. The delegation does not reach the owner's decisions
+    below, and it does not make an unmeasured control the default.
   - Owner decisions: architecture and product direction, the Boss model,
     schema / migration / Neon / pgvector, branch protection, the rig's system
     settings, deleting anything from the owner's real data.
