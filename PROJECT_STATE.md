@@ -608,6 +608,11 @@ claim written in one place with nothing that notices it going stale.
   #154 b1f80be  eval: ADR-020 acceptance self-comparison at 29abb4e -- PASS
   #155 b080a98  fix(eval): contract-checks-v3 -- a misreading is not a refusal;
                acceptance rescored, still PASS
+  #156 9a6d030  docs(adr): ADR-021 (PROPOSED/DEFERRED) -- forbidding foreign
+               scripts during decoding
+  #157 8fcfa88  fix(conversation): the language guard treats Hebrew as a
+               foreign script
+  #158 72133ab  docs(adr): ADR-022 (PROPOSED) -- a capability benchmark
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1073,7 +1078,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at b080a98)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at 8fcfa88)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1111,6 +1116,18 @@ ADR-020 (evaluating a candidate model) -- where it stands
   - Open from #154: ground-decline-ar failed 2/15 vs 9/15 on identical weights
     (p about 1% by chance; below the +8 threshold). The case is the noisiest
     in the set; cause unresolved.
+  - ADR-022 capability benchmark: ACCEPTED. D1 24 tasks, D2 5 runs (240
+    runs, both languages), D3 containment (app/bench/policy.py): workspace
+    tools, local git and Python/pytest via a command policy, no network tools,
+    no unrestricted shell. NOT a security sandbox -- code the agent writes can
+    reach the network; never describe it as isolated. Units: (1) format,
+    checks, policy -- this PR; (2) runner; (3) the 24 tasks; (4) the 240-run
+    baseline on the rig. Before unit 4 runs, show the owner the allowlist
+    (`policy.describe()`). After the baseline: STOP and report the gaps; the
+    owner picks the 2-3 biggest failure causes to work on.
+  - Owner's order after the baseline: planning + execute/test + verification,
+    semantic RAG, experience/memory, real sandbox, stronger models,
+    multi-agent only if needed; LoRA last, only on evidence.
   - Owner's priorities (2026-10-02): MEASUREMENT FIRST. Build the system --
     model, planning, memory, RAG, tools, agent loop, verification, sandbox,
     multi-agent when needed -- against a capability benchmark (ADR-022, next),
@@ -1119,7 +1136,7 @@ ADR-020 (evaluating a candidate model) -- where it stands
   - ADR-021 (grammar during decoding): PROPOSED / DEFERRED. D1 Phases A-C only,
     D2 GPU-only in production, D3 grammar only under the guard's expected
     script. Revisited after the capability baseline.
-  - The guard's blind spot for Hebrew and other "other" scripts: its own PR. The first real candidate (a LoRA of
+  - Hebrew is now a foreign script for the guard (#157). The first real candidate (a LoRA of
     the Boss model) needs: its weights served by Ollama with an ADAPTER line
     (so adapters are recorded), a fresh baseline at the same commit, and the
     same 15 + 9 runs per side. Adoption still needs the owner (ADR-002, D4).

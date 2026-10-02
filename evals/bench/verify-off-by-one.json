@@ -1,0 +1,57 @@
+{
+  "id": "verify-off-by-one",
+  "track": "agent",
+  "category": "verification",
+  "fixture": "fixtures/off_by_one",
+  "instruction": {
+    "en": "The tests in test_calc.py fail. Fix the bug in calc.py without changing the tests, then run the tests to confirm they pass.",
+    "ar": "الاختبارات في test_calc.py تفشل. أصلح الخطأ في calc.py دون تعديل الاختبارات، ثم شغّل الاختبارات لتتأكد أنها تنجح."
+  },
+  "checks": [
+    {
+      "type": "command_passes",
+      "argv": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ]
+    },
+    {
+      "type": "file_equals",
+      "path": "test_calc.py",
+      "text": "from calc import total\n\n\ndef test_total_of_three():\n    assert total([5, 10, 20]) == 35\n\n\ndef test_total_of_one():\n    assert total([7]) == 7\n\n\ndef test_total_of_none():\n    assert total([]) == 0\n"
+    },
+    {
+      "type": "tested_after_last_edit"
+    }
+  ],
+  "reference": {
+    "writes": {
+      "calc.py": "\"\"\"Order totals.\"\"\"\n\n\ndef total(prices):\n    \"\"\"The sum of every price in the order.\"\"\"\n    result = 0\n    for i in range(len(prices)):\n        result += prices[i]\n    return result\n"
+    },
+    "calls": [
+      {
+        "tool": "read_file",
+        "arguments": {
+          "path": "calc.py"
+        }
+      },
+      {
+        "tool": "write_file",
+        "arguments": {
+          "path": "calc.py",
+          "content": "\"\"\"Order totals.\"\"\"\n\n\ndef total(prices):\n    \"\"\"The sum of every price in the order.\"\"\"\n    result = 0\n    for i in range(len(prices)):\n        result += prices[i]\n    return result\n"
+        }
+      },
+      {
+        "tool": "run_command",
+        "arguments": {
+          "command": "pytest -q"
+        }
+      }
+    ]
+  }
+}
