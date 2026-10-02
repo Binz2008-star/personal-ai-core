@@ -1142,8 +1142,9 @@ WHERE THINGS STAND (2026-10-02)
           measures it.
       (c) not measured: the benchmark passes plain strings, so the gate never
           engages there. Measuring it needs the section 8.3 change.
-      (d) ADR-023's status table and section 8.1 still say no control is in
-          the code; the PR asks for them to be updated after the merge.
+      (d) ADR-023 said no control was in the code (status line, status table,
+          sections 2.2 and 8.1). Corrected in the PR that records this merge;
+          section 8.2 now carries a status line.
   - Implemented with the owner's approval (#172): the caller-owned
     `AgentTaskContract(task_text, action_required)` in core/agent.py, and the
     strict per-line `pac --agent` prefix `[action_required=true|false] TASK`.

@@ -1,15 +1,15 @@
 # ADR-023 — Planning, execution/test and verification in the agent loop
 
-**Status:** ACCEPTED (2026-10-02) — first unit specified (§8), NOT YET IMPLEMENTED
+**Status:** ACCEPTED (2026-10-02) — first unit (§8.2) built in #174, NOT YET MEASURED
 
 | Stage | State |
 |---|---|
 | Proposed | yes: this document, 2026-10-02 |
 | Design questions | decided by the owner, 2026-10-02 (§6) |
 | Accepted | **yes**, by the owner, 2026-10-02, with the first unit (§8) |
-| Authorized | **acceptance and the specification of unit 1.** Implementing unit 1, and the benchmark change that lets it be measured, each need their own approval (§4, §8) |
-| Implemented | **the contract only, recorded, not enforced** (#172, §8.1). No control in §2 exists in the code |
-| Verified | **no.** Nothing has been measured against these controls |
+| Authorized | **acceptance and the specification of unit 1.** The benchmark change that lets unit 1 be measured, and every other control, each need their own approval (§4, §8) |
+| Implemented | **the contract (#172, §8.1) and unit 1, action enforcement (#174, §8.2).** The gate is live only for a task line with `action_required=true`. No other control in §2 exists in the code |
+| Verified | **no.** Nothing has been measured against these controls, and unit 1 cannot be until the benchmark change (§8.3) |
 
 - Serves the owner's order after the capability baseline: Planning, then Execution/Test,
   then Verification, built against measured gaps.
@@ -208,9 +208,11 @@ model (§6, decision 1):
   only with a recorded reason: an event in the run record stating why no action was
   taken.
 - **In the benchmark,** each task file is the contract.
-- **Built (#172):** `AgentTaskContract(task_text, action_required)` and the
-  `pac --agent` prefix `[action_required=true|false] TASK` (§8.1). The value is
-  recorded in the run's events; nothing above is enforced yet.
+- **Built:** `AgentTaskContract(task_text, action_required)` and the `pac --agent`
+  prefix `[action_required=true|false] TASK` (#172, §8.1), and the rejection of an
+  answer given before any executed tool call when `action_required` is true (#174,
+  §8.2). Not built: the recorded reason for a no-action completion when it is false
+  (§7, item 2) and the evidence that completes a task (§2.3).
 
 ### 2.3 Verification: no observable evidence, no accepted completion claim
 
@@ -456,10 +458,19 @@ approval, as their own PRs (§4).
   `RiskPolicy`; it prohibits nothing.
 - `AgentLoop.run` still accepts a plain string (the benchmark runner, tests): no
   contract, recorded as `"no contract"`.
-- The value is recorded in `AGENT_STEP` and `AGENT_FINISHED` payloads. It is **not
-  enforced**.
+- The value is recorded in `AGENT_STEP` and `AGENT_FINISHED` payloads. #172 only
+  recorded it; since #174 it is enforced for `action_required=true` (§8.2).
 
 ### 8.2 Unit 1: action enforcement (§2.2), the first control to implement
+
+**Status (2026-10-02): built in #174, not measured.** `agent/loop.py` rejects a final
+answer until a tool call has executed. The rejection draws one failure and one action
+from the global budget, and an `AGENT_ANSWER_REJECTED` event records it with counts and
+no text (the one addition in `core/domain.py`). A call that was denied, not confirmed,
+unknown or given invalid arguments does not count as executed; a call that ran and
+failed does. The benchmark passes plain strings, so the gate never engages there until
+the change in §8.3. The review of the rejection wording that this section reserves for
+the owner is not recorded in #174.
 
 **Order.** §6 decision 4 orders the controls environment context, then action
 enforcement. The owner chose action enforcement as the first unit because it addresses
