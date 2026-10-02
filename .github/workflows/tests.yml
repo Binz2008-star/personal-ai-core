@@ -8,6 +8,32 @@ on:
 jobs:
   suite:
     runs-on: ubuntu-latest
+    # A real PostgreSQL for the server-gated suites (ADR-016). Until this existed the
+    # 55 tests that exercise `persistence/postgres.py` -- the largest module in the
+    # repository -- never ran in CI: they skipped for want of a server, and a skip
+    # reads like a pass. They passed when first run against PostgreSQL 16 (2026-10-02,
+    # 55 of 55), so enabling them is not a risk taken blind.
+    #
+    # Throwaway: a fresh container per job, gone when the job ends, with the
+    # conventional example password. It is not Neon and not any database the owner
+    # uses, and nothing here touches schema or data outside the container.
+    #
+    # Linux only. GitHub's Windows runners cannot run service containers, so
+    # `suite-windows` still has no server and its gated tests still skip with the
+    # accounted reason `test_expected_skips.py` allows.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pac_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pac_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       # Full history, not the default shallow clone.
       # `tests/unit/test_merge_ledger.py` checks PROJECT_STATE.md's merge
@@ -25,12 +51,17 @@ jobs:
       # psycopg[binary]: the server backend's driver (ADR-016). Installed on
       # every job that imports `persistence/postgres.py` -- the conformance
       # module needs it importable so its skip is reported, not thrown, and
-      # pyright needs it resolvable. No server is advertised in CI, so the
-      # server-gated tests skip with an accounted reason there.
+      # pyright needs it resolvable. On THIS job a server is advertised (the
+      # service above) and the server-gated tests run; on `suite-windows` none
+      # is, and they skip with an accounted reason.
 
       # The whole suite first: if this fails, the named steps below only
       # narrow down where.
       - name: Full suite
+        env:
+          # `localhost`, not 127.0.0.1: a test asserts that the same database spelled
+          # with another host is refused, and it builds that spelling from this one.
+          POSTGRES_TEST_URL: postgresql://postgres:postgres@localhost:5432/pac_test
         run: python -m pytest tests/ -v
 
       # The three layers are run separately as well, because a failure in
@@ -38,10 +69,18 @@ jobs:
       # `unit/` -- one says the Core changed, the other says our reading of
       # the legacy behaviour did.
       - name: Unit
+        env:
+          # `localhost`, not 127.0.0.1: a test asserts that the same database spelled
+          # with another host is refused, and it builds that spelling from this one.
+          POSTGRES_TEST_URL: postgresql://postgres:postgres@localhost:5432/pac_test
         run: python -m pytest tests/unit -v
       - name: Characterization (legacy behaviour, and Core vs legacy)
         run: python -m pytest tests/characterization -v
-      - name: Integration (composed, no infrastructure required)
+      - name: Integration (composed; the server-gated suites run against the service)
+        env:
+          # `localhost`, not 127.0.0.1: a test asserts that the same database spelled
+          # with another host is refused, and it builds that spelling from this one.
+          POSTGRES_TEST_URL: postgresql://postgres:postgres@localhost:5432/pac_test
         run: python -m pytest tests/integration -v
 
       # `tests/support` holds no tests. It is the shared PostgreSQL URL
@@ -85,6 +124,10 @@ jobs:
       # not fail on them. `tests/unit/test_expected_skips.py` is what
       # actually enforces which skips are allowed.
       - name: Report skips with reasons
+        env:
+          # `localhost`, not 127.0.0.1: a test asserts that the same database spelled
+          # with another host is refused, and it builds that spelling from this one.
+          POSTGRES_TEST_URL: postgresql://postgres:postgres@localhost:5432/pac_test
         run: python -m pytest tests/ -q -rs
 
   # A separate job, not more steps on `suite`, for the same reason the layers
