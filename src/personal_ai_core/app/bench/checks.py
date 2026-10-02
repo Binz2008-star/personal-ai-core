@@ -103,6 +103,7 @@ def interpreter(argv: Sequence[str]) -> list[str]:
 def _run(ev: RunEvidence, argv: Sequence[str]) -> subprocess.CompletedProcess[str] | None:
     try:
         return subprocess.run(interpreter(argv), cwd=ev.workspace, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL,
                               timeout=COMMAND_TIMEOUT_SECONDS)
     except (OSError, subprocess.TimeoutExpired):
         return None

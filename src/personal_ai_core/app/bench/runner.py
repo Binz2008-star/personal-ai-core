@@ -26,6 +26,7 @@ import dataclasses
 import hashlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -55,6 +56,11 @@ DEFAULT_OUT = Path("evals/results/bench")
 CLIP_CHARS = 2_000
 OUTPUT_CLIP_CHARS = 2_000
 # Not part of a workspace's final state: caches the checks or tests leave.
+# Environment variables that change how the tasks' own commands behave, recorded
+# in the header by name and value (paths, never secrets). PYTEST_DEBUG_TEMPROOT:
+# the rig needs it because its default pytest temp folder is access-denied
+# (2026-10-02); without it every `tmp_path` test errors there.
+RECORDED_ENVIRONMENT = ("PYTEST_DEBUG_TEMPROOT", "PYTHONPATH", "PYTHONHASHSEED", "PYTHONUTF8")
 IGNORED_PARTS = frozenset({".git", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"})
 
 Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
@@ -338,6 +344,8 @@ def main(
         "policy": describe(),
         "environment": "benchmark containment, not a sandbox: code the agent runs is not "
                        "isolated from the network (ADR-022 §3.5)",
+        "environment_variables": {name: os.environ[name] for name in RECORDED_ENVIRONMENT
+                                  if name in os.environ},
     }
 
     done: set[tuple[str, str, int]] = set()
