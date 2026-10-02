@@ -153,8 +153,10 @@ recorded in the run record, so the benchmark can attribute a change to one contr
 
 At the start of the loop, code (not the model) gathers authoritative facts about where
 the model is working and states them to it. The context has a **bounded budget**: a
-fixed maximum size, recorded per run, so it cannot crowd out the task on an 8192-token
-window. The figure is set at implementation, by measurement.
+fixed maximum size, counted with the project's token estimator and recorded per run as
+a named share of the prompt, as the identity and the guard note are. That way it cannot
+crowd out the task on an 8192-token window. The figure is set at implementation, by
+measurement.
 
 The facts given:
 
@@ -167,7 +169,9 @@ The facts given:
   3. verified repository configuration (for example a pytest configuration that is
      present and parses);
   4. constrained discovery, only as a fallback (for example a `tests/` directory with
-     pytest-style files). Discovery never overrides a command from 1-3;
+     pytest-style files). Discovery never overrides a command from 1-3. It can only
+     offer a command the command policy already accepts (`agent/commands.py`); it
+     never widens it;
 - the command tools and what each accepts.
 
 When a supported test command is known, the model does not choose another. A test run
@@ -175,6 +179,13 @@ that counts as verification (§2.3) is a run of that command.
 
 - **Verification required, no authorized test command:** the agent must not claim
   `tests_passed`, and no such claim can be accepted.
+- **The check must not be the agent's to change.** `write_file` needs no confirmation,
+  and test files and test configuration (`conftest.py`, `pytest.ini`,
+  `pyproject.toml`) can sit in the workspace.
+  - If the run modified any of them (the loop already tracks touched files), a passing
+    test is recorded but is **not** accepted as independent evidence for
+    `tests_passed`.
+  - In the baseline, one attempt edited the test file it was told to leave alone (§1.2).
 - **A task that needs no test is not blocked** merely because no test command exists.
 
 ### 2.2 Action enforcement: no action, no completion
@@ -330,6 +341,11 @@ one thing.
 | Failure-class transitions | for each attempt, its class (§1.2) on each side, so movement between classes is visible |
 | Global budget exhaustion | share of attempts stopped by the third failure, and which controls' rejections consumed it |
 
+**A risk to watch: budget exhaustion.** In the baseline, 17 of the 43 Class 2 attempts
+already ended on the budget. Rejections under §2.2 and §2.3 draw on the same three, so
+an attempt may stop before it can repair. The owner kept the single global budget
+(§6, decision 5). The global-budget-exhaustion measure above shows whether this happens.
+
 **Class 1 failures may move instead of disappearing.**
 - An agent stopped from answering without action may act badly (Class 2), or reach for
   wrong commands (Class 3).
@@ -406,3 +422,17 @@ These follow from the decisions and are left for acceptance or implementation:
    - It would be its own reviewed change, made for correctness and not for the score.
 3. **`file_modified` for a file the run created.** Created then edited: is that
    `file_created` only, or both?
+4. **Where the plan is stated.** A review note suggests folding the plan into the first
+   reply (`{"plan": …, "tool": …}`) instead of adding a turn. Either way the plan stays a
+   declaration, never the authority (§6, decision 1).
+
+A review of this draft by the rig session (2026-10-02) contributed three points that
+fit the owner's decisions:
+- a test file or test configuration changed in the run voids the independence of a
+  passing test;
+- discovery cannot widen the command policy;
+- the context budget is counted with the estimator.
+
+Its proposal of a separate rejection budget per control was not adopted: the owner
+decided on one global budget of 3.
+
