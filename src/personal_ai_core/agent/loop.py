@@ -34,11 +34,12 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from ..core.agent import AgentTaskContract, AuditRecord, Decision, ToolRequest
 from ..core.contracts import EventRepository, IdentityComposer, ModelProvider
 from ..core.domain import Event, EventType, Message, Role
+from .environment import EnvironmentContext
 from .executor import ToolExecutor
 from .recovery import ActionBudget, Checkpoints
 from .verifier import Verifier
@@ -91,6 +92,8 @@ class AgentOutcome:
     touched_files: tuple[str, ...] = field(default=())
     protocol_errors: int = 0
     action_rejections: int = 0
+    # What the environment context recorded for this run (ADR-023 §2.1); None when off.
+    environment: Mapping[str, Any] | None = None
 
     @property
     def finished(self) -> bool:
@@ -178,6 +181,7 @@ class AgentLoop:
         identity: IdentityComposer | None = None,
         events: EventRepository | None = None,
         session_exists: Callable[[str], bool] | None = None,
+        environment: EnvironmentContext | None = None,
         max_actions: int = 12,
         max_failures: int = 3,
         generation_limit: int = 1024,
@@ -190,6 +194,7 @@ class AgentLoop:
         self._checkpoints = checkpoints
         self._identity = identity
         self._events = events
+        self._environment = environment
         self._max_actions = max_actions
         self._max_failures = max_failures
         self._generation_limit = generation_limit
@@ -219,7 +224,9 @@ class AgentLoop:
             contract, task_text = None, task.strip()
         task_text = task_text[:MAX_TASK_CHARS]
         budget = ActionBudget(max_actions=self._max_actions, max_failures=self._max_failures)
-        messages = self._opening(task_text, session_id)
+        composed = self._environment.compose() if self._environment is not None else None
+        environment = dict(composed.record) if composed is not None else None
+        messages = self._opening(task_text, session_id, composed.text if composed else None)
         steps: list[Step] = []
         protocol_errors = 0
         action_rejections = 0
@@ -262,6 +269,7 @@ class AgentLoop:
                     protocol_errors,
                     contract,
                     action_rejections,
+                    environment,
                 )
 
             record = self._executor.execute(
@@ -290,11 +298,14 @@ class AgentLoop:
             protocol_errors,
             contract,
             action_rejections,
+            environment,
         )
 
     # --- helpers ---------------------------------------------------------------
 
-    def _opening(self, task: str, session_id: str) -> list[Message]:
+    def _opening(
+        self, task: str, session_id: str, environment: str | None = None
+    ) -> list[Message]:
         messages: list[Message] = []
         if self._identity is not None:
             messages.append(self._identity.compose(session_id=session_id))
@@ -305,6 +316,10 @@ class AgentLoop:
                 content=PROTOCOL + _tool_catalogue(self._executor),
             )
         )
+        if environment is not None:
+            messages.append(
+                Message(session_id=session_id, role=Role.SYSTEM, content=environment)
+            )
         messages.append(self._user(session_id, task))
         return messages
 
@@ -320,6 +335,7 @@ class AgentLoop:
         protocol_errors: int,
         contract: AgentTaskContract | None,
         action_rejections: int,
+        environment: Mapping[str, Any] | None = None,
     ) -> AgentOutcome:
         check = self._verifier.verify_response(answer)
         if not check.passed:
@@ -332,6 +348,7 @@ class AgentLoop:
             touched_files=self._touched(),
             protocol_errors=protocol_errors,
             action_rejections=action_rejections,
+            environment=environment,
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
@@ -344,6 +361,7 @@ class AgentLoop:
         protocol_errors: int,
         contract: AgentTaskContract | None,
         action_rejections: int,
+        environment: Mapping[str, Any] | None = None,
     ) -> AgentOutcome:
         outcome = AgentOutcome(
             answer=None,
@@ -352,6 +370,7 @@ class AgentLoop:
             touched_files=self._touched(),
             protocol_errors=protocol_errors,
             action_rejections=action_rejections,
+            environment=environment,
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
@@ -417,22 +436,26 @@ class AgentLoop:
     ) -> None:
         if self._events is None:
             return
+        payload: dict[str, Any] = {
+            "finished": outcome.finished,
+            "steps": len(outcome.steps),
+            "protocol_errors": outcome.protocol_errors,
+            "stopped_reason": outcome.stopped_reason,
+            "touched_files": list(outcome.touched_files),
+            "action_rejections": outcome.action_rejections,
+            "action_required": (
+                contract.action_required if contract is not None else "no contract"
+            ),
+        }
+        # Only when the context was on: with it off the event is what it always was.
+        if outcome.environment is not None:
+            payload["environment"] = dict(outcome.environment)
         self._events.append(
             Event(
                 session_id=session_id,
                 type=EventType.AGENT_FINISHED,
                 actor="agent",
-                payload={
-                    "finished": outcome.finished,
-                    "steps": len(outcome.steps),
-                    "protocol_errors": outcome.protocol_errors,
-                    "stopped_reason": outcome.stopped_reason,
-                    "touched_files": list(outcome.touched_files),
-                    "action_rejections": outcome.action_rejections,
-                    "action_required": (
-                        contract.action_required if contract is not None else "no contract"
-                    ),
-                },
+                payload=payload,
             )
         )
 
