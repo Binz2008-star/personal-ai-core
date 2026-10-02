@@ -242,7 +242,10 @@ def test_report_counts_and_signals():
 
 def test_a_commit_through_shell_lands_with_the_fixed_identity(tmp_path):
     """Local git through `shell`, end to end: approved by the policy, committed
-    under the fixtures' identity, seen by the git check."""
+    under the fixtures' identity, seen by the git check. The identity is in the
+    repository's config: `shell` strips GIT_AUTHOR_* from its environment
+    (the name matches "AUTH"), and CI has no global git identity to fall
+    back on -- which is how this was found."""
     tasks = tmp_path / "tasks"
     (tasks / "fixtures" / "repo").mkdir(parents=True)
     (tasks / "fixtures" / "repo" / "notes.txt").write_text("draft\n", encoding="utf-8")
@@ -277,3 +280,23 @@ def test_a_commit_through_shell_lands_with_the_fixed_identity(tmp_path):
     assert [a["approved"] for a in run["approvals"]] == [True, True]
     assert run["final_state"]["git_log"][0].endswith("finalize notes")
     assert run["final_state"]["git_status"] == ""
+
+
+def test_the_fixture_repository_carries_its_own_identity(tmp_path):
+    import subprocess
+
+    from personal_ai_core.app.bench.tasks import load, materialize
+
+    tasks = tmp_path / "tasks"
+    (tasks / "fixtures" / "repo").mkdir(parents=True)
+    (tasks / "fixtures" / "repo" / "a.txt").write_text("x\n", encoding="utf-8")
+    (tasks / "t.json").write_text(json.dumps({
+        "id": "t", "track": "agent", "category": "git", "fixture": "fixtures/repo",
+        "git": True, "instruction": {"en": "x", "ar": "س"},
+        "checks": [{"type": "git_clean"}], "reference": {}}), encoding="utf-8")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    materialize(load(tasks)[0], workspace)
+    name = subprocess.run(["git", "config", "--local", "user.name"], cwd=workspace,
+                          capture_output=True, text=True).stdout.strip()
+    assert name == "bench"

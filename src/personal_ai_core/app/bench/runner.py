@@ -22,12 +22,10 @@ run fails); one that is not admitted stops the benchmark before it starts.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import dataclasses
 import hashlib
 import io
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -35,7 +33,7 @@ import time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO
+from typing import Any, Callable, Mapping, Sequence, TextIO
 
 from ...conversation.factory import (
     build_agent,
@@ -49,7 +47,7 @@ from ..cli import _ingest
 from ..evaluate import PASS, _git_commit, _machine
 from .checks import EDITING_TOOLS, RunEvidence, ToolCall, judge, tested_after_last_edit
 from .policy import BenchmarkConfirm, describe
-from .tasks import GIT_ENV, LANGUAGES, Task, load, materialize, prove
+from .tasks import LANGUAGES, Task, load, materialize, prove
 
 HARNESS = "ADR-022 capability benchmark v0"
 DEFAULT_TASKS = Path("evals/bench")
@@ -94,21 +92,6 @@ class CallLog:
     def take(self) -> list[dict[str, Any]]:
         calls, self.calls = self.calls, []
         return calls
-
-
-@contextlib.contextmanager
-def _git_identity() -> Iterator[None]:
-    """A commit the agent makes gets the fixtures' fixed identity and date."""
-    saved = {k: os.environ.get(k) for k in GIT_ENV}
-    os.environ.update(GIT_ENV)
-    try:
-        yield
-    finally:
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
 
 
 def _clip(value: Any, limit: int = CLIP_CHARS) -> Any:
@@ -168,16 +151,15 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
     started = time.perf_counter()
     answer = None
     steps: tuple = ()
-    with _git_identity():
-        try:
-            agent = build_agent(settings, workspace=workspace, transport=log, confirm=confirm)
-            outcome = agent.loop.run(task.instruction[language], session_id="bench")
-            answer, steps = outcome.answer, outcome.steps
-            record["stop"] = "answered" if outcome.finished else "budget"
-            record["stopped_reason"] = outcome.stopped_reason
-            record["protocol_errors"] = outcome.protocol_errors
-        except ProviderError as exc:
-            record["stop"], record["error"] = "error", str(exc)
+    try:
+        agent = build_agent(settings, workspace=workspace, transport=log, confirm=confirm)
+        outcome = agent.loop.run(task.instruction[language], session_id="bench")
+        answer, steps = outcome.answer, outcome.steps
+        record["stop"] = "answered" if outcome.finished else "budget"
+        record["stopped_reason"] = outcome.stopped_reason
+        record["protocol_errors"] = outcome.protocol_errors
+    except ProviderError as exc:
+        record["stop"], record["error"] = "error", str(exc)
     record["seconds"] = round(time.perf_counter() - started, 3)
 
     calls, step_records = [], []
