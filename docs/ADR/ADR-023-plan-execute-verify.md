@@ -1,14 +1,14 @@
 # ADR-023 — Planning, execution/test and verification in the agent loop
 
-**Status:** PROPOSED / DRAFT — NOT IMPLEMENTED — NOT ACCEPTED
+**Status:** ACCEPTED (2026-10-02) — first unit specified (§8), NOT YET IMPLEMENTED
 
 | Stage | State |
 |---|---|
 | Proposed | yes: this document, 2026-10-02 |
 | Design questions | decided by the owner, 2026-10-02 (§6) |
-| Accepted | **no** |
-| Authorized | **drafting only.** The owner authorized writing this ADR, not implementing it |
-| Implemented | **no.** No control below exists in the code |
+| Accepted | **yes**, by the owner, 2026-10-02, with the first unit (§8) |
+| Authorized | **acceptance and the specification of unit 1.** Implementing unit 1, and the benchmark change that lets it be measured, each need their own approval (§4, §8) |
+| Implemented | **the contract only, recorded, not enforced** (#172, §8.1). No control in §2 exists in the code |
 | Verified | **no.** Nothing has been measured against these controls |
 
 - Serves the owner's order after the capability baseline: Planning, then Execution/Test,
@@ -208,6 +208,9 @@ model (§6, decision 1):
   only with a recorded reason: an event in the run record stating why no action was
   taken.
 - **In the benchmark,** each task file is the contract.
+- **Built (#172):** `AgentTaskContract(task_text, action_required)` and the
+  `pac --agent` prefix `[action_required=true|false] TASK` (§8.1). The value is
+  recorded in the run's events; nothing above is enforced yet.
 
 ### 2.3 Verification: no observable evidence, no accepted completion claim
 
@@ -311,7 +314,7 @@ context of §2.1.
 | Action | Needs |
 |---|---|
 | Edit this draft | already authorized |
-| Accept this ADR (PROPOSED → ACCEPTED) | the owner; the design questions are decided (§6), the items in §7 remain |
+| Accept this ADR (PROPOSED → ACCEPTED) | done: the owner, 2026-10-02 (§8) |
 | Implement any control | a separate, explicit authorization per control, after acceptance |
 | Measure an implementation on the rig | the owner's go, as for every rig run |
 | Adopt a control in `pac --agent` | the owner, on the measured result |
@@ -412,10 +415,10 @@ day.
 
 These follow from the decisions and are left for acceptance or implementation:
 
-1. **Where the contract comes from outside the benchmark.**
-   - In `pac --agent` a person types a request; there is no task file.
-   - Who sets `action_required` there: the caller, a command-line flag, or a default?
-   - What applies when it is not set?
+1. **Where the contract comes from outside the benchmark.** RESOLVED by the owner,
+   2026-10-02, and built in #172 (§8.1): the caller sets it on every `pac --agent`
+   line; there is no default; a missing or malformed prefix is rejected before any
+   model call.
 2. **How the model states structured claims.**
    - A field in the final protocol object (for example `{"answer": …, "claims": […]}`)
      changes the protocol the model is told about, which is a prompt change.
@@ -435,4 +438,69 @@ fit the owner's decisions:
 
 Its proposal of a separate rejection budget per control was not adopted: the owner
 decided on one global budget of 3.
+
+## 8. Acceptance and the first unit (owner, 2026-10-02)
+
+The owner accepted this ADR on 2026-10-02 with its first unit. Acceptance does not
+authorize implementation: unit 1 and its measurement change each need the owner's
+approval, as their own PRs (§4).
+
+### 8.1 Already built: the contract (#172)
+
+- `core.agent.AgentTaskContract(task_text: str, action_required: bool)`: frozen, no
+  default, empty task text refused.
+- `pac --agent` requires `[action_required=true|false] TASK` at the very start of each
+  line. A missing or malformed prefix is rejected before any model call; the next line
+  continues; the session exits 2. Confirmation answers are never parsed as tasks.
+- `action_required=false` means only "action not required". Tools stay governed by
+  `RiskPolicy`; it prohibits nothing.
+- `AgentLoop.run` still accepts a plain string (the benchmark runner, tests): no
+  contract, recorded as `"no contract"`.
+- The value is recorded in `AGENT_STEP` and `AGENT_FINISHED` payloads. It is **not
+  enforced**.
+
+### 8.2 Unit 1: action enforcement (§2.2), the first control to implement
+
+**Order.** §6 decision 4 orders the controls environment context, then action
+enforcement. The owner chose action enforcement as the first unit because it addresses
+the largest failure class (Class 1, 52 of 111) and needs no environment discovery.
+Environment context (§2.1) follows as unit 2. Each stays independently measurable.
+
+**Behaviour, when the run has a contract with `action_required=true`:**
+
+- A final `{"answer": …}` is accepted only if at least one tool call in this run was
+  executed.
+- Otherwise the answer is rejected, not shown as the outcome. The model receives one
+  protocol message saying an action is required and none was taken; the rejection
+  consumes one failure and one action from the global budget (§2.4).
+- After the third failure of any kind the run stops with no answer, as §2.4 states.
+- Each rejection is recorded as an event, so the false rejection rate (§5) is countable.
+
+**Unchanged in unit 1:**
+
+- No contract, or `action_required=false`: the loop behaves exactly as today. The
+  recorded reason for a no-action completion under `false` (§2.2) is deferred: it needs
+  the model to state a reason, which is a protocol change (§7, item 2).
+- No structured claims (§2.3), no environment context (§2.1), no change to the tools,
+  the command policy, the Boss model or the knowledge path.
+
+**For the owner's review in the implementation PR:** the exact wording of the
+rejection message. It is new text the model sees, so it is reviewed as a protocol
+change, written for correctness and not for the score (§3).
+
+### 8.3 Measuring unit 1
+
+The benchmark runner passes plain strings today, so a run would record `"no contract"`
+and unit 1 would never engage. Measuring it needs one benchmark change, with its own
+approval:
+
+- each agent task file states `action_required` (true for the 12 agent tasks; knowledge
+  tasks have none, they do not use the agent loop);
+- the runner passes an `AgentTaskContract` built from the task file;
+- the task digest includes the new field, so a resume across the change is refused;
+- the baseline files are not edited.
+
+Then the same 240 attempts on the rig, compared with the baseline under §5:
+failure-class transitions, action rate, false rejections and budget exhaustion, with
+no target score.
 

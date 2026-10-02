@@ -1121,17 +1121,22 @@ WHERE THINGS STAND (2026-10-02)
     contract" in AGENT_* payloads. The contract is RECORDED, NOT ENFORCED.
   - Authority for #172: the owner's explicit decisions of 2026-10-02 (the
     caller-owned contract, the CLI syntax, decisions 1-3, "start
-    implementation"), given separately from ADR-023. ADR-023 itself is still
-    PROPOSED / NOT ACCEPTED: #172 built only its first design decision (the
-    task contract sets action_required) as a recorded value, none of its
-    controls. A session that reads #167 alone will see the contract as
-    unimplemented; it is implemented, and #167 should say so when it is next
-    revised (owner's call). Codex built #172 in its own worktree; the lead
-    reviewed it, fixed a pyright error (f780498) and opened the PR.
-  - Not authorized: any enforcement of action_required in the loop or any
-    other ADR-023 control. Do not start one from ADR-023, from #167, or from
-    anything below. A change to #167 is reviewed against ADR-023 and the
-    invariants and reported; it is not a reason to implement.
+    implementation"), given before ADR-023 was accepted. #172 built only its
+    first design decision (the task contract sets action_required) as a
+    recorded value, none of its controls. Codex built #172 in its own
+    worktree; the lead reviewed it, fixed a pyright error (f780498) and
+    opened the PR.
+  - ADR-023 ACCEPTED by the owner (2026-10-02, #167) with its first unit
+    specified in its section 8: action enforcement -- with a contract and
+    action_required=true, an answer with no executed tool call in the run is
+    rejected, the model told once, one failure from the global budget of 3.
+    The owner chose it ahead of environment context (decision 4's order)
+    because it targets Class 1, the largest.
+  - Not authorized yet: implementing unit 1 (its rejection message is new
+    model-facing text, reviewed in that PR), and the benchmark change that
+    lets it be measured (task files state action_required; the runner passes
+    a contract). Each needs the owner's approval as its own PR. No other
+    ADR-023 control is authorized.
   - The capability baseline is done and is the reference for every later
     measurement:
       raw   evals/results/bench/bench-20261002T081707Z.jsonl  (#165, a609f69,
@@ -1151,9 +1156,9 @@ WHERE THINGS STAND (2026-10-02)
     (python -m unittest, dotnet, cmd quoting), 2 protocol only. Knowledge:
     six Arabic failures (script drift, one invented figure); citations 5/80,
     informational (the grounding prompt never asks for them).
-  - ADR-023 (planning -> execution/test -> verification): PROPOSED / DRAFT,
-    NOT ACCEPTED, NOT IMPLEMENTED. PR #167 at 8081eec, CI green, documentation
-    only, stays a draft. It records the owner's six design decisions: the task
+  - ADR-023 (planning -> execution/test -> verification): ACCEPTED
+    2026-10-02 (#167); only the contract is built (#172), recorded and not
+    enforced. It records the owner's six design decisions: the task
     contract (not the model) sets action_required; structured claims need
     observable evidence (the phrase list is telemetry, never the gate); test
     command precedence contract > caller > verified repo config > constrained
@@ -1192,11 +1197,9 @@ WHERE THINGS STAND (2026-10-02)
     yet diagnosed. It needs main merged in and a fresh CI run before any
     review; the owner decides whether it goes ahead.
   - Next, for the owner to decide (nothing is in progress):
-      1. ADR-023 (#167): accept, amend (record #172 as built), or keep a
-         draft. Any enforcement of action_required waits for this.
-      2. If accepted: its first control, enforcing action_required=true in
-         the loop, aimed at the largest failure class (52 of 111 agent
-         failures answered without executing anything).
+      1. Done: ADR-023 accepted with unit 1 (#167).
+      2. Implement unit 1, action enforcement in agent/loop.py (ADR-023
+         section 8.2), aimed at Class 1 (52 of 111 agent failures).
       3. Then measure: the same 240 runs (#165 setup, fresh worktree on the
          rig), compared by failure class with the baseline, never by a
          target score. The bench runner passes plain strings, so #172 alone
@@ -1347,8 +1350,9 @@ Not every ADR is accepted. PROPOSED, not accepted:
   authorises no implementation.
 - ADR-021 (grammar during decoding) — PROPOSED / DEFERRED until after the
   capability baseline; Phases A-C only when revisited.
-- ADR-023 (planning, execution/test, verification) — PROPOSED / DRAFT, not
-  accepted, not implemented (PR #167).
+- ADR-023 (planning, execution/test, verification) — ACCEPTED 2026-10-02 with
+  its first unit specified (section 8); only the task contract is built (#172),
+  recorded and not enforced.
 
 Record what is PROPOSED versus accepted, never whether a PR has merged. The
 previous wording said ADR-011 was "NOT merged (PR #24)", which was true when it
