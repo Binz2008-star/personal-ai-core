@@ -28,11 +28,14 @@ this test says so rather than going quiet.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Mapping
 
 import pytest
+from support.lag_limit import effective_limit
 
 REPO = Path(__file__).resolve().parents[2]
 STATE = REPO / "PROJECT_STATE.md"
@@ -201,6 +204,22 @@ def test_the_ledger_rows_are_in_order(ledger):
     )
 
 
+def _fallen_behind(unrecorded: list[int], environ: Mapping[str, str]) -> str | None:
+    """Why the ledger is too far behind, or None. The limit is one lower on a pull request
+    (tests/support/lag_limit.py): its own merge will count once it lands."""
+    limit = effective_limit(MAX_UNRECORDED_MERGES, environ)
+    if len(unrecorded) <= limit:
+        return None
+    return (
+        f"PROJECT_STATE.md is {len(unrecorded)} merges behind git: {unrecorded} "
+        f"(limit {limit}"
+        + (f": {MAX_UNRECORDED_MERGES} on main, one fewer on a pull request, because this "
+           "PR's own merge will count" if limit != MAX_UNRECORDED_MERGES else "")
+        + "). Add them to POST-PHASE-4 MERGES. A ledger that drifts is the defect "
+        "that section was written to end."
+    )
+
+
 def test_the_ledger_has_not_fallen_behind(ledger, merges_in_git):
     """The original defect: the record stopped while main moved on.
 
@@ -211,11 +230,20 @@ def test_the_ledger_has_not_fallen_behind(ledger, merges_in_git):
     unrecorded = sorted(
         num for num in merges_in_git if num >= FIRST_LEDGER_PR and num not in ledger
     )
-    assert len(unrecorded) <= MAX_UNRECORDED_MERGES, (
-        f"PROJECT_STATE.md is {len(unrecorded)} merges behind git: {unrecorded}. "
-        "Add them to POST-PHASE-4 MERGES. A ledger that drifts is the defect "
-        "that section was written to end."
-    )
+    failure = _fallen_behind(unrecorded, os.environ)
+    assert failure is None, failure
+
+
+def test_a_pull_request_is_held_one_merge_below_the_limit():
+    """The incident of 2026-10-02: at the limit, a PR is green in CI and turns main red when it
+    lands. On main the same state is allowed; on a pull request it is not."""
+    at_limit = list(range(100, 100 + MAX_UNRECORDED_MERGES))
+    assert _fallen_behind(at_limit, {"GITHUB_EVENT_NAME": "push"}) is None
+    assert _fallen_behind(at_limit, {}) is None
+    failure = _fallen_behind(at_limit, {"GITHUB_EVENT_NAME": "pull_request"})
+    assert failure is not None and "one fewer on a pull request" in failure
+    assert _fallen_behind(at_limit[:-1], {"GITHUB_EVENT_NAME": "pull_request"}) is None
+    assert _fallen_behind([*at_limit, 999], {"GITHUB_EVENT_NAME": "push"}) is not None
 
 
 # --- The comparison itself, driven without a repository -------------------
