@@ -45,6 +45,10 @@ GIT_SUBCOMMANDS = frozenset({
 GIT_REFUSED_OPTIONS = ("--exec", "--upload-pack", "--receive-pack", "--output",
                        "--ext-diff", "--git-dir", "--work-tree", "--template")
 PYTHON_EXECUTABLES = frozenset({"python", "python3"})
+# Modules `python -m` may run: the project checks `run_command` already allows
+# by name (pytest, ruff, mypy). Refusing `python -m mypy` while allowing
+# `mypy` was a contradiction the 2026-10-02 smoke run found.
+PYTHON_MODULES = frozenset({"pytest", "ruff", "mypy"})
 # Characters with a meaning in sh or in cmd. The shell tool runs through the
 # platform shell, so a command is accepted only when no shell would read
 # anything into it: it then means the same as its argument list.
@@ -72,7 +76,7 @@ def check_shell_command(command: str, *, windows: bool | None = None) -> list[st
     Accepted forms:
 
     - `git SUBCOMMAND ...`, SUBCOMMAND in GIT_SUBCOMMANDS, no option before it;
-    - `pytest ...` and `python -m pytest ...`;
+    - `pytest ...`, and `python -m pytest|ruff|mypy ...`;
     - `python FILE.py ...`, FILE a relative path inside the workspace.
 
     On Windows the shell is cmd, where a single quote is not a quote, so a
@@ -109,13 +113,13 @@ def check_shell_command(command: str, *, windows: bool | None = None) -> list[st
     elif executable == "pytest":
         pass
     elif executable in PYTHON_EXECUTABLES:
-        if arguments[:2] == ["-m", "pytest"]:
+        if arguments[:1] == ["-m"] and len(arguments) > 1 and arguments[1] in PYTHON_MODULES:
             pass
         elif arguments and not arguments[0].startswith("-") and arguments[0].endswith(".py"):
             pass
         else:
-            raise ShellRefused("python may run `-m pytest` or a .py file in the workspace, "
-                               "nothing else")
+            raise ShellRefused("python may run `-m pytest|ruff|mypy` or a .py file in the "
+                               "workspace, nothing else")
     else:
         raise ShellRefused(f"{executable} is outside the benchmark policy")
     return parts
@@ -168,7 +172,7 @@ def describe() -> str:
         "shell, approved only as:",
         f"  git {{{', '.join(sorted(GIT_SUBCOMMANDS))}}} (no option before the subcommand;"
         f" refused options: {', '.join(GIT_REFUSED_OPTIONS)})",
-        "  pytest ... | python -m pytest ... | python FILE.py ...",
+        "  pytest ... | python -m {pytest, ruff, mypy} ... | python FILE.py ...",
         "  no shell metacharacters, no absolute, ~ or .. paths; no single quotes on Windows",
         "Limit: Python code the agent writes and runs is not isolated from the network.",
     ])

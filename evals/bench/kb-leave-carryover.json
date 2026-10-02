@@ -20,7 +20,8 @@
     },
     {
       "type": "cites",
-      "document": "annual-leave.md"
+      "document": "annual-leave.md",
+      "informational": true
     }
   ],
   "reference": {

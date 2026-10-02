@@ -53,7 +53,7 @@ HARNESS = "ADR-022 capability benchmark v0"
 DEFAULT_TASKS = Path("evals/bench")
 DEFAULT_OUT = Path("evals/results/bench")
 CLIP_CHARS = 2_000
-OUTPUT_CLIP_CHARS = 500
+OUTPUT_CLIP_CHARS = 2_000
 # Not part of a workspace's final state: caches the checks or tests leave.
 IGNORED_PARTS = frozenset({".git", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"})
 
@@ -137,8 +137,12 @@ def _signals(record: Mapping[str, Any], evidence: RunEvidence) -> list[str]:
     edited = any(c.executed and c.tool in EDITING_TOOLS for c in evidence.calls)
     if edited and tested_after_last_edit(evidence)[0] != PASS:
         signals.append("not_tested_after_edit")
+    if record.get("track") == "agent" and record["stop"] == "answered" and not any(
+            s["executed"] for s in steps):
+        signals.append("answered_without_acting")
     if not record["success"]:
-        signals.extend(f"check:{c['check']}" for c in record["checks"] if c["verdict"] != PASS)
+        signals.extend(f"check:{c['check']}" for c in record["checks"]
+                       if c["verdict"] != PASS and not c.get("informational"))
     return signals
 
 
@@ -147,7 +151,7 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
     workspace.mkdir(parents=True)
     materialize(task, workspace)
     confirm = BenchmarkConfirm()
-    record: dict[str, Any] = {}
+    record: dict[str, Any] = {"track": "agent"}
     started = time.perf_counter()
     answer = None
     steps: tuple = ()
@@ -162,6 +166,8 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
         record["stop"], record["error"] = "error", str(exc)
     record["seconds"] = round(time.perf_counter() - started, 3)
 
+    # The policy's answers, in the order the ASK steps asked them.
+    answers = iter(confirm.answers)
     calls, step_records = [], []
     for step in steps:
         r = step.record
@@ -180,6 +186,14 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
             "error": r.result.error if r.result is not None else None,
             "output": _clip(r.result.output, OUTPUT_CLIP_CHARS) if r.result is not None else "",
         })
+        if r.decision.decision.value == "ask":
+            # Asked of the benchmark policy, not of a person: its verdict and
+            # reason belong on the step, beside the executor's own wording.
+            answer_ = next(answers, None)
+            step_records[-1]["approval"] = (
+                {"by": "benchmark policy", "approved": answer_.approved, "reason": answer_.reason}
+                if answer_ is not None else {"by": "benchmark policy", "approved": None,
+                                             "reason": "no answer recorded"})
     record["answer"] = answer
     record["steps"] = step_records
     record["commands"] = [s["arguments"].get("command") for s in step_records
@@ -416,6 +430,16 @@ def report(lines: Sequence[Mapping[str, Any]]) -> str:
         en = [r for r in rows if r["language"] == "en"]
         ar = [r for r in rows if r["language"] == "ar"]
         out.append(f"  {task_id:30} {_rate(en):>12} | {_rate(ar)}")
+    secondary: dict[str, list[bool]] = defaultdict(list)
+    for r in runs:
+        for c in r.get("checks", []):
+            if c.get("informational"):
+                secondary[c["check"]].append(c["verdict"] == PASS)
+    if secondary:
+        out.append("informational checks (not part of success):")
+        for name, verdicts in sorted(secondary.items()):
+            out.append(f"  {name:20} {sum(verdicts)}/{len(verdicts)} "
+                       f"({100 * sum(verdicts) / len(verdicts):.0f}%)")
     failures = [r for r in runs if not r["success"]]
     counts = Counter(s for r in failures for s in r.get("signals", []))
     out.append(f"signals in the {len(failures)} failed run(s):")

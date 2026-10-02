@@ -23,7 +23,8 @@
     },
     {
       "type": "cites",
-      "document": "remote-work.md"
+      "document": "remote-work.md",
+      "informational": true
     }
   ],
   "reference": {

@@ -616,6 +616,8 @@ claim written in one place with nothing that notices it going stale.
   #159 57bc96b  feat(bench): ADR-022 unit 1 -- task format, mechanical checks,
                containment policy
   #160 3b2af21  feat(bench): ADR-022 unit 2 -- the benchmark runner
+  #161 5bc81a1  feat(bench): ADR-022 unit 3 -- the v0 task set, 24 tasks in two
+               languages
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1129,7 +1131,9 @@ ADR-020 (evaluating a candidate model) -- where it stands
     --show-policy (#160); (3) the 24 tasks: 12 agent (every agent category;
     each proved solvable through the real tools under the policy) and 12
     knowledge (three corpora, one Arabic; three declines; one
-    cross-document); (4) the 240-run baseline on the rig. Before unit 4 runs, show the owner the allowlist
+    cross-document) (#161); smoke run on the rig 2026-10-02 (4 runs, clean;
+    found: citation never asked for -> informational, python -m mypy refused
+    -> allowed, approval wording on steps); (4) the 240-run baseline on the rig. Before unit 4 runs, show the owner the allowlist
     (`policy.describe()`). After the baseline: STOP and report the gaps; the
     owner picks the 2-3 biggest failure causes to work on.
   - Owner's order after the baseline: planning + execute/test + verification,

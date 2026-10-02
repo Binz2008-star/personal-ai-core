@@ -99,6 +99,10 @@ def test_a_solved_task_passes_and_a_wrong_answer_fails(tmp_path):
         assert solved["commands"] == ["python -m pytest -q -p no:cacheprovider"]
         assert solved["verification"]["verdict"] == "PASS"
         assert solved["approvals"][0]["approved"] is True
+        assert solved["steps"][2]["approval"] == {
+            "by": "benchmark policy", "approved": True,
+            "reason": "shell: within the benchmark command policy"}
+        assert "approval" not in solved["steps"][0], "read_file is not asked"
         assert solved["final_state"]["files"]["calc.py"]
         assert solved["signals"] == []
         wrong = by[("kb-leave-carryover", language)]
@@ -383,3 +387,32 @@ def test_every_agent_task_is_solvable_through_the_tools_under_the_policy(tmp_pat
               for r in runs if not r["success"]}
     assert not failed, failed
     assert len(runs) == 12
+
+
+def test_a_right_fact_without_a_citation_succeeds_and_the_citation_is_its_own_rate(tmp_path):
+    scripts = dict(SOLVES)
+    scripts["leave"] = ["You can carry over up to 5 days."]
+    _, output, lines = _run(tmp_path, scripts, "--only", "kb-leave-carryover", "--languages", "en")
+    run = next(x for x in lines if x["kind"] == "run")
+    assert run["success"] and run["signals"] == []
+    assert "informational checks (not part of success):" in output
+    assert "cites                0/1 (0%)" in output
+
+
+def test_an_agent_that_answers_without_acting_is_labelled(tmp_path):
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = [_answer("I will look at calc.py and test_calc.py.")]
+    _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
+    run = next(x for x in lines if x["kind"] == "run")
+    assert not run["success"] and run["stop"] == "answered"
+    assert "answered_without_acting" in run["signals"]
+
+
+def test_a_refused_step_carries_the_policy_reason(tmp_path):
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = [_tool("shell", command="code . -g"), _answer("Could not open it.")]
+    _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
+    step = next(x for x in lines if x["kind"] == "run")["steps"][0]
+    assert step["executed"] is False
+    assert step["approval"]["approved"] is False
+    assert step["approval"]["reason"] == "shell: code is outside the benchmark policy"
