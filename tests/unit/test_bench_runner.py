@@ -640,3 +640,86 @@ def test_rescore_accepts_a_file_written_before_the_contract(tmp_path):
     path.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines),
                     encoding="utf-8")
     assert main(["--tasks", str(BENCH), "--rescore", str(path)], stdout=io.StringIO()) == 0
+
+
+# --- ADR-023 §2.1: the environment context is a flag, off unless asked for -----------
+
+
+class _Capture:
+    """Wraps the scripted model and keeps every payload it was sent."""
+
+    def __init__(self, scripts) -> None:
+        self.inner, self.payloads = ScriptedModel(scripts), []
+
+    def __call__(self, url, payload, timeout):
+        self.payloads.append(payload)
+        return self.inner(url, payload, timeout)
+
+
+def _run_with(tmp_path, *argv):
+    capture = _Capture(SOLVES)
+    out = io.StringIO()
+    code = main(["--tasks", str(BENCH), "--out", str(tmp_path), "--runs", "1",
+                 "--only", "verify-off-by-one", "--languages", "en", *argv],
+                transport=capture, stdout=out, env={}, now=lambda: FIXED, commit="abc1234",
+                probe=lambda url, body=None: {"models": []})
+    lines = [json.loads(x) for x in next(tmp_path.glob("bench-*.jsonl")).read_text(
+        encoding="utf-8").splitlines()]
+    return code, capture, lines, out.getvalue()
+
+
+def test_the_environment_context_is_off_by_default_and_the_file_says_so(tmp_path):
+    code, capture, lines, _ = _run_with(tmp_path)
+    run = next(x for x in lines if x["kind"] == "run")
+    assert code == 0 and lines[0]["environment_context"] is False
+    assert "environment" not in run
+    assert not any(m["content"].startswith("Environment (")
+                   for p in capture.payloads for m in p["messages"])
+
+
+def test_with_the_flag_each_agent_run_is_given_and_records_the_environment(tmp_path):
+    code, capture, lines, _ = _run_with(tmp_path, "--environment-context")
+    run = next(x for x in lines if x["kind"] == "run")
+    assert code == 0 and lines[0]["environment_context"] is True
+    first = capture.payloads[0]["messages"]
+    assert sum(m["content"].startswith("Environment (") for m in first) == 1
+    assert run["environment"]["test_command"] == "pytest"
+    assert run["environment"]["test_command_source"] == "discovery"
+    assert run["environment"]["dropped"] == [] and run["environment"]["tokens"] > 0
+
+
+def test_a_knowledge_run_is_never_given_the_environment(tmp_path):
+    out = io.StringIO()
+    capture = _Capture(SOLVES)
+    main(["--tasks", str(BENCH), "--out", str(tmp_path), "--runs", "1", "--only",
+          "kb-leave-carryover", "--languages", "en", "--environment-context"],
+         transport=capture, stdout=out, env={}, now=lambda: FIXED, commit="abc1234",
+         probe=lambda url, body=None: {"models": []})
+    assert not any(m["content"].startswith("Environment (")
+                   for p in capture.payloads for m in p["messages"])
+
+
+def test_a_file_is_not_resumed_under_the_other_setting(tmp_path):
+    _run_with(tmp_path)
+    path = next(tmp_path.glob("bench-*.jsonl"))
+    out = io.StringIO()
+    code = main(["--tasks", str(BENCH), "--runs", "1", "--only", "verify-off-by-one",
+                 "--languages", "en", "--environment-context", "--resume", str(path)],
+                transport=ScriptedModel(SOLVES), stdout=out, env={}, commit="abc1234",
+                probe=lambda url, body=None: {"models": []})
+    assert code == 2 and "environment_context differs" in out.getvalue()
+
+
+def test_a_file_from_before_the_flag_resumes_as_off(tmp_path):
+    _run_with(tmp_path)
+    path = next(tmp_path.glob("bench-*.jsonl"))
+    lines = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()]
+    lines[0].pop("environment_context")
+    path.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines),
+                    encoding="utf-8")
+    out = io.StringIO()
+    code = main(["--tasks", str(BENCH), "--runs", "1", "--only", "verify-off-by-one",
+                 "--languages", "en", "--resume", str(path)],
+                transport=ScriptedModel(SOLVES), stdout=out, env={}, commit="abc1234",
+                probe=lambda url, body=None: {"models": []})
+    assert code == 0
