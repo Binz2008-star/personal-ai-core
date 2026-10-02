@@ -1,0 +1,26 @@
+{
+  "id": "kb-leave-carryover",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/leave_policy",
+  "instruction": {
+    "en": "How many unused annual leave days can I carry into next year?",
+    "ar": "كم يوماً من الإجازة السنوية غير المستخدمة يمكنني ترحيله إلى السنة القادمة؟"
+  },
+  "checks": [
+    {
+      "type": "answer_number",
+      "value": 5
+    },
+    {
+      "type": "cites",
+      "document": "annual-leave.md"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "Up to 5 unused days carry over; the rest lapse on 31 March (annual-leave.md).",
+      "ar": "يمكنك ترحيل ٥ أيام كحد أقصى، والباقي يسقط في 31 مارس (annual-leave.md)."
+    }
+  }
+}

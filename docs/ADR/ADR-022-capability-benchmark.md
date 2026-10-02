@@ -1,7 +1,7 @@
 # ADR-022 — A capability benchmark: does the system do the task?
 
-**Status:** PROPOSED · direction approved by the owner 2026-10-02 ("put item 10 first") ·
-design only · nothing built · the decisions in §8 are open
+**Status:** ACCEPTED · direction approved by the owner 2026-10-02 ("put item 10 first") ·
+§8 decided 2026-10-02 (D1 24 tasks, D2 5 runs, D3 containment as in §3.5) · unit 1 built
 
 - Serves the owner's order of 2026-10-02: measurement first, then targeted improvement
   against measured gaps. LoRA or fine-tuning is considered only if this baseline shows a
@@ -119,17 +119,40 @@ task:
   `num_predict`, not the Boss model's sampling settings, and the record says so rather
   than assuming.
 
-### 3.5 Approvals during a benchmark
+### 3.5 Approvals during a benchmark: containment, not a sandbox
 
-The agent asks the owner before a HIGH-risk tool call. A benchmark cannot ask, so it runs
-under a fixed, recorded policy:
+The agent asks the owner before a HIGH or CRITICAL tool call. A benchmark cannot ask, so
+`app/bench/policy.py` answers under a fixed policy and records every answer with its
+reason:
 
-- **Inside the temporary workspace:** file writes, deletes and allowlisted commands are
-  approved.
-- **Network:** web search and fetch are denied. The benchmark is offline and must not
-  depend on the internet.
-- **Every approval and denial is recorded.** A task the agent could only finish by asking
-  for something denied counts as a failure, labelled so.
+- **LOW and MEDIUM tools** (read, list, search, find, write) never reach it: `RiskPolicy`
+  allows them inside the workspace sandbox, as always.
+- **Approved:** `delete_file` (the sandbox confines the path) and `run_command` (its own
+  allowlist: inspection commands, read-only git, pytest, ruff, mypy).
+- **`shell`, only within the benchmark command policy:**
+  - `git` with a local subcommand (status, log, diff, show, rev-parse, ls-files, add,
+    commit, mv, rm, restore), no option before the subcommand, and none of `--exec`,
+    `--upload-pack`, `--receive-pack`, `--output`, `--ext-diff`, `--git-dir`,
+    `--work-tree`, `--template`;
+  - `pytest ...`, `python -m pytest ...`, `python FILE.py ...`;
+  - no shell metacharacters (`| ; & $ \` ! { } ( ) [ ] < > % ^ * ?`, newline), no
+    absolute, `~` or `..` path, a command named by name; on Windows no single quote, which
+    cmd does not read as a quote.
+
+  So no unrestricted shell command is exposed to the benchmark: push, pull, fetch, clone,
+  remote, config, reset, checkout, `python -c`, `python -m pip` and every other program are
+  refused.
+- **Denied:** `web_search`, `fetch_url`, and any tool not named above.
+- A task the agent could only finish with something denied counts as a failure; the run
+  record shows the denial and its reason.
+
+**The limit, stated plainly.** This is benchmark containment, not a security sandbox.
+There is no OS-level process isolation yet. A Python file or a test the agent writes and
+then runs executes with the user's network access and file permissions; the policy
+stops the benchmark from handing the agent the network or the rest of the disk through
+its tools, not code the agent wrote from reaching them. Results and reports must not
+describe the benchmark environment as sandboxed or network-isolated. The real sandbox is
+roadmap item 8 and is not part of this ADR.
 
 ### 3.6 Runs and reading
 
@@ -145,8 +168,9 @@ under a fixed, recorded policy:
 
 - Fixtures live in the repository and are small.
 - Each run copies its fixture into a new temporary directory, the agent's workspace.
-- The sandbox (ADR-004 and #151) and the command allowlist apply unchanged.
-- Nothing touches the owner's files, the owner's `core.db`, or the network.
+- The workspace sandbox (ADR-004 and #151) and the command allowlist apply unchanged.
+- The tools give the agent no path to the owner's files, the owner's `core.db`, or the
+  network. Code the agent writes and runs is not isolated (§3.5).
 
 ## 4. What this does not give
 
@@ -169,7 +193,8 @@ under a fixed, recorded policy:
 
 - No judge model decides a result.
 - Result files are immutable. The Boss model and `pac` behaviour are unchanged.
-- No network during a benchmark. No schema, Neon or pgvector change.
+- No network tool during a benchmark (§3.5 states what that does not cover). No schema,
+  Neon or pgvector change.
 
 ## 7. Documentation
 
@@ -183,6 +208,23 @@ instructions when it is built.
   rig. A smaller first cut (12 tasks) would get a baseline sooner.
 - **D2.** Runs per task: 5 (proposed), or 3 for v0 to get a first reading faster.
 - **D3.** The approvals policy in §3.5: approve inside the workspace, deny the network.
+
+**Decided 2026-10-02 by the owner:**
+
+- **D1:** 24 tasks, each in English and Arabic.
+- **D2:** 5 runs per task: 120 runs per language, 240 in all.
+- **D3:** approve automatically only what is scoped to the temporary benchmark workspace,
+  and block network tools. Local git and Python/pytest only through the defined command
+  policy; no unrestricted shell. Documented as containment, not a sandbox (§3.5); the
+  full sandbox stays with roadmap item 8.
+- **Scope:** v0 establishes a reproducible capability baseline and stays small; it is not
+  to grow into a large evaluation framework yet.
+- **Recorded per run:** success or failure; each check's verdict; tools used, in order;
+  commands executed; verification result; stop reason; latency; tokens; the sampling
+  settings actually sent; the final workspace and git state.
+- **After the baseline:** stop and report before implementing the next capability
+  improvement. No LoRA or fine-tuning work until the benchmark shows that
+  architecture, tool and model changes are insufficient.
 
 ## 9. Proposed units, if authorized
 
