@@ -7,7 +7,7 @@ Two marks and one wordmark. Nothing else is part of the brand.
 | `logo-mark.svg` | **Primary mark.** White fox on a navy circle with a blue tail swoosh. Web UI, avatars, social. |
 | `logo-mark-mono.svg` | **Secondary mark.** Outlined fox with circuit nodes, one colour (`currentColor`). Docs, diagrams, print. |
 | `logo-horizontal.svg` | Primary mark + `personal-ai-core` wordmark, for light backgrounds. |
-| `logo-horizontal-dark.svg` | Same lockup for dark backgrounds (white text, cyan `-ai-`, blue ring on the mark). |
+| `logo-horizontal-dark.svg` | Same lockup for dark backgrounds (white text, cyan `-ai-`); the mark is unchanged. |
 | `favicon.svg` | Simplified primary mark for 16–64 px: no inner-ear or eye detail, solid blue swoosh. |
 | `favicon-32.png` | 32 × 32 raster of `favicon.svg`, transparent corners. |
 | `app-icon-512.png` | 512 × 512 raster of `logo-mark.svg`, transparent corners. |
@@ -32,8 +32,8 @@ accent colour.
 - **Clear space:** at least one quarter of the mark's diameter on every side.
 - **Minimum size:** mark 16 px (use `favicon.svg` below 48 px); horizontal lockup 24 px tall.
 - **Light backgrounds:** `logo-horizontal.svg`, `logo-mark.svg`.
-- **Dark backgrounds:** `logo-horizontal-dark.svg`. The bare `logo-mark.svg` navy circle loses its edge
-  on very dark backgrounds, so prefer the dark lockup, which adds the blue ring.
+- **Dark backgrounds:** `logo-horizontal-dark.svg`. The navy circle has low contrast against very dark
+  backgrounds; place the mark on a mid-to-light or navy-adjacent surface where that matters.
 - **Mono mark:** `currentColor` only follows the surrounding text colour when the SVG is **inlined** in
   HTML. Loaded through `<img>` it renders black. Inline it, or set the colour with CSS on the `<svg>`.
 - Do not recolour, stretch, rotate, add effects, or change the wordmark case.
