@@ -1286,6 +1286,24 @@ WHERE THINGS STAND (2026-10-02)
     (python -m unittest, dotnet, cmd quoting), 2 protocol only. Knowledge:
     six Arabic failures (script drift, one invented figure); citations 5/80,
     informational (the grounding prompt never asks for them).
+  - A second reading of the same 111 (counts of what was recorded, not a
+    forecast; pinned by tests/unit/test_bench_baseline_findings.py): 31 of the
+    120 agent runs were refused at least one `shell` call by the benchmark
+    policy (73 calls in all) and none of those 31 passed. 26 of the 33 runs the
+    budget stopped had one, and 19 spent all three failures on refused calls.
+    50 of the 73 named a runner other than pytest (unittest, dotnet, mstest, a
+    debugger); 5 were `git commit` with a single-quoted message, which the
+    policy refuses on Windows; the other 18 were pipes and `||`, `dir`/`type`/
+    `cat`/`find` forms, `git push`, `pip install`, `nano`, an inline
+    `python -c`. Class 2 is not one problem: of its 43, 17 stopped on the budget
+    (10 of those neither edited a file nor ran one successful tool call) and 26
+    answered; 27 carry `not_tested_after_edit`, which is the most a "tested
+    after the last edit" gate could touch. What it means for the ORDER of the
+    controls: the failure budget often runs out on environment mismatch before
+    verification comes up, so unit 2 should be measured before unit 3 is
+    designed further, and unit 3's reach is bounded by those 27. It also needs
+    the protocol change the owner reserved for separate review (position 2
+    below). That is why unit 3 is not started.
   - ADR-023 (planning -> execution/test -> verification): ACCEPTED
     2026-10-02 (#167); built so far: the contract (#172) and the unit 1
     gate (#174), not yet measured. It records the owner's six design
@@ -1354,6 +1372,11 @@ WHERE THINGS STAND (2026-10-02)
          compared with the unit-1 file. Class 3 is the one expected to move;
          read the Arabic rows (the English block sits in a system message, not
          the latest user message, but that is an inference, not an observation).
+      6. Then, with both comparisons in hand, the owner decides whether unit 3
+         is built. If unit 2 moves Class 3 and the refused-shell counts above
+         fall, unit 3 is aimed at what is left; if not, the environment text is
+         what to look at first. Its protocol change (structured claims) goes to
+         separate review either way.
   - Rules learned today: update this header in any PR that finds it 2 or more
     merges behind -- CI now fails a PR at 3 (main went red after #163, and again
     after #176, when it slipped to 4); a scorer fix is
