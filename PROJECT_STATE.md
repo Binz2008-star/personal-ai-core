@@ -653,6 +653,10 @@ claim written in one place with nothing that notices it going stale.
                [action_required=true|false]
   #180 b8ee118  ci: run the PostgreSQL-gated suites against a real server on
                the Linux job
+  #181 3328062  test: the ledger and handoff gates hold a pull request one
+               merge below the limit
+  #182 3196641  feat(app): pac --documents says which files a directory walk
+               passed over
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1118,7 +1122,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at b8ee118)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at 3196641)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1132,8 +1136,17 @@ WHERE THINGS STAND (2026-10-02)
   - Since 6d4fe15: #167 (ADR-023 accepted), #173 (the previous handoff),
     #174 (unit 1), #176 (the section 8.3 benchmark change), #175 (the record
     of those two), #177 (the comparison tool), #179 (README: the agent line
-    prefix) and #178 (unit 2) merged; main is 1514e3e. Open: #162 (stale,
-    "Open, not ours" below).
+    prefix), #178 (unit 2), #180 (PostgreSQL in CI), #181 (the lag gates)
+    and #182 (`pac --documents` names the files a directory walk skipped)
+    merged; main is 3196641. Open: #162 (stale, "Open, not ours" below).
+  - Merged (#182): `pac --documents DIR` used to read only the `.md` and
+    `.txt` files in DIR and drop the rest without a word. It now prints one
+    line before the `documents:` summary naming the kinds passed over and how
+    many of each (`skipped: 4 file(s) that are not .md or .txt -- .pdf (3),
+    .env (1); ...`): kinds and counts, never contents; six kinds then "and N
+    more"; a file named explicitly is read and so never reported. What is
+    ingested did not change. (This was item 8 of the rig session's list, left
+    to the lead.)
   - CI (#180): the PostgreSQL-gated suites -- 55 tests on persistence/postgres.py,
     ADR-016, the largest module in the repository -- now run on the Linux job
     against a postgres:16 service container. Until now CI advertised no server
