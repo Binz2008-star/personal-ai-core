@@ -86,6 +86,12 @@ def test_answer_contains_folds_case_and_arabic_forms(tmp_path):
 
 @pytest.mark.parametrize("answer, verdict", [
     ("3 tests fail", PASS),
+    # v2: the first baseline scored "port 8443." as stating no number at all.
+    ("The answer is 3.", PASS),
+    ("Three: 3, then more", PASS),
+    ("فشلت ٣.", PASS),
+    ("(3)", PASS),
+    ("1,003 tests", FAIL),
     ("فشلت ٣ اختبارات", PASS),
     ("13 tests fail", FAIL),
     ("3.5 tests", FAIL),
@@ -172,3 +178,12 @@ def test_an_informational_check_is_recorded_but_does_not_decide(tmp_path):
         {"type": "answer_number", "value": 5},
         {"type": "cites", "document": "annual-leave.md", "informational": True}])
     assert not ok, "a right citation does not rescue a wrong fact"
+
+
+def test_a_number_ending_a_sentence_is_stated(tmp_path):
+    """bench-checks-v1 missed every number followed by a full stop: 17 correct
+    answers in the first baseline were scored wrong."""
+    ev = _ev(tmp_path, "The api service listens on port 8443.")
+    assert _verdict(ev, "answer_number", value=8443) == PASS
+    assert _verdict(_ev(tmp_path, "It is 9,443."), "answer_number", value=9443) == PASS
+    assert _verdict(_ev(tmp_path, "Version 8443.1"), "answer_number", value=8443) == FAIL

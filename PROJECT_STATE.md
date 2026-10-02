@@ -620,6 +620,8 @@ claim written in one place with nothing that notices it going stale.
                languages
   #163 cf629a2  fix(bench): what the rig smoke run found, fixed before the
                baseline
+  #164 a609f69  fix(agent): a command gets no input, and a timeout ends its
+               whole process tree
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped

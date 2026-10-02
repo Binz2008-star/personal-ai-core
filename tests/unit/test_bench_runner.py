@@ -416,3 +416,66 @@ def test_a_refused_step_carries_the_policy_reason(tmp_path):
     assert step["executed"] is False
     assert step["approval"]["approved"] is False
     assert step["approval"]["reason"] == "shell: code is outside the benchmark policy"
+
+
+def _v1_file(tmp_path: Path, answer: str) -> Path:
+    """A result file as bench-checks-v1 wrote it: a right answer scored wrong."""
+    _, _, lines = _run(tmp_path, {**SOLVES, "leave": [answer]}, "--only", "kb-leave-carryover",
+                       "--languages", "en")
+    lines[0].pop("scorer")
+    run = next(x for x in lines if x["kind"] == "run")
+    run["checks"][0].update(verdict="FAIL", detail="states [], not 5")
+    run["success"] = False
+    run["signals"] = ["check:answer_contains"]
+    path = tmp_path / "bench-v1.jsonl"
+    path.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines),
+                    encoding="utf-8")
+    return path
+
+
+def test_rescore_rejudges_answer_checks_into_a_new_file(tmp_path):
+    path = _v1_file(tmp_path, "Up to 5 days.")
+    source_before = path.read_bytes()
+    out = io.StringIO()
+    assert main(["--tasks", str(BENCH), "--rescore", str(path)], stdout=out) == 0
+    assert path.read_bytes() == source_before, "the source is never modified"
+    target = path.with_name("bench-v1.rescored-bench-checks-v2.jsonl")
+    lines = [json.loads(x) for x in target.read_text(encoding="utf-8").splitlines()]
+    assert lines[0]["rescored_from"] == "bench-v1.jsonl"
+    assert lines[0]["rescored_with"] == "bench-checks-v2"
+    assert lines[0]["scorer_before"] == "bench-checks-v1"
+    run = next(x for x in lines if x["kind"] == "run")
+    assert run["success"] and run["signals"] == []
+    assert "1 check verdict(s) changed" in out.getvalue()
+
+
+def test_rescore_never_overwrites_and_refuses_a_current_file(tmp_path):
+    path = _v1_file(tmp_path, "Up to 5 days.")
+    assert main(["--tasks", str(BENCH), "--rescore", str(path)], stdout=io.StringIO()) == 0
+    out = io.StringIO()
+    assert main(["--tasks", str(BENCH), "--rescore", str(path)], stdout=out) == 2
+    assert "never overwritten" in out.getvalue()
+    current = path.with_name("bench-v1.rescored-bench-checks-v2.jsonl")
+    out = io.StringIO()
+    assert main(["--tasks", str(BENCH), "--rescore", str(current)], stdout=out) == 2
+    assert "nothing to do" in out.getvalue()
+
+
+def test_rescore_refuses_a_changed_task_whose_answers_it_would_rejudge(tmp_path):
+    import shutil
+
+    path = _v1_file(tmp_path, "Up to 5 days.")
+    tasks = tmp_path / "tasks"
+    shutil.copytree(BENCH, tasks)
+    data = json.loads((tasks / "kb-leave-carryover.json").read_text(encoding="utf-8"))
+    data["checks"][0]["any_of"].append("V")
+    (tasks / "kb-leave-carryover.json").write_text(json.dumps(data, ensure_ascii=False),
+                                                   encoding="utf-8")
+    out = io.StringIO()
+    assert main(["--tasks", str(tasks), "--rescore", str(path)], stdout=out) == 2
+    assert "changed since the run" in out.getvalue()
+
+
+def test_a_new_result_file_names_its_scorer(tmp_path):
+    _, _, lines = _run(tmp_path, SOLVES, "--only", "kb-leave-carryover", "--languages", "en")
+    assert lines[0]["scorer"] == "bench-checks-v2"

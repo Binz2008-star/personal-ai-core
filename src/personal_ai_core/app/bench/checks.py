@@ -23,6 +23,11 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ..evaluate import FAIL, PASS, _fold, check_declines
 
+# Which version of the checks produced a verdict; recorded in every result file,
+# and a rescore names the version it applied (as the contract harness does).
+#   v1  the first baseline (a609f69, 2026-10-02)
+#   v2  a number that ends a sentence ("port 8443.") is a number; "9,443" is 9443
+SCORER = "bench-checks-v2"
 COMMAND_TIMEOUT_SECONDS = 120
 # Tools that change files; a test run must come after the last of them.
 EDITING_TOOLS = frozenset({"write_file", "delete_file", "shell"})
@@ -153,7 +158,11 @@ def answer_contains(ev: RunEvidence, *, any_of: Sequence[str]) -> tuple[str, str
     return (PASS, f"contains {hit!r}") if hit else (FAIL, f"none of {list(any_of)}")
 
 
-_NUMBER = re.compile(r"(?<![\d.])\d+(?![\d.])")
+# A whole number: not part of a longer number or of a decimal ("3.5" states
+# neither 3 nor 5), but a full stop or comma AFTER it is punctuation. v1 refused
+# any adjacent "." and so missed every number that ended a sentence.
+_NUMBER = re.compile(r"(?<!\d)(?<!\d[.,])\d+(?!\d)(?![.,]\d)")
+_THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
@@ -161,7 +170,8 @@ def answer_number(ev: RunEvidence, *, value: int) -> tuple[str, str]:
     """The answer states this number (Arabic-Indic digits count)."""
     if not ev.answer:
         return FAIL, "no answer"
-    numbers = {int(n) for n in _NUMBER.findall(ev.answer.translate(_ARABIC_DIGITS))}
+    text = _THOUSANDS.sub("", ev.answer.translate(_ARABIC_DIGITS))
+    numbers = {int(n) for n in _NUMBER.findall(text)}
     return (PASS, f"states {value}") if value in numbers else (
         FAIL, f"states {sorted(numbers)[:6]}, not {value}")
 
