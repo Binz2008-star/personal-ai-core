@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from personal_ai_core.agent.executor import ToolExecutor
-from personal_ai_core.agent.loop import AgentLoop, fence, parse_reply
+from personal_ai_core.agent.loop import ACTION_REQUIRED_MESSAGE, AgentLoop, fence, parse_reply
 from personal_ai_core.agent.policy import RiskPolicy
 from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import Workspace
@@ -100,15 +100,123 @@ def test_a_task_runs_tools_then_answers(ws):
     assert script.calls[1]["messages"][-1].content.startswith("<<<result ")
 
 
-def test_action_required_is_recorded_but_does_not_enforce_tool_use(ws):
+def test_action_required_rejects_answer_until_a_tool_executes(ws):
     events = InMemoryEventRepository()
-    outcome = loop(ws, Script('{"answer": "done"}'), events=events).run(
+    script = Script(
+        '{"answer": "not yet"}',
+        '{"tool": "list_directory"}',
+        '{"answer": "done"}',
+    )
+    outcome = loop(ws, script, events=events).run(
         AgentTaskContract(task_text="change the workspace", action_required=True),
         session_id="s1",
     )
     assert outcome.finished
+    assert outcome.answer == "done"
+    assert outcome.action_rejections == 1
+    assert outcome.rejected_answers == ("not yet",)
+    assert script.calls[1]["messages"][-1].content == ACTION_REQUIRED_MESSAGE
+    rejected = [
+        event
+        for event in events.list_for_session("s1")
+        if event.type is EventType.AGENT_ANSWER_REJECTED
+    ]
+    assert len(rejected) == 1
+    assert dict(rejected[0].payload) == {
+        "reason": "action_required",
+        "rejection": 1,
+        "action_required": True,
+    }
+    assert events.list_for_session("s1")[-1].payload["action_rejections"] == 1
+
+
+def test_three_action_rejections_stop_without_a_fourth_model_call(ws):
+    events = InMemoryEventRepository()
+    script = Script(
+        '{"answer": "first rejected"}',
+        '{"answer": "second rejected"}',
+        '{"answer": "third rejected"}',
+        '{"answer": "must not run"}',
+    )
+    outcome = loop(ws, script, events=events).run(
+        AgentTaskContract(task_text="change the workspace", action_required=True),
+        session_id="s1",
+    )
+    assert not outcome.finished
+    assert outcome.stopped_reason == "stopped: 3 failed actions reached the limit of 3"
+    assert outcome.action_rejections == 3
+    assert outcome.rejected_answers == (
+        "first rejected",
+        "second rejected",
+        "third rejected",
+    )
+    assert len(script.calls) == 3
+    payloads = [event.payload for event in events.list_for_session("s1")]
+    assert all(
+        answer not in repr(dict(payload))
+        for answer in outcome.rejected_answers
+        for payload in payloads
+    )
+    assert payloads[-1]["action_rejections"] == 3
+
+
+def test_a_denied_tool_does_not_count_as_action_for_enforcement(ws):
+    script = Script(
+        '{"tool": "run_command", "arguments": {"command": "git status"}}',
+        '{"answer": "not yet"}',
+        '{"tool": "list_directory"}',
+        '{"answer": "done"}',
+    )
+    outcome = loop(ws, script).run(
+        AgentTaskContract(task_text="change the workspace", action_required=True),
+        session_id="s1",
+    )
+    assert outcome.finished and outcome.action_rejections == 1
+    assert outcome.steps[0].record.executed is False
+
+
+def test_one_executed_tool_allows_an_action_required_answer(ws):
+    script = Script('{"tool": "list_directory"}', '{"answer": "done"}')
+    outcome = loop(ws, script).run(
+        AgentTaskContract(task_text="change the workspace", action_required=True),
+        session_id="s1",
+    )
+    assert outcome.finished and outcome.action_rejections == 0
+
+
+def test_action_required_false_accepts_an_answer_without_a_tool(ws):
+    events = InMemoryEventRepository()
+    outcome = loop(ws, Script('{"answer": "done"}'), events=events).run(
+        AgentTaskContract(task_text="explain the workspace", action_required=False),
+        session_id="s1",
+    )
+    assert outcome.finished and outcome.action_rejections == 0
+    assert not any(
+        event.type is EventType.AGENT_ANSWER_REJECTED
+        for event in events.list_for_session("s1")
+    )
+
+
+def test_action_rejection_shares_the_global_failure_budget(ws):
+    script = Script('{"answer": "reject"}', "not json", "still not json")
+    outcome = loop(ws, script).run(
+        AgentTaskContract(task_text="change the workspace", action_required=True),
+        session_id="s1",
+    )
+    assert not outcome.finished
+    assert outcome.action_rejections == 1
+    assert outcome.protocol_errors == 2
+    assert len(script.calls) == 3
+
+
+def test_plain_string_answer_has_no_contract_and_no_rejection(ws):
+    events = InMemoryEventRepository()
+    outcome = loop(ws, Script('{"answer": "done"}'), events=events).run(
+        "explain the workspace", session_id="s1"
+    )
+    assert outcome.finished and outcome.action_rejections == 0
     finish = events.list_for_session("s1")[-1]
-    assert finish.payload["action_required"] is True
+    assert finish.payload["action_required"] == "no contract"
 
 
 def test_the_model_is_told_the_protocol_and_the_tools(ws):
@@ -228,6 +336,7 @@ def test_every_step_and_the_finish_are_events(ws):
     assert recorded[-1].payload["finished"] is True
     assert recorded[0].payload["action_required"] == "no contract"
     assert recorded[-1].payload["action_required"] == "no contract"
+    assert recorded[-1].payload["action_rejections"] == 0
 
 
 def test_an_event_payload_carries_no_error_text(ws):
