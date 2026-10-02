@@ -1,7 +1,9 @@
 # ADR-021 — Forbidding foreign scripts during decoding (llama.cpp grammar)
 
-**Status:** PROPOSED · direction requested by the owner 2026-10-02 ("ابدأ بـ 2") · design
-only · nothing built · the decisions in §7 are open
+**Status:** PROPOSED / DEFERRED · direction requested by the owner 2026-10-02 · §7
+decided 2026-10-02 (D1 Phases A-C only, D2 GPU-only in production, D3 grammar only under
+the guard's expected script) · deferred until the capability baseline (ADR-022) exists ·
+nothing built · Phase D is a separate decision
 
 - Serves:
   - ADR-012 amendment 1, the language rule;
@@ -133,6 +135,22 @@ when a phase lands.
   reply, or "GPU only".
 - **D3.** Whether the grammar, once adopted, applies only when the guard's expected script
   is Arabic or Latin and the turn is not a translation request (proposed), or always.
+
+**Decided 2026-10-02 by the owner:**
+
+- **D1:** Phases A to C are approved, and only those. Phase D is a separate decision,
+  taken after the Phase C results are reviewed.
+- **D2:** Production stays GPU-only. Phase A may measure the CPU build to establish the
+  performance gap. CPU never becomes the production fallback if the Vulkan/GPU path is
+  not viable.
+- **D3:** The grammar applies only when the guard expects Arabic or English. It does not
+  apply when the user's explicit request needs another language, translation and
+  Chinese included. It follows the guard's existing exemptions, and only those.
+- **Phase C stays controlled.** Same model, same prompts and test set, same hardware and
+  runtime conditions, same calibrated gate. The grammar is the only intended variable.
+- **Deferred.** The owner put measurement first (ADR-022, the capability benchmark).
+  Phases A to C are revisited once that baseline exists. Nothing here reaches production
+  without its validation and the owner's review.
 
 ## 8. Proposed units, if authorized
 

@@ -153,8 +153,9 @@ design background, not current architecture.
   adapter exists for the evaluation harness only.
 - **[TARGET]** A foreign script is impossible to sample, not only caught afterwards: a
   llama.cpp grammar applied per turn under the guard's exemptions, the guard kept as a
-  second line. Proposed in ADR-021, phased: rig feasibility, `compare --vary`, a
-  measurement, then adoption on the owner's decision.
+  second line. ADR-021, PROPOSED / DEFERRED until the capability baseline (ADR-022):
+  Phases A-C approved, GPU-only, grammar only under the guard's expected script; adoption
+  (Phase D) is a separate decision.
 - **[CURRENT]** The harness scores the contract with mechanical checks and no judge model.
   Raw replies and verdicts are committed unmodified. Each result names the commit, the
   cases version and the scorer version.

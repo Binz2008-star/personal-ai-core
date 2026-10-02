@@ -1111,12 +1111,15 @@ ADR-020 (evaluating a candidate model) -- where it stands
   - Open from #154: ground-decline-ar failed 2/15 vs 9/15 on identical weights
     (p about 1% by chance; below the +8 threshold). The case is the noisiest
     in the set; cause unresolved.
-  - Owner's order after acceptance (2026-10-02): first the foreign-script problem
-    by constrained decoding -- ADR-021 PROPOSED, phased (rig feasibility of
-    llama.cpp on the GPU with Smart App Control on; `compare --vary`; a 48-run
-    grammar measurement; adoption only on the owner's D1) -- then the guard's
-    blind spot for Hebrew and other "other" scripts (a small production fix).
-  - Candidate evaluation is open as well. The first real candidate (a LoRA of
+  - Owner's priorities (2026-10-02): MEASUREMENT FIRST. Build the system --
+    model, planning, memory, RAG, tools, agent loop, verification, sandbox,
+    multi-agent when needed -- against a capability benchmark (ADR-022, next),
+    and look at LoRA/fine-tuning only if the baseline shows a recurring weakness
+    that prompting, RAG, tools, memory, architecture or model choice cannot fix.
+  - ADR-021 (grammar during decoding): PROPOSED / DEFERRED. D1 Phases A-C only,
+    D2 GPU-only in production, D3 grammar only under the guard's expected
+    script. Revisited after the capability baseline.
+  - The guard's blind spot for Hebrew and other "other" scripts: its own PR. The first real candidate (a LoRA of
     the Boss model) needs: its weights served by Ollama with an ADAPTER line
     (so adapters are recorded), a fresh baseline at the same commit, and the
     same 15 + 9 runs per side. Adoption still needs the owner (ADR-002, D4).
