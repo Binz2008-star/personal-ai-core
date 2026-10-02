@@ -620,6 +620,10 @@ claim written in one place with nothing that notices it going stale.
                languages
   #163 cf629a2  fix(bench): what the rig smoke run found, fixed before the
                baseline
+  #164 a609f69  fix(agent): a command gets no input, and a timeout ends its
+               whole process tree
+  #165 6c2d1f5  eval: ADR-022 capability benchmark baseline -- 240 runs at
+               a609f69
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1085,7 +1089,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at cf629a2)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at 6c2d1f5)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1139,8 +1143,13 @@ ADR-020 (evaluating a candidate model) -- where it stands
     cf629a2 stopped at 98/240: the model ran `pytest --pdb`, the debugger
     waited for input, and the shell timeout killed only cmd.exe -- fixed in
     the agent's tools (stdin closed, process tree killed); the partial file
-    is discarded, the 240 are re-run on the fixed commit. (4) the 240-run
-    baseline on the rig. Before unit 4 runs, show the owner the allowlist
+    is discarded, the 240 are re-run on the fixed commit. (4) DONE: the
+    240-run baseline at a609f69 (#165): 106/240 under bench-checks-v1;
+    rescored with v2 (a number ending a sentence was not read; 17 answers)
+    123/240 -- knowledge 114/120, agent 9/120. Agent failures: answers
+    without acting, acts without verifying, wrong environment commands.
+    Next: the owner authorized only a DRAFT ADR for planning ->
+    execution/test -> verification; nothing implemented. Before unit 4 runs, show the owner the allowlist
     (`policy.describe()`). After the baseline: STOP and report the gaps; the
     owner picks the 2-3 biggest failure causes to work on.
   - Owner's order after the baseline: planning + execute/test + verification,

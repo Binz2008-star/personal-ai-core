@@ -233,6 +233,8 @@ python -m personal_ai_core.app.bench --show-policy
 python -m personal_ai_core.app.bench --runs 5 --num-ctx 8192
 # a run that was interrupted: continue the same file
 python -m personal_ai_core.app.bench --runs 5 --num-ctx 8192 --resume evals\results\bench\bench-<time>.jsonl
+# re-judge a result file's answer checks after a scorer fix (writes a new file beside it)
+python -m personal_ai_core.app.bench --rescore evals\results\bench\bench-<time>.jsonl
 # the summary of a result file
 python -m personal_ai_core.app.bench --report evals\results\bench\bench-<time>.jsonl
 ```

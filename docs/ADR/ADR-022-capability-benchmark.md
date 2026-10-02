@@ -242,3 +242,24 @@ instructions when it is built.
 4. The baseline on the rig, committed as results, and a gap reading.
 
 Each unit is its own PR.
+
+## 10. Record: the first baseline, and a scorer correction (2026-10-02)
+
+- **Baseline.** 24 tasks x 2 languages x 5 runs = 240 of 240 completed on the rig at
+  `a609f69` (Boss model `huihui_ai/qwen2.5-abliterate:7b`, weights digest verified, 8192
+  context, GPU share 0.85). Raw file, immutable: `evals/results/bench/bench-20261002T081707Z.jsonl`
+  (#165). Scored with `bench-checks-v1`: 106/240.
+- **Defect.** `answer_number` in `bench-checks-v1` refused any `.` after a number, so a
+  number that ended a sentence ("The api service listens on port 8443.") was not read.
+- **Fix (`bench-checks-v2`).** One change: a `.` after a number is refused only when a
+  digit follows (a decimal). Decimals, longer numbers and the rule before a number are as
+  in v1.
+- **Rescore.** `python -m personal_ai_core.app.bench --rescore
+  evals/results/bench/bench-20261002T081707Z.jsonl`: answer checks re-judged on the
+  recorded answers (no model call, no task or answer changed), written to
+  `bench-20261002T081707Z.rescored-bench-checks-v2.jsonl`. 17 verdicts changed, all
+  `answer_number` FAIL -> PASS, each checked by hand: `kb-api-port` 10 (5 en, 5 ar),
+  `kb-crossdoc-failed-port` 7 (5 en, 2 ar). No verdict changed the other way.
+- **Result.** 123/240: knowledge 114/120, agent 9/120. The reported accuracy changed
+  because of a scorer correction, not because of any change to the system.
+  `tests/unit/test_bench_baseline_rescore.py` pins the 17 changes.
