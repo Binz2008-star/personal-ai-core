@@ -114,7 +114,6 @@ def test_action_required_rejects_answer_until_a_tool_executes(ws):
     assert outcome.finished
     assert outcome.answer == "done"
     assert outcome.action_rejections == 1
-    assert outcome.rejected_answers == ("not yet",)
     assert script.calls[1]["messages"][-1].content == ACTION_REQUIRED_MESSAGE
     rejected = [
         event
@@ -145,7 +144,7 @@ def test_three_action_rejections_stop_without_a_fourth_model_call(ws):
     assert not outcome.finished
     assert outcome.stopped_reason == "stopped: 3 failed actions reached the limit of 3"
     assert outcome.action_rejections == 3
-    assert outcome.rejected_answers == (
+    rejected_answer_texts = (
         "first rejected",
         "second rejected",
         "third rejected",
@@ -154,7 +153,7 @@ def test_three_action_rejections_stop_without_a_fourth_model_call(ws):
     payloads = [event.payload for event in events.list_for_session("s1")]
     assert all(
         answer not in repr(dict(payload))
-        for answer in outcome.rejected_answers
+        for answer in rejected_answer_texts
         for payload in payloads
     )
     assert payloads[-1]["action_rejections"] == 3

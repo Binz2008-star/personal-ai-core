@@ -91,7 +91,6 @@ class AgentOutcome:
     touched_files: tuple[str, ...] = field(default=())
     protocol_errors: int = 0
     action_rejections: int = 0
-    rejected_answers: tuple[str, ...] = field(default=())
 
     @property
     def finished(self) -> bool:
@@ -224,7 +223,6 @@ class AgentLoop:
         steps: list[Step] = []
         protocol_errors = 0
         action_rejections = 0
-        rejected_answers: list[str] = []
         tool_executed = False
 
         while budget.allowed():
@@ -251,7 +249,6 @@ class AgentLoop:
                     and not tool_executed
                 ):
                     action_rejections += 1
-                    rejected_answers.append(proposal["answer"])
                     budget.record(ok=False)
                     self._record_answer_rejected(
                         session_id, action_rejections, contract
@@ -265,7 +262,6 @@ class AgentLoop:
                     protocol_errors,
                     contract,
                     action_rejections,
-                    rejected_answers,
                 )
 
             record = self._executor.execute(
@@ -294,7 +290,6 @@ class AgentLoop:
             protocol_errors,
             contract,
             action_rejections,
-            rejected_answers,
         )
 
     # --- helpers ---------------------------------------------------------------
@@ -325,7 +320,6 @@ class AgentLoop:
         protocol_errors: int,
         contract: AgentTaskContract | None,
         action_rejections: int,
-        rejected_answers: list[str],
     ) -> AgentOutcome:
         check = self._verifier.verify_response(answer)
         if not check.passed:
@@ -338,7 +332,6 @@ class AgentLoop:
             touched_files=self._touched(),
             protocol_errors=protocol_errors,
             action_rejections=action_rejections,
-            rejected_answers=tuple(rejected_answers),
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
@@ -351,7 +344,6 @@ class AgentLoop:
         protocol_errors: int,
         contract: AgentTaskContract | None,
         action_rejections: int,
-        rejected_answers: list[str],
     ) -> AgentOutcome:
         outcome = AgentOutcome(
             answer=None,
@@ -360,7 +352,6 @@ class AgentLoop:
             touched_files=self._touched(),
             protocol_errors=protocol_errors,
             action_rejections=action_rejections,
-            rejected_answers=tuple(rejected_answers),
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
