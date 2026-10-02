@@ -42,6 +42,7 @@ from ...conversation.factory import (
     describe_loaded,
     http_transport,
 )
+from ...core.agent import AgentTaskContract
 from ...core.config import DEFAULT_BOSS_MODEL, Settings
 from ...core.errors import ProviderError
 from ..cli import _ingest
@@ -143,6 +144,8 @@ def _signals(record: Mapping[str, Any], evidence: RunEvidence) -> list[str]:
         signals.append("no_answer")
     if record.get("protocol_errors"):
         signals.append("protocol_errors")
+    if record.get("action_rejections"):
+        signals.append("action_rejected")
     steps = record.get("steps", [])
     if any(not s["executed"] and s["decision"] in ("deny", "ask") for s in steps):
         signals.append("tool_refused")
@@ -160,22 +163,33 @@ def _signals(record: Mapping[str, Any], evidence: RunEvidence) -> list[str]:
     return signals
 
 
+def _contract(task: Task, language: str) -> AgentTaskContract:
+    """The contract the task file states (ADR-023 §8.3), in the run's language."""
+    if task.action_required is None:
+        raise ValueError(f"{task.id}: an agent task states action_required")
+    return AgentTaskContract(task_text=task.instruction[language],
+                             action_required=task.action_required)
+
+
 def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
                    workspace: Path) -> dict[str, Any]:
     workspace.mkdir(parents=True)
     materialize(task, workspace)
     confirm = BenchmarkConfirm()
-    record: dict[str, Any] = {"track": "agent"}
+    # The contract the run was held to, so a reader of the file need not guess
+    # whether the gate was engaged: baseline runs carry neither key ("no contract").
+    record: dict[str, Any] = {"track": "agent", "action_required": task.action_required}
     started = time.perf_counter()
     answer = None
     steps: tuple = ()
     try:
         agent = build_agent(settings, workspace=workspace, transport=log, confirm=confirm)
-        outcome = agent.loop.run(task.instruction[language], session_id="bench")
+        outcome = agent.loop.run(_contract(task, language), session_id="bench")
         answer, steps = outcome.answer, outcome.steps
         record["stop"] = "answered" if outcome.finished else "budget"
         record["stopped_reason"] = outcome.stopped_reason
         record["protocol_errors"] = outcome.protocol_errors
+        record["action_rejections"] = outcome.action_rejections
     except ProviderError as exc:
         record["stop"], record["error"] = "error", str(exc)
     record["seconds"] = round(time.perf_counter() - started, 3)
@@ -249,12 +263,21 @@ def run_knowledge_task(task: Task, language: str, settings: Settings, log: CallL
     return record
 
 
-def _task_digest(task: Task) -> str:
-    """The task and its fixture or corpus: a resumed run must measure the same tasks."""
+def _task_digest(task: Task, *, with_contract: bool = True) -> str:
+    """The task and its fixture or corpus: a resumed run must measure the same tasks.
+
+    The contract (`action_required`) is part of the task a run measured, so it is
+    in the digest: a file written before the contract existed, or under another
+    one, is not resumed (ADR-023 §8.3). A knowledge task has no contract and keeps
+    the digest it always had. `with_contract=False` is the digest from before the
+    field existed; `rescore` accepts it, because the contract changes no check.
+    """
+    parts: dict[str, Any] = {"instruction": task.instruction, "checks": task.checks,
+                             "git": task.git, "git_commits": task.git_commits}
+    if with_contract and task.action_required is not None:
+        parts["action_required"] = task.action_required
     digest = hashlib.sha256(json.dumps(
-        {"instruction": task.instruction, "checks": task.checks, "git": task.git,
-         "git_commits": task.git_commits},
-        sort_keys=True, ensure_ascii=False).encode("utf-8"))
+        parts, sort_keys=True, ensure_ascii=False).encode("utf-8"))
     for root in (task.fixture, task.corpus):
         if root is None:
             continue
@@ -354,6 +377,9 @@ def main(
         "num_ctx_measured_by_owner": args.num_ctx,
         "num_ctx_sent_by_core": False,
         "profile": "none (deliberately empty)",
+        "contract": "each agent task file states action_required and the runner passes an "
+                    "AgentTaskContract built from it (ADR-023 §8.3); a file without this key "
+                    "ran without a contract",
         "judge_model": "none (ADR-013)",
         "scorer": SCORER,
         "language_guard": settings.language_guard,
@@ -457,8 +483,11 @@ def rescore(path: Path, tasks_dir: Path, out: TextIO) -> int:
             return 2
         # Only a task whose answer checks are re-judged must be the same task;
         # the others keep their recorded verdicts and are not re-read.
+        # A file from before the contract recorded the digest without it; the
+        # contract changes no check, so that form still proves the task is the one.
         rejudged = any(c["type"] in ANSWER_CHECKS for c in task.checks)
-        if rejudged and _task_digest(task) != recorded.get("digest"):
+        if rejudged and recorded.get("digest") not in (
+                _task_digest(task), _task_digest(task, with_contract=False)):
             print(f"refusing to rescore: task {task_id} changed since the run", file=out)
             return 2
     rescored = [{**header, "scorer": SCORER, "rescored_from": path.name, "rescored_with": SCORER,
