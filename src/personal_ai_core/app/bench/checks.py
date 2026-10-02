@@ -66,7 +66,7 @@ def _read(path: Path) -> str | None:
 
 def _normal(text: str) -> str:
     """Line endings and trailing whitespace do not decide a file's content."""
-    return "\n".join(line.rstrip() for line in text.replace("\r\n", "\n").split("\n")).strip()
+    return "\n".join(line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")).strip()
 
 
 def file_exists(ev: RunEvidence, *, path: str) -> tuple[str, str]:

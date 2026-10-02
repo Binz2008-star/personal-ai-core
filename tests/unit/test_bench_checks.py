@@ -26,7 +26,8 @@ def _verdict(ev: RunEvidence, kind: str, **params) -> str:
 
 
 def test_file_checks(tmp_path):
-    (tmp_path / "a.txt").write_text("hello\r\nworld  \n", encoding="utf-8")
+    # Bytes, so the platform does not translate the line endings under test.
+    (tmp_path / "a.txt").write_bytes(b"hello\r\nworld  \n")
     ev = _ev(tmp_path)
     assert _verdict(ev, "file_exists", path="a.txt") == PASS
     assert _verdict(ev, "file_exists", path="b.txt") == FAIL
