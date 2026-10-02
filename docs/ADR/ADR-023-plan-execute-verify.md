@@ -1,15 +1,15 @@
 # ADR-023 — Planning, execution/test and verification in the agent loop
 
-**Status:** ACCEPTED (2026-10-02) — first unit specified (§8), NOT YET IMPLEMENTED
+**Status:** ACCEPTED (2026-10-02) — unit 1 (§8.2) built and merged (#174, `d2b6cac`), not yet measured
 
 | Stage | State |
 |---|---|
 | Proposed | yes: this document, 2026-10-02 |
 | Design questions | decided by the owner, 2026-10-02 (§6) |
 | Accepted | **yes**, by the owner, 2026-10-02, with the first unit (§8) |
-| Authorized | **acceptance and the specification of unit 1.** Implementing unit 1, and the benchmark change that lets it be measured, each need their own approval (§4, §8) |
-| Implemented | **the contract only, recorded, not enforced** (#172, §8.1). No control in §2 exists in the code |
-| Verified | **no.** Nothing has been measured against these controls |
+| Authorized | **acceptance, the specification of unit 1, unit 1's implementation** (#174) **and the benchmark change that lets it be measured** (§8.3, #176), each merged on the owner's instruction, 2026-10-02. Unit 2 and every later control each need their own approval (§4, §8) |
+| Implemented | **the contract (#172) and unit 1, action enforcement (#174, `d2b6cac`)**, enforced for `action_required=true`. No other control in §2 exists in the code |
+| Verified | **tests and CI only** (§8.4). **Not measured**: since #176 the benchmark passes the contract, so unit 1 engages there, but the 240 runs have not been made |
 
 - Serves the owner's order after the capability baseline: Planning, then Execution/Test,
   then Verification, built against measured gaps.
@@ -135,8 +135,9 @@ or how its tests run.
 
 ## 2. Proposed controls
 
-These are proposals. None is implemented. The order below is the order of the loop and
-the proposed order of implementation (§6, decision 4):
+These are proposals. Only action enforcement (§2.2) is implemented, in #174 (§8.4). The
+order below is the order of the loop and the proposed order of implementation (§6,
+decision 4):
 
 1. environment context;
 2. action enforcement;
@@ -210,7 +211,9 @@ model (§6, decision 1):
 - **In the benchmark,** each task file is the contract.
 - **Built (#172):** `AgentTaskContract(task_text, action_required)` and the
   `pac --agent` prefix `[action_required=true|false] TASK` (§8.1). The value is
-  recorded in the run's events; nothing above is enforced yet.
+  recorded in the run's events.
+- **Enforced since #174** for `action_required=true`: an answer with no executed tool
+  call is rejected (§8.2, §8.4). Nothing else above is enforced yet.
 
 ### 2.3 Verification: no observable evidence, no accepted completion claim
 
@@ -445,6 +448,9 @@ The owner accepted this ADR on 2026-10-02 with its first unit. Acceptance does n
 authorize implementation: unit 1 and its measurement change each need the owner's
 approval, as their own PRs (§4).
 
+Unit 1 was then built in #174 (§8.4), and its measurement change in #176 (§8.3), each
+merged on the owner's instruction on 2026-10-02. The measurement itself is not made.
+
 ### 8.1 Already built: the contract (#172)
 
 - `core.agent.AgentTaskContract(task_text: str, action_required: bool)`: frozen, no
@@ -456,10 +462,10 @@ approval, as their own PRs (§4).
   `RiskPolicy`; it prohibits nothing.
 - `AgentLoop.run` still accepts a plain string (the benchmark runner, tests): no
   contract, recorded as `"no contract"`.
-- The value is recorded in `AGENT_STEP` and `AGENT_FINISHED` payloads. It is **not
-  enforced**.
+- The value is recorded in `AGENT_STEP` and `AGENT_FINISHED` payloads. As built in #172
+  it was **not enforced**; #174 enforces `true` (§8.4).
 
-### 8.2 Unit 1: action enforcement (§2.2), the first control to implement
+### 8.2 Unit 1: action enforcement (§2.2), the first control, built in #174
 
 **Order.** §6 decision 4 orders the controls environment context, then action
 enforcement. The owner chose action enforcement as the first unit because it addresses
@@ -490,6 +496,13 @@ change, written for correctness and not for the score (§3).
 
 ### 8.3 Measuring unit 1
 
+**Status (2026-10-02): built in #176 (`de5a79e`), merged on the owner's instruction; the
+measurement is not made.** Every bullet below is as built. Two details the spec did not
+settle: the runner also records `action_required` and `action_rejections` per run (and
+the signal `action_rejected`), and `rescore` accepts the digest from before the field,
+because the contract changes no check and the immutable baseline could not otherwise be
+rescored. A comparison of two result files is in #177 (open).
+
 The benchmark runner passes plain strings today, so a run would record `"no contract"`
 and unit 1 would never engage. Measuring it needs one benchmark change, with its own
 approval:
@@ -504,3 +517,36 @@ Then the same 240 attempts on the rig, compared with the baseline under §5:
 failure-class transitions, action rate, false rejections and budget exhaustion, with
 no target score.
 
+### 8.4 Unit 1 as built (#174, merged 2026-10-02, `d2b6cac`)
+
+Facts from the merged code and from an independent review at its head (`9a8dac7`).
+Nothing here changes the design above.
+
+- **What counts as executed.** `record.executed`, set where the tool is called. A call
+  the policy denied, that was not confirmed, or whose arguments were invalid does not
+  count. A call that ran and failed does count.
+- **Recorded.** A new event type, `AGENT_ANSWER_REJECTED`, with `reason`
+  (`action_required`), `rejection` (the running count) and `action_required`: counts
+  and flags, no text. `AGENT_FINISHED` gains `action_rejections`, and
+  `AgentOutcome.action_rejections` carries it.
+- **Budget.** A rejection is `ActionBudget.record(ok=False)`: one failure and one action
+  from the global budget (§2.4). After the third failure the stop reason is "stopped: 3
+  failed actions reached the limit of 3".
+- **The message the model sees** (`ACTION_REQUIRED_MESSAGE`, `agent/loop.py`): "Action
+  required: this task requires you to act with a tool before answering, and no tool call
+  has run yet. Reply with one tool call." Reviewed for correctness against §8.2: it is
+  accurate. One risk, an inference and not an observation: it is English text sent as
+  the latest user message, and the language rule keys on that message, so an Arabic
+  task could be answered in English. The benchmark measures it.
+- **A consequence to know.** A tool call that ran and failed satisfies the gate, as §8.2
+  says literally. Requiring evidence is §2.3.
+- **Not pinned by a test:** a failed-but-executed call counting; an invalid-argument call
+  not counting; a rejection after two failed tool calls ending the run.
+- **Verification so far.** CI (`suite`, `suite-windows`, `static`) green; an independent
+  full run at the head, 2001 passed and 87 skipped; three mutations of the gate (it
+  disabled, any step counting, a rejection not charged), each caught by the PR's tests.
+  No benchmark run.
+- **Live in `pac --agent`** for lines the caller prefixes `action_required=true`; there
+  is no flag. §4's row "adopt a control in `pac --agent`: the owner, on the measured
+  result" is therefore not met by a measurement. This was raised in review before the
+  owner merged #174.
