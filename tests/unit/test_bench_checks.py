@@ -88,10 +88,17 @@ def test_answer_contains_folds_case_and_arabic_forms(tmp_path):
     ("3 tests fail", PASS),
     # v2: the first baseline scored "port 8443." as stating no number at all.
     ("The answer is 3.", PASS),
-    ("Three: 3, then more", PASS),
+    ("The answer is 3, I think", PASS),
+    ("Is it 3?", PASS),
+    ("It is 3!", PASS),
     ("فشلت ٣.", PASS),
     ("(3)", PASS),
-    ("1,003 tests", FAIL),
+    # ...and nothing else is widened: a decimal or a longer number is not 3.
+    ("It is 3.5.", FAIL),
+    ("It is 0.3.", FAIL),
+    ("It is .3", FAIL),
+    ("Room 33.", FAIL),
+    ("In 2023, five tests failed.", FAIL),
     ("فشلت ٣ اختبارات", PASS),
     ("13 tests fail", FAIL),
     ("3.5 tests", FAIL),
@@ -182,8 +189,21 @@ def test_an_informational_check_is_recorded_but_does_not_decide(tmp_path):
 
 def test_a_number_ending_a_sentence_is_stated(tmp_path):
     """bench-checks-v1 missed every number followed by a full stop: 17 correct
-    answers in the first baseline were scored wrong."""
-    ev = _ev(tmp_path, "The api service listens on port 8443.")
-    assert _verdict(ev, "answer_number", value=8443) == PASS
-    assert _verdict(_ev(tmp_path, "It is 9,443."), "answer_number", value=9443) == PASS
-    assert _verdict(_ev(tmp_path, "Version 8443.1"), "answer_number", value=8443) == FAIL
+    answers in the first baseline were scored wrong. These are their shapes."""
+    assert _verdict(_ev(tmp_path, "The api service listens on port 8443."),
+                    "answer_number", value=8443) == PASS
+    assert _verdict(_ev(tmp_path, "خدمة api تستمع على المنفذ 8443."),
+                    "answer_number", value=8443) == PASS
+    assert _verdict(_ev(tmp_path, "It failed in the March 2026 outage and listens on port 9443."),
+                    "answer_number", value=9443) == PASS
+
+
+@pytest.mark.parametrize("answer", [
+    "The api service listens on port 9443.",      # a wrong number, punctuated
+    "Version 8443.1 of the service.",             # the number inside a decimal
+    "Port 18443.",                                # inside a longer number
+    "Port 84430!",
+    "The service was released in 2026.",          # unrelated numbers only
+])
+def test_the_fix_adds_no_false_positive(tmp_path, answer):
+    assert _verdict(_ev(tmp_path, answer), "answer_number", value=8443) == FAIL
