@@ -647,6 +647,10 @@ claim written in one place with nothing that notices it going stale.
                action_required; the runner passes the contract
   #177 5d681b4  feat(bench): ADR-023 section 5 -- compare two result files:
                what moved, never a verdict
+  #178 1514e3e  feat(agent): ADR-023 unit 2 -- environment context, off unless
+               asked for
+  #179 c812cb1  docs(readme): pac --agent lines start with
+               [action_required=true|false]
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1112,7 +1116,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at 5d681b4)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at 1514e3e)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1125,16 +1129,30 @@ PR, as with the ledger.
 WHERE THINGS STAND (2026-10-02)
   - Since 6d4fe15: #167 (ADR-023 accepted), #173 (the previous handoff),
     #174 (unit 1), #176 (the section 8.3 benchmark change), #175 (the record
-    of those two) and #177 (the comparison tool) merged; main is 5d681b4.
-    Open: #178 (unit 2, environment context, off by default) and #162 (stale,
+    of those two), #177 (the comparison tool), #179 (README: the agent line
+    prefix) and #178 (unit 2) merged; main is 1514e3e. Open: #162 (stale,
     "Open, not ours" below).
+  - CI (#180): the PostgreSQL-gated suites -- 55 tests on persistence/postgres.py,
+    ADR-016, the largest module in the repository -- now run on the Linux job
+    against a postgres:16 service container. Until now CI advertised no server
+    and they skipped, and a skip reads like a pass. They passed 55 of 55 against
+    PostgreSQL 16 when first run (2026-10-02) and on GitHub's runner (the suite
+    job: 2107 passed, 24 skipped; the 24 are the allowed token-estimator and
+    dependency-direction skips). suite-windows still has no server (Windows
+    runners cannot run service containers) and still skips them with the
+    accounted reason. The URL is set per step, not job-wide, because "Test
+    support package resolves" asserts that none is advertised; it says
+    `localhost`, not 127.0.0.1, because a test builds another host spelling from
+    it. Check names are unchanged, so branch protection is untouched. The
+    service is a throwaway container, not Neon and not any database the owner
+    uses.
   - main went red for one run (2026-10-02, the #176 merge) and was fixed by
     #175: after #174 the ledger and the handoff were exactly 3 merges behind,
     and #176 made it 4. A PR cannot count its own merge, so its CI could not
     warn. The rule below ("update this header in any PR that finds it 3 merges
     behind") is the one that was not applied; merge the PR that refreshes the
     header BEFORE, or WITH, the one that makes it 4.
-  - Built, open (#178): ADR-023 unit 2, environment context, section 2.1.
+  - Merged (#178): ADR-023 unit 2, environment context, section 2.1.
     OFF unless asked for: `build_agent(environment_context=True)` and the
     benchmark flag `--environment-context`; `pac --agent` is not changed
     (adopting a control there is the owner's, on the measured result, section
