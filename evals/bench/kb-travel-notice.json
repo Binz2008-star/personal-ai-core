@@ -1,0 +1,32 @@
+{
+  "id": "kb-travel-notice",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/arabic_policies",
+  "instruction": {
+    "en": "How many days before travelling must the trip be approved?",
+    "ar": "قبل كم يوماً من السفر يجب الحصول على الموافقة؟"
+  },
+  "checks": [
+    {
+      "type": "answer_contains",
+      "any_of": [
+        "14",
+        "١٤",
+        "fourteen",
+        "أربعة عشر",
+        "اربعة عشر"
+      ]
+    },
+    {
+      "type": "cites",
+      "document": "travel-ar.md"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "At least 14 days before travelling, from your direct manager (travel-ar.md).",
+      "ar": "قبل السفر بـ 14 يوماً على الأقل، من المدير المباشر (travel-ar.md)."
+    }
+  }
+}

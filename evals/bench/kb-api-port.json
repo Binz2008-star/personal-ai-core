@@ -1,0 +1,26 @@
+{
+  "id": "kb-api-port",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/project_notes",
+  "instruction": {
+    "en": "Which port does the api service listen on?",
+    "ar": "على أي منفذ (port) تستمع خدمة api؟"
+  },
+  "checks": [
+    {
+      "type": "answer_number",
+      "value": 8443
+    },
+    {
+      "type": "cites",
+      "document": "architecture.md"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "The api service listens on port 8443 (architecture.md).",
+      "ar": "تستمع خدمة api على المنفذ 8443 (architecture.md)."
+    }
+  }
+}

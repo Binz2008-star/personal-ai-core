@@ -104,3 +104,47 @@ def test_a_git_fixture_starts_committed_with_a_fixed_identity(tmp_path):
     log2 = subprocess.run(["git", "log", "--format=%H"], cwd=other, capture_output=True,
                           text=True, check=True).stdout.split()
     assert log2[0] == log[2], "the same fixture must give the same commit on every run"
+
+
+def test_the_v0_set_is_what_the_owner_decided():
+    """ADR-022 D1: 24 tasks, 12 agent and 12 knowledge, every category covered."""
+    from collections import Counter
+
+    from personal_ai_core.app.bench.tasks import CATEGORIES
+
+    tasks = load(BENCH)
+    assert len(tasks) == 24
+    assert Counter(t.track for t in tasks) == {"agent": 12, "knowledge": 12}
+    assert {t.category for t in tasks} == CATEGORIES
+    # Every knowledge task that answers names the document it should cite, or
+    # combines documents; declines are the rest.
+    for t in tasks:
+        if t.track == "knowledge":
+            kinds = {c["type"] for c in t.checks}
+            assert kinds & {"declines", "answer_contains", "answer_number"}, t.id
+
+
+def test_git_history_is_built_on_top_of_the_fixture(tmp_path):
+    import subprocess
+
+    data = copy.deepcopy(_shipped("git-last-commit-file"))
+    task = parse(data, BENCH)
+    materialize(task, tmp_path)
+    log = subprocess.run(["git", "log", "--format=%s"], cwd=tmp_path, capture_output=True,
+                         text=True, check=True).stdout.splitlines()
+    assert log == ["Fix typo in installation steps", "Add contributing guide", "initial"]
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=tmp_path,
+                            capture_output=True, text=True, check=True).stdout
+    assert status == ""
+
+
+@pytest.mark.parametrize("mutate, reason", [
+    (lambda d: d.pop("git"), "needs"),
+    (lambda d: d["git_commits"].append({"message": "", "writes": {"a": "b"}}), "message"),
+    (lambda d: d["git_commits"].append({"message": "x", "writes": {}}), "message"),
+])
+def test_a_malformed_git_history_is_refused(mutate, reason):
+    data = copy.deepcopy(_shipped("git-last-commit-file"))
+    mutate(data)
+    with pytest.raises(TaskError, match=reason):
+        parse(data, BENCH)

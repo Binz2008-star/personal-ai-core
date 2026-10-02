@@ -1,0 +1,22 @@
+{
+  "id": "toolsel-count-json",
+  "track": "agent",
+  "category": "tool_selection",
+  "fixture": "fixtures/json_count",
+  "instruction": {
+    "en": "How many .json files are in this project, counting every subdirectory?",
+    "ar": "كم ملفاً بامتداد .json يوجد في هذا المشروع، مع احتساب كل المجلدات الفرعية؟"
+  },
+  "checks": [
+    {
+      "type": "answer_number",
+      "value": 4
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "There are 4 .json files.",
+      "ar": "يوجد 4 ملفات بامتداد .json."
+    }
+  }
+}

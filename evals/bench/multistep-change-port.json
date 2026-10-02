@@ -1,0 +1,45 @@
+{
+  "id": "multistep-change-port",
+  "track": "agent",
+  "category": "multi_step",
+  "fixture": "fixtures/port",
+  "instruction": {
+    "en": "Find the configuration file that sets the server port, change the port to 8081, then run check.py and tell me which file you changed.",
+    "ar": "اعثر على ملف الإعدادات الذي يحدد منفذ الخادم (port)، وغيّر المنفذ إلى 8081، ثم شغّل check.py وأخبرني أي ملف غيّرت."
+  },
+  "checks": [
+    {
+      "type": "command_passes",
+      "argv": [
+        "python",
+        "check.py"
+      ]
+    },
+    {
+      "type": "file_contains",
+      "path": "config/app.ini",
+      "text": "host = 127.0.0.1"
+    },
+    {
+      "type": "file_equals",
+      "path": "check.py",
+      "text": "import configparser\n\nparser = configparser.ConfigParser()\nparser.read(\"config/app.ini\", encoding=\"utf-8\")\nport = parser.getint(\"server\", \"port\")\nif port != 8081:\n    raise SystemExit(f\"port is {port}, expected 8081\")\nprint(\"check passed: port 8081\")\n"
+    },
+    {
+      "type": "answer_contains",
+      "any_of": [
+        "config/app.ini",
+        "app.ini"
+      ]
+    }
+  ],
+  "reference": {
+    "writes": {
+      "config/app.ini": "[server]\nhost = 127.0.0.1\nport = 8081\n"
+    },
+    "answer": {
+      "en": "I changed config/app.ini; check.py passes.",
+      "ar": "غيّرت الملف config/app.ini، والفحص check.py ينجح."
+    }
+  }
+}

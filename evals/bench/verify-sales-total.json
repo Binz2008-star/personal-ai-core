@@ -1,0 +1,50 @@
+{
+  "id": "verify-sales-total",
+  "track": "agent",
+  "category": "verification",
+  "fixture": "fixtures/sales",
+  "instruction": {
+    "en": "total_sales in report.py gives the wrong total for sales.csv. Fix it, then run the tests and confirm they pass.",
+    "ar": "الدالة total_sales في report.py تعطي مجموعاً خاطئاً للملف sales.csv. أصلحها، ثم شغّل الاختبارات وتأكد أنها تنجح."
+  },
+  "checks": [
+    {
+      "type": "command_passes",
+      "argv": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ]
+    },
+    {
+      "type": "file_equals",
+      "path": "test_report.py",
+      "text": "from report import total_sales\n\n\ndef test_total_of_the_sales_file():\n    assert total_sales(\"sales.csv\") == 250\n\n\ndef test_a_single_row(tmp_path):\n    path = tmp_path / \"one.csv\"\n    path.write_text(\"region,amount\\nwest,7\\n\", encoding=\"utf-8\")\n    assert total_sales(path) == 7\n"
+    },
+    {
+      "type": "tested_after_last_edit"
+    }
+  ],
+  "reference": {
+    "writes": {
+      "report.py": "\"\"\"Sales report.\"\"\"\nimport csv\n\n\ndef total_sales(path):\n    \"\"\"The sum of the amount column.\"\"\"\n    with open(path, newline=\"\", encoding=\"utf-8\") as handle:\n        rows = list(csv.DictReader(handle))\n    return sum(int(row[\"amount\"]) for row in rows)\n"
+    },
+    "calls": [
+      {
+        "tool": "write_file",
+        "arguments": {
+          "path": "report.py"
+        }
+      },
+      {
+        "tool": "shell",
+        "arguments": {
+          "command": "python -m pytest -q"
+        }
+      }
+    ]
+  }
+}

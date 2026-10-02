@@ -1,0 +1,31 @@
+{
+  "id": "recover-moved-changelog",
+  "track": "agent",
+  "category": "recovery",
+  "fixture": "fixtures/changelog",
+  "instruction": {
+    "en": "Add the line \"- Fixed the date parser.\" under the 2.0.0 heading of the changelog. It used to be at docs/CHANGELOG.md, but it was moved, and that path no longer exists.",
+    "ar": "أضف السطر \"- Fixed the date parser.\" تحت عنوان 2.0.0 في سجل التغييرات (changelog). كان في docs/CHANGELOG.md لكنه نُقل، وهذا المسار لم يعد موجوداً."
+  },
+  "checks": [
+    {
+      "type": "file_contains",
+      "path": "CHANGELOG.md",
+      "text": "- Fixed the date parser."
+    },
+    {
+      "type": "file_contains",
+      "path": "CHANGELOG.md",
+      "text": "- New export format."
+    },
+    {
+      "type": "file_absent",
+      "path": "docs/CHANGELOG.md"
+    }
+  ],
+  "reference": {
+    "writes": {
+      "CHANGELOG.md": "# Changelog\n\n## 2.0.0\n- New export format.\n- Fixed the date parser.\n"
+    }
+  }
+}

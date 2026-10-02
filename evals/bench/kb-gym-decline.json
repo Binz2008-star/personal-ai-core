@@ -1,0 +1,21 @@
+{
+  "id": "kb-gym-decline",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/arabic_policies",
+  "instruction": {
+    "en": "Is there a gym membership allowance, and how much is it?",
+    "ar": "هل يوجد بدل لاشتراك النادي الرياضي، وكم قيمته؟"
+  },
+  "checks": [
+    {
+      "type": "declines"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "The provided documents do not contain this information.",
+      "ar": "المستندات المتوفرة لا تحتوي على هذه المعلومة."
+    }
+  }
+}

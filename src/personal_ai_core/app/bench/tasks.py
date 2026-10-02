@@ -8,6 +8,9 @@ A task file is JSON:
       "category": "debugging",              # one of CATEGORIES
       "fixture": "fixtures/off_by_one",     # agent: copied into the workspace
       "git": true,                          # optional: the fixture is committed first
+      "git_commits": [                      # optional, needs git: history on top of it
+        {"message": "...", "writes": {"README.md": "..."}}
+      ],
       "corpus": "corpora/policies",         # knowledge: the documents to ingest
       "instruction": {"en": "...", "ar": "..."},
       "checks": [{"type": "command_passes", "argv": ["python", "-m", "pytest", "-q"]}],
@@ -74,6 +77,7 @@ class Task:
     fixture: Path | None = None
     corpus: Path | None = None
     git: bool = False
+    git_commits: Sequence[Mapping[str, Any]] = ()
 
 
 def _fail(task_id: str, reason: str) -> TaskError:
@@ -135,12 +139,19 @@ def parse(data: Mapping[str, Any], base: Path) -> Task:
         corpus = _inside(base, data["corpus"], task_id)
         if not corpus.is_dir() or not any(corpus.iterdir()):
             raise _fail(task_id, f"no documents in {data['corpus']}")
+    git_commits = data.get("git_commits") or []
+    if git_commits and not data.get("git"):
+        raise _fail(task_id, "git_commits needs \"git\": true")
+    for commit in git_commits:
+        if not str(commit.get("message", "")).strip() or not isinstance(
+                commit.get("writes"), Mapping) or not commit["writes"]:
+            raise _fail(task_id, "each git commit needs a message and the files it writes")
     reference = data.get("reference")
     if not isinstance(reference, Mapping):
         raise _fail(task_id, "no reference solve; a task is admitted only on one")
     return Task(id=task_id, track=track, category=category, instruction=dict(instruction),
                 checks=list(checks), reference=reference, base=base, fixture=fixture,
-                corpus=corpus, git=bool(data.get("git", False)))
+                corpus=corpus, git=bool(data.get("git", False)), git_commits=list(git_commits))
 
 
 def load(directory: Path) -> list[Task]:
@@ -167,8 +178,20 @@ def materialize(task: Task, workspace: Path) -> None:
     shutil.copytree(task.fixture, workspace, dirs_exist_ok=True)
     if task.git:
         _git(workspace, "init", "-q", "-b", "main")
+        # In the repository's own config, not only the environment: the agent's
+        # `shell` strips variables whose names look secret, and GIT_AUTHOR_*
+        # matches "AUTH". A commit the agent makes needs an identity too.
+        _git(workspace, "config", "user.name", GIT_ENV["GIT_AUTHOR_NAME"])
+        _git(workspace, "config", "user.email", GIT_ENV["GIT_AUTHOR_EMAIL"])
         _git(workspace, "add", "-A")
         _git(workspace, "commit", "-q", "-m", "initial")
+        for commit in task.git_commits:
+            for relative, content in commit["writes"].items():
+                target = _inside(workspace, relative, task.id)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+            _git(workspace, "add", "-A")
+            _git(workspace, "commit", "-q", "-m", commit["message"])
 
 
 def _apply_reference(task: Task, workspace: Path, language: str) -> RunEvidence:
