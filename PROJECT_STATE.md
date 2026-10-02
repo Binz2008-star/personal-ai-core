@@ -626,6 +626,8 @@ claim written in one place with nothing that notices it going stale.
                a609f69
   #166 1449930  fix(bench): a number that ends a sentence is a number; rescore
                the baseline
+  #167 5009294  docs(adr): ADR-023 -- planning, execution/test, verification --
+               ACCEPTED with unit 1 (action enforcement)
   #168 3128fb9  docs: handoff at 1449930 -- the baseline done, ADR-023 a draft,
                nothing in progress
   #169 641707e  docs: handoff -- the fixture digest difference explained; the
@@ -635,6 +637,8 @@ claim written in one place with nothing that notices it going stale.
   #171 2ac9994  test: the state-script test reads and writes UTF-8 on both ends
   #172 6d4fe15  feat(agent): caller-owned AgentTaskContract and the
                [action_required=...] CLI prefix
+  #173 dc57794  docs: handoff at 6d4fe15 -- #172 merged, its authority
+               recorded, next steps for the owner
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1100,7 +1104,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at 6d4fe15)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at 5009294)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1111,6 +1115,23 @@ when the header above is more than 3 merges behind main: update it in the next
 PR, as with the ledger.
 
 WHERE THINGS STAND (2026-10-02)
+  - Since 6d4fe15: #167 (ADR-023 accepted) and #173 (the previous handoff)
+    merged; main is 5009294 and its `tests` run is green. Two PRs are open:
+    #174 (unit 1, next entry) and #162 (stale, "Open, not ours" below).
+  - Open, awaiting the owner: #174 (feat/adr-023-unit-1, opened 2026-10-02
+    17:09, 4 files, +195/-9, CI green at 9a8dac7: suite, static,
+    suite-windows). It implements ADR-023 section 8.2: with a contract and
+    action_required=true, an answer before any executed tool call is rejected,
+    the model is told once, each rejection is one failure from the global
+    budget of 3, and an AGENT_ANSWER_REJECTED event records it (counts, never
+    text). Read against section 8.2 the behaviour matches. Three things this
+    entry does not settle: (a) its description is empty, so it records no
+    owner approval -- section 8 and the "Not authorized yet" line below say
+    implementation needs one; (b) ACTION_REQUIRED_MESSAGE is the new
+    model-facing text section 8.2 reserves for the owner's review; (c) it
+    does not change the benchmark, so it cannot be measured yet (section
+    8.3). It does not touch this file, so merging it makes the handoff 3
+    merges behind -- the limit; the next PR after it must refresh the header.
   - Implemented with the owner's approval (#172): the caller-owned
     `AgentTaskContract(task_text, action_required)` in core/agent.py, and the
     strict per-line `pac --agent` prefix `[action_required=true|false] TASK`.
@@ -1193,13 +1214,18 @@ WHERE THINGS STAND (2026-10-02)
     that broke on it independent of that. One session per worktree: Codex
     works in personal-ai-core-codex, never in the shared checkout.
   - Open, not ours: #162 (docs/brand logo assets, branch ccr-4d137493-sqp6vv)
-    is based on cf629a2 and its suite and suite-windows checks fail; cause not
-    yet diagnosed. It needs main merged in and a fresh CI run before any
-    review; the owner decides whether it goes ahead.
+    is based on cf629a2. Diagnosed from its CI logs: suite and suite-windows
+    each fail one test, test_the_handoff_is_at_most_a_few_merges_behind_main
+    (the header then named 8fcfa88, 4 merges behind), and nothing else; the
+    static job passes. The cause is a stale branch, not its assets or code.
+    Merging main into the branch gives it the current handoff header and a
+    fresh CI run; the owner decides whether it goes ahead.
   - Next, for the owner to decide (nothing is in progress):
       1. Done: ADR-023 accepted with unit 1 (#167).
-      2. Implement unit 1, action enforcement in agent/loop.py (ADR-023
-         section 8.2), aimed at Class 1 (52 of 111 agent failures).
+      2. Unit 1, action enforcement in agent/loop.py (ADR-023 section 8.2),
+         aimed at Class 1 (52 of 111 agent failures): built in #174, open,
+         CI green; the owner reviews the rejection wording and records the
+         approval in the PR.
       3. Then measure: the same 240 runs (#165 setup, fresh worktree on the
          rig), compared by failure class with the baseline, never by a
          target score. The bench runner passes plain strings, so #172 alone
