@@ -2,6 +2,7 @@
   "id": "tests-count-failures",
   "track": "agent",
   "category": "test_execution",
+  "action_required": true,
   "fixture": "fixtures/inventory",
   "instruction": {
     "en": "Run the tests in this project and tell me how many of them fail. Do not change any file.",

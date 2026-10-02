@@ -2,6 +2,7 @@
   "id": "modify-discount-cap",
   "track": "agent",
   "category": "code_modification",
+  "action_required": true,
   "fixture": "fixtures/discount",
   "instruction": {
     "en": "Change price_after_discount in pricing.py so a discount never exceeds 50%: any larger percentage counts as 50. Keep the rest of its behaviour. test_pricing.py describes it; do not change the tests.",
