@@ -94,6 +94,22 @@ class ToolRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentTaskContract:
+    """Caller-owned intent for one agent task."""
+
+    task_text: str
+    action_required: bool
+
+    def __post_init__(self) -> None:
+        task_text = self.task_text.strip()
+        if not task_text:
+            raise ValueError("task_text must not be empty")
+        if not isinstance(self.action_required, bool):
+            raise TypeError("action_required must be a boolean")
+        object.__setattr__(self, "task_text", task_text)
+
+
+@dataclass(frozen=True, slots=True)
 class PolicyDecision:
     decision: Decision
     reason: str

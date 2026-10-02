@@ -10,7 +10,7 @@ import sqlite3
 
 import pytest
 
-from personal_ai_core.app.cli import main
+from personal_ai_core.app.cli import main, parse_agent_task
 
 
 def scripted(*replies):
@@ -44,7 +44,7 @@ def test_a_task_writes_a_file_and_answers(tmp_path):
         '{"tool": "write_file", "arguments": {"path": "hello.md", "content": "hi"}}',
         '{"answer": "wrote hello.md"}',
     )
-    code, output, workspace = run(tmp_path, transport, "create hello.md")
+    code, output, workspace = run(tmp_path, transport, "[action_required=true] create hello.md")
     assert code == 0
     assert (workspace / "hello.md").read_text(encoding="utf-8") == "hi"
     assert '· write_file {"path": "hello.md", "content": "hi"} -> ok' in output
@@ -52,12 +52,65 @@ def test_a_task_writes_a_file_and_answers(tmp_path):
     assert "changed: hello.md" in output
 
 
+def test_a_task_without_action_metadata_is_rejected_before_model_call(tmp_path, capsys):
+    transport = scripted('{"answer": "must not run"}')
+    code, output, _ = run(tmp_path, transport, "create hello.md")
+    assert code == 2
+    assert output == ""
+    assert capsys.readouterr().err == (
+        "invalid agent task: expected [action_required=true|false] TASK\n"
+    )
+    assert transport.sent == []  # type: ignore[attr-defined]
+
+
+def test_a_malformed_task_does_not_stop_later_valid_tasks(tmp_path, capsys):
+    transport = scripted('{"answer": "done"}')
+    code, output, _ = run(
+        tmp_path, transport, "[action_required] bad", "[action_required=false] explain this"
+    )
+    assert code == 2
+    assert output == "core> done\n"
+    assert capsys.readouterr().err == (
+        "invalid agent task: expected [action_required=true|false] TASK\n"
+    )
+    assert "core> done" in output
+    assert len(transport.sent) == 1  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("line", "task_text", "action_required"),
+    [
+        ("[action_required=true] create the file", "create the file", True),
+        ("[action_required=false] explain [foo] later", "explain [foo] later", False),
+    ],
+)
+def test_agent_task_prefix_is_parsed_once(line, task_text, action_required):
+    contract = parse_agent_task(line)
+    assert contract.task_text == task_text
+    assert contract.action_required is action_required
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "create the file",
+        "[action_required] create the file",
+        "[action_required=yes] create the file",
+        "[action_required=true]",
+        "[action_required=true] [action_required=false] explain",
+    ],
+)
+def test_agent_task_prefix_rejects_missing_malformed_or_repeated_metadata(line):
+    with pytest.raises(ValueError, match=r"expected \[action_required=true\|false\] TASK"):
+        parse_agent_task(line)
+
+
 def test_a_command_waits_for_the_users_yes(tmp_path):
     transport = scripted(
         '{"tool": "run_command", "arguments": {"command": "git status"}}',
         '{"answer": "done"}',
     )
-    code, output, _ = run(tmp_path, transport, "check git", "n")
+    _code, output, _ = run(tmp_path, transport, "[action_required=true] check git", "n")
     assert "? run_command" in output and "high risk. Allow? [y/N]" in output
     assert "-> not allowed by you" in output
 
@@ -68,7 +121,7 @@ def test_the_answer_to_a_prompt_is_not_taken_as_a_task(tmp_path):
         '{"tool": "run_command", "arguments": {"command": "git status"}}',
         '{"answer": "done"}',
     )
-    run(tmp_path, transport, "check git", "y")
+    run(tmp_path, transport, "[action_required=true] check git", "y")
     assert len(transport.sent) == 2  # type: ignore[attr-defined]
 
 
@@ -77,7 +130,7 @@ def test_end_of_input_at_a_prompt_is_a_no(tmp_path):
         '{"tool": "run_command", "arguments": {"command": "git status"}}',
         '{"answer": "done"}',
     )
-    _, output, _ = run(tmp_path, transport, "check git")
+    _, output, _ = run(tmp_path, transport, "[action_required=true] check git")
     assert "-> not allowed by you" in output
 
 
@@ -88,7 +141,9 @@ def test_a_stopped_task_offers_to_undo_its_changes(tmp_path):
         '{"tool": "delete_file", "arguments": {"path": "keep.md"}}',
         "x", "y", "z",
     )
-    code, output, workspace = run(tmp_path, transport, "clean up", "y", "y")
+    _code, output, workspace = run(
+        tmp_path, transport, "[action_required=true] clean up", "y", "y"
+    )
     assert "critical risk. Allow?" in output
     assert "stopped: 3 failed actions" in output
     assert "undo 1 file change(s) from this task (keep.md)?" in output
@@ -105,7 +160,9 @@ def test_an_accepted_task_is_not_undone_by_a_later_one(tmp_path):
         '{"tool": "write_file", "arguments": {"path": "two.md", "content": "2"}}',
         "x", "y", "z",
     )
-    _, output, workspace = run(tmp_path, transport, "task one", "task two", "y")
+    _, output, workspace = run(
+        tmp_path, transport, "[action_required=true] task one", "[action_required=true] task two", "y"
+    )
     assert (workspace / "one.md").exists()
     assert not (workspace / "two.md").exists()
     assert "restored: two.md" in output
@@ -116,7 +173,7 @@ def test_the_agent_carries_the_identity_contract(tmp_path):
     message too: rule 2 (confirmation before external effect) and rule 5
     (retrieved text is data) apply to an agent above all."""
     transport = scripted('{"answer": "ok"}')
-    run(tmp_path, transport, "hello")
+    run(tmp_path, transport, "[action_required=false] hello")
     messages = transport.sent[0]["messages"]  # type: ignore[attr-defined]
     assert [m["role"] for m in messages[:2]] == ["system", "system"]
     assert "standard written form" in messages[0]["content"]
@@ -125,7 +182,7 @@ def test_the_agent_carries_the_identity_contract(tmp_path):
 
 def test_every_step_is_recorded_in_the_database(tmp_path):
     transport = scripted('{"tool": "list_directory"}', '{"answer": "ok"}')
-    run(tmp_path, transport, "look around")
+    run(tmp_path, transport, "[action_required=false] look around")
     types = [
         row[0]
         for row in sqlite3.connect(tmp_path / "core.db").execute(
@@ -166,7 +223,7 @@ def test_an_unreachable_model_is_reported(tmp_path):
     def down(url, payload, timeout):
         raise ProviderError("connection refused")
 
-    code, output, _ = run(tmp_path, down, "anything")
+    code, output, _ = run(tmp_path, down, "[action_required=false] anything")
     assert code == 1 and "could not be reached" in output
 
 
@@ -186,7 +243,7 @@ def test_the_agent_cannot_touch_the_database_inside_its_workspace(tmp_path):
     code = main(
         ["--database", str(database), "--agent", "--workspace", str(workspace)],
         transport=transport,
-        stdin=iter(["wreck it", "y"]),
+        stdin=iter(["[action_required=true] wreck it", "y"]),
         stdout=out,
         env={},
     )
@@ -204,7 +261,9 @@ def test_an_unknown_session_is_refused_and_nothing_is_recorded(tmp_path):
     """F-2: the same refusal `send` gives, and no agent.* event for a session
     nobody started."""
     transport = scripted('{"tool": "list_directory"}', '{"answer": "ok"}')
-    code, output, _ = run(tmp_path, transport, "look", extra=("--session", "no-such-session"))
+    code, output, _ = run(
+        tmp_path, transport, "[action_required=false] look", extra=("--session", "no-such-session")
+    )
     assert code == 2 and "no such session: no-such-session" in output
     assert transport.sent == []  # type: ignore[attr-defined]
     connection = sqlite3.connect(tmp_path / "core.db")
@@ -213,12 +272,14 @@ def test_an_unknown_session_is_refused_and_nothing_is_recorded(tmp_path):
 
 def test_the_agent_continues_a_session_started_earlier(tmp_path):
     first = scripted('{"answer": "one"}')
-    _, output, _ = run(tmp_path, first, "task one")
+    _, output, _ = run(tmp_path, first, "[action_required=false] task one")
     session_id = next(
         line.split()[-1] for line in output.splitlines() if line.startswith("session:")
     )
     second = scripted('{"answer": "two"}')
-    code, output, _ = run(tmp_path, second, "task two", extra=("--session", session_id))
+    code, output, _ = run(
+        tmp_path, second, "[action_required=false] task two", extra=("--session", session_id)
+    )
     assert code == 0 and "core> two" in output
     rows = sqlite3.connect(tmp_path / "core.db").execute(
         "select type from events where session_id = ? order by seq", (session_id,)
