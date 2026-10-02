@@ -1,10 +1,12 @@
 # ADR-023 — Planning, execution/test and verification in the agent loop
 
-**Status:** PROPOSED / DRAFT — NOT IMPLEMENTED
+**Status:** PROPOSED / DRAFT — NOT IMPLEMENTED — NOT ACCEPTED
 
 | Stage | State |
 |---|---|
 | Proposed | yes: this document, 2026-10-02 |
+| Design questions | decided by the owner, 2026-10-02 (§6) |
+| Accepted | **no** |
 | Authorized | **drafting only.** The owner authorized writing this ADR, not implementing it |
 | Implemented | **no.** No control below exists in the code |
 | Verified | **no.** Nothing has been measured against these controls |
@@ -133,52 +135,116 @@ or how its tests run.
 
 ## 2. Proposed controls
 
-These are proposals. None is implemented. Each is stated as a rule the loop would
-enforce, with what it would read.
+These are proposals. None is implemented. The order below is the order of the loop and
+the proposed order of implementation (§6, decision 4):
 
-### 2.1 No action, no completion
+1. environment context;
+2. action enforcement;
+3. execution;
+4. verification.
 
-- **Rule:** if the task requires an action or change and no tool call has executed, a
-  final answer is not accepted as completion.
-- **What happens instead:** the model is told, as a protocol message, that the task
-  required action and none was taken. That turn counts against the budget like any
-  failed step.
-- **Open:** how the loop knows a task requires action (Q1). It must not depend on the
-  benchmark's task files, which the production loop never sees.
+Environment context is information the model works with. It is never evidence that
+anything succeeded.
 
-### 2.2 No claim without evidence
+### 2.1 Environment context
 
-- **Rule:** when the answer claims that something was changed, committed, tested or
-  verified, the claim is checked against the audit log before the answer is accepted.
-  For example:
-  - "created X" needs an executed `write_file` to X;
-  - "committed" needs an executed commit;
-  - "tests pass" needs an executed test command after the last change, and that command
-    must have succeeded.
-- **For a project change that has tests**, the loop expects this sequence:
+At the start of the loop, code (not the model) gathers authoritative facts about where
+the model is working and states them to it:
+
+- operating system and shell, and what that shell does with quotes and wildcards;
+- the project's language or runtime, as found in the workspace;
+- whether the workspace is a git repository, and its state;
+- the supported test command, resolved in this order (§6, decision 3):
+  1. the task or repository contract;
+  2. an explicit command from the caller;
+  3. verified repository configuration (for example a pytest configuration that is
+     present and parses);
+  4. constrained discovery, only as a fallback (for example a `tests/` directory with
+     pytest-style files);
+- the command tools and what each accepts.
+
+When a supported test command is known, the model does not choose another. A test run
+that counts as verification (§2.3) is a run of that command.
+
+### 2.2 Action enforcement: no action, no completion
+
+The authority for whether a task requires action is the **task contract**, never the
+model (§6, decision 1):
+
+    task contract -> action_required -> agent plan -> execution -> verification
+
+- **The task contract** states `action_required` and, where it applies, the evidence
+  that completes the task. The model may produce a plan, but its own statement that a
+  task does or does not need action decides nothing.
+- **When `action_required` is true** and no tool call has executed, a final answer is
+  not accepted as completion. The model receives a protocol message saying so. That
+  turn consumes one failure (§2.4).
+- **In the benchmark,** each task file is the contract.
+
+### 2.3 Verification: no observable evidence, no accepted completion claim
+
+Completion claims are **structured**, not read from free text (§6, decision 2). The
+final answer carries a list of claims. The loop accepts a claim only with observable
+evidence from a tool receipt or from the workspace:
+
+| Claim | Evidence required |
+|---|---|
+| `file_created` | an executed write to that path, and the file exists afterwards |
+| `file_modified` | an executed write or edit to that path, and its content differs from the checkpoint taken before the run |
+| `file_deleted` | an executed delete of that path, and the path is absent |
+| `tests_passed` | an executed run of the supported test command (§2.1), after the last file change, with exit status 0 |
+| `committed` | an executed `git commit` with exit status 0, and a new commit in `git log` |
+| `pushed` | an executed push with exit status 0. Pushing is not permitted in the benchmark, so this claim cannot be accepted there |
+
+- **Rule:** no observable evidence means no accepted completion claim.
+- **An unsupported claim** is returned to the model with what the evidence shows, and
+  consumes one failure (§2.4). It is not shown to the user as fact.
+- **Free-text wording is not the mechanism.** A phrase list may later be used only to
+  report an answer that asserts a completion without a structured claim. It never
+  accepts anything.
+- **For a project change that has a supported test command,** completion needs the full
+  sequence:
   1. modify;
   2. run the test;
   3. inspect the result;
   4. repair if needed;
-  5. verify the final state.
-- **An unsupported claim** is returned to the model with what the log shows. It is
-  neither shown to the user as fact nor silently removed.
-- **Open:** how claims are recognized without a judge model (Q2). The verifier already
-  names grounding as the layer it does not have (`agent/verifier.py`, layer 2); this
-  would be its mechanical form, limited to claims about tool actions.
+  5. `tests_passed` on the final state.
 
-### 2.3 Environment context
+### 2.4 The failure budget
 
-At the start of the loop, the model receives authoritative facts about where it is
-working, gathered by code, not guessed by the model:
-- operating system and shell (and what that shell does with quotes);
-- the project's language or runtime as detected from the workspace;
-- whether the workspace is a git repository, and its state;
-- the supported test command, if one can be determined;
-- the command tools and what each accepts.
+The budget stays at **3 failures** (and 12 actions). It is not tuned from this
+benchmark (§6, decision 5). This is what consumes it.
 
-**Open:** the source of the "supported test command" (Q3), and how much context this
-costs on an 8192-token window.
+**Today, in the code (`agent/recovery.py`, `agent/loop.py`), one failure is:**
+
+- a tool call the policy denied or that was not confirmed;
+- a tool call with invalid arguments;
+- an executed tool call whose result failed, or that the verifier did not pass;
+- a reply that is not valid protocol JSON.
+
+**Proposed additions,** one failure each:
+
+- a final answer rejected under §2.2 (action required, none taken);
+- a completion claim rejected under §2.3 (no observable evidence).
+
+**Not a failure:** a successful step, the final accepted answer, and the environment
+context of §2.1.
+
+**Counting:**
+
+- Failures accumulate over the run and do not reset after a success.
+- Every tool call and every rejected answer also counts as one action.
+
+**After the third failure:**
+
+- The loop stops. No further model call or tool call is made.
+- The outcome has no answer (`answer` is `None`) and records the stop reason, "3 failed
+  actions reached the limit of 3".
+- The run is not a completion, whatever it claimed earlier.
+- Files changed before the stop are left as they are. The checkpoints taken before each
+  change are returned to the caller, who decides whether to roll back. Nothing is rolled
+  back automatically.
+- In the benchmark, such a run is a failure, with the `no_answer` signal.
 
 ## 3. Non-goals
 
@@ -193,6 +259,10 @@ costs on an 8192-token window.
   makes the loop correct for any task; the benchmark only measures whether it did.
 - No LoRA, fine-tuning or training.
 - No Neon, pgvector, migration, schema or production database change.
+- Output-language policy is not part of this ADR (§6, decision 6). The language guard
+  does not run in the agent loop today, and 31 of the 37 Arabic no-action answers
+  contained no Arabic script. That is recorded as a separate finding and a dependency
+  for whoever decides the agent loop's language behaviour. It is not a control here.
 - Not addressed here, each kept separate:
   - the fixture fingerprint discrepancy;
   - Remote Control's worktree mode;
@@ -205,12 +275,13 @@ costs on an 8192-token window.
 | Action | Needs |
 |---|---|
 | Edit this draft | already authorized |
-| Accept this ADR (PROPOSED → ACCEPTED) | the owner, after answering §6 |
+| Accept this ADR (PROPOSED → ACCEPTED) | the owner; the design questions are decided (§6), the items in §7 remain |
 | Implement any control | a separate, explicit authorization per control, after acceptance |
 | Measure an implementation on the rig | the owner's go, as for every rig run |
 | Adopt a control in `pac --agent` | the owner, on the measured result |
 
-Each control would be its own PR: small, behind tests, and changing one thing.
+Each control would be its own PR, in the order of §2: small, behind tests, and changing
+one thing.
 
 ## 5. How a future implementation would be evaluated
 
@@ -240,30 +311,51 @@ Each control would be its own PR: small, behind tests, and changing one thing.
   following ADR-020 amendment 1, and applied to the 5-run samples with their variance
   stated.
 
-## 6. Open questions for the owner
+## 6. Decisions on the design questions (owner, 2026-10-02)
 
-1. **Q1, which tasks require action.** Options:
-   - the user's wording (a classifier the loop runs, itself measured);
-   - the model stating its intent first (a plan step the loop then holds it to);
-   - an explicit mode chosen by the caller.
+These decide the design. They do not accept the ADR or authorize implementation.
 
-   The draft proposes the plan step, because it also serves Planning. It needs the
-   owner's choice.
-2. **Q2, recognizing claims without a judge model.**
-   - The draft proposes a closed list of action claims mapped to audit-log evidence,
-     in English and Arabic, accepting that unlisted phrasings are missed.
-   - Alternatively, a structured answer field where the model lists what it did.
-3. **Q3, the test command.**
-   - Detected from the workspace (pytest config, `tests/`, etc.), declared by the
-     caller, or both.
-   - What happens when none is found.
+1. **What requires action.**
+   - The task contract is the authority: `action_required`, then plan, execution,
+     verification.
+   - The model's plan is not the authority.
+2. **Claim verification.**
+   - Structured claims tied to observable evidence and tool receipts: `file_created`,
+     `file_modified`, `tests_passed`, `committed`, `pushed`, as in §2.3.
+   - Not a closed list of natural-language words.
+   - No observable evidence means no accepted completion claim.
+3. **The test command.** In order of precedence:
+   1. the task or repository contract;
+   2. an explicit command from the caller;
+   3. verified repository configuration;
+   4. constrained discovery as a fallback.
+
+   The model does not invent a test command when one is defined.
 4. **Order.**
-   - The draft proposes three PRs: 2.3 (environment) first, because it changes no
-     acceptance rule; then 2.1; then 2.2.
-   - Each would be measured separately or together, at the owner's choice.
-5. **Budget.** Rejected answers would count against the failure budget
-   (`max_failures=3`). Should the budget change with these controls, or stay as the
-   system's real setting?
-6. **Arabic.** 31 of 37 Arabic no-action answers were not in Arabic. The language guard
-   does not run in the agent loop today. Is that in scope for this ADR or kept
-   separate?
+   1. Environment context.
+   2. Action enforcement.
+   3. Execution.
+   4. Verification.
+
+   Environment context informs; it proves nothing.
+5. **Failure budget.**
+   - It stays at 3 and is not tuned from this benchmark.
+   - §2.4 defines what consumes it and what happens after the third failure.
+6. **Language guard.**
+   - Out of this ADR.
+   - Recorded as a separate finding and dependency only (§3).
+
+## 7. Questions that remain open
+
+These follow from the decisions and are left for acceptance or implementation:
+
+1. **Where the contract comes from outside the benchmark.**
+   - In `pac --agent` a person types a request; there is no task file.
+   - Who sets `action_required` there: the caller, a command-line flag, or a default?
+   - What applies when it is not set?
+2. **How the model states structured claims.**
+   - A field in the final protocol object (for example `{"answer": …, "claims": […]}`)
+     changes the protocol the model is told about, which is a prompt change.
+   - It would be its own reviewed change, made for correctness and not for the score.
+3. **`file_modified` for a file the run created.** Created then edited: is that
+   `file_created` only, or both?
