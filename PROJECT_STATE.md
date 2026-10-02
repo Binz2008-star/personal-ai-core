@@ -633,6 +633,8 @@ claim written in one place with nothing that notices it going stale.
   #170 9c77078  fix(bench): the task digest orders fixture files by their
                relative path as text
   #171 2ac9994  test: the state-script test reads and writes UTF-8 on both ends
+  #172 6d4fe15  feat(agent): caller-owned AgentTaskContract and the
+               [action_required=...] CLI prefix
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1098,7 +1100,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at 2ac9994)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at 6d4fe15)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1117,6 +1119,15 @@ WHERE THINGS STAND (2026-10-02)
     only "action not required" (tools stay under RiskPolicy); AgentLoop.run
     still takes a plain string (bench runner, tests), recorded as "no
     contract" in AGENT_* payloads. The contract is RECORDED, NOT ENFORCED.
+  - Authority for #172: the owner's explicit decisions of 2026-10-02 (the
+    caller-owned contract, the CLI syntax, decisions 1-3, "start
+    implementation"), given separately from ADR-023. ADR-023 itself is still
+    PROPOSED / NOT ACCEPTED: #172 built only its first design decision (the
+    task contract sets action_required) as a recorded value, none of its
+    controls. A session that reads #167 alone will see the contract as
+    unimplemented; it is implemented, and #167 should say so when it is next
+    revised (owner's call). Codex built #172 in its own worktree; the lead
+    reviewed it, fixed a pyright error (f780498) and opened the PR.
   - Not authorized: any enforcement of action_required in the loop or any
     other ADR-023 control. Do not start one from ADR-023, from #167, or from
     anything below. A change to #167 is reviewed against ADR-023 and the
@@ -1176,6 +1187,20 @@ WHERE THINGS STAND (2026-10-02)
     sets PYTHONIOENCODING=utf-8 with a cp1252 locale; #171 made the one test
     that broke on it independent of that. One session per worktree: Codex
     works in personal-ai-core-codex, never in the shared checkout.
+  - Open, not ours: #162 (docs/brand logo assets, branch ccr-4d137493-sqp6vv)
+    is based on cf629a2 and its suite and suite-windows checks fail; cause not
+    yet diagnosed. It needs main merged in and a fresh CI run before any
+    review; the owner decides whether it goes ahead.
+  - Next, for the owner to decide (nothing is in progress):
+      1. ADR-023 (#167): accept, amend (record #172 as built), or keep a
+         draft. Any enforcement of action_required waits for this.
+      2. If accepted: its first control, enforcing action_required=true in
+         the loop, aimed at the largest failure class (52 of 111 agent
+         failures answered without executing anything).
+      3. Then measure: the same 240 runs (#165 setup, fresh worktree on the
+         rig), compared by failure class with the baseline, never by a
+         target score. The bench runner passes plain strings, so #172 alone
+         does not change what the benchmark measures.
   - Rules learned today: update this header in any PR that finds it 3 merges
     behind (main went red after #163 when it slipped to 4); a scorer fix is
     the smallest rule that fixes the defect, proved by re-judging the same
