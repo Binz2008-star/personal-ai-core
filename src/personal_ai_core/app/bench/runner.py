@@ -258,8 +258,12 @@ def _task_digest(task: Task) -> str:
     for root in (task.fixture, task.corpus):
         if root is None:
             continue
-        for path in sorted(p for p in root.rglob("*") if p.is_file()):
-            digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        # Ordered by the relative path as text: Path ordering ignores letter case
+        # on Windows only, which put check_settings.py before README.md there and
+        # gave file-create-settings another digest than on Linux.
+        files = sorted((p.relative_to(root).as_posix(), p) for p in root.rglob("*") if p.is_file())
+        for relative, path in files:
+            digest.update(relative.encode("utf-8"))
             digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     return digest.hexdigest()[:16]
 
