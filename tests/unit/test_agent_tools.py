@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+import time
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +12,7 @@ from personal_ai_core.agent import tools as tools_module
 from personal_ai_core.agent.commands import CommandRejected
 from personal_ai_core.agent.sandbox import SandboxError, Workspace
 from personal_ai_core.agent.tools import (
+    Shell,
     MAX_OUTPUT_CHARS,
     ListDirectory,
     ReadFile,
@@ -164,10 +168,10 @@ def test_a_command_runs_without_a_shell_in_the_workspace(ws, monkeypatch):
     seen = {}
 
     def fake_run(args, **kwargs):
-        seen.update(args=args, **kwargs)
-        return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
+        seen.update(args=args, shell=False, **kwargs)
+        return 0, "ok\n", ""
 
-    monkeypatch.setattr(tools_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(tools_module, "run_bounded", fake_run)
     result = RunCommand(ws).run({"command": "git status"})
     assert result.ok and result.output == "ok\n"
     assert seen["args"] == ["git", "status"]
@@ -182,20 +186,16 @@ def test_the_command_environment_is_built_from_nothing(ws, monkeypatch):
 
     def fake_run(args, **kwargs):
         seen.update(kwargs)
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        return 0, "", ""
 
-    monkeypatch.setattr(tools_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(tools_module, "run_bounded", fake_run)
     RunCommand(ws).run({"command": "git status"})
     assert "OPENAI_API_KEY" not in seen["env"]
     assert seen["env"]["HOME"] == str(ws.root)
 
 
 def test_a_failing_command_is_a_failed_result_with_its_output(ws, monkeypatch):
-    monkeypatch.setattr(
-        tools_module.subprocess,
-        "run",
-        lambda args, **k: subprocess.CompletedProcess(args, 128, stdout="", stderr="not a repo"),
-    )
+    monkeypatch.setattr(tools_module, "run_bounded", lambda args, **k: (128, "", "not a repo"))
     result = RunCommand(ws).run({"command": "git status"})
     assert not result.ok and result.error == "exit code 128" and "not a repo" in result.output
 
@@ -204,7 +204,7 @@ def test_a_timeout_is_reported(ws, monkeypatch):
     def slow(args, **kwargs):
         raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
-    monkeypatch.setattr(tools_module.subprocess, "run", slow)
+    monkeypatch.setattr(tools_module, "run_bounded", slow)
     result = RunCommand(ws, timeout_seconds=3).run({"command": "git log"})
     assert not result.ok and result.error == "timed out after 3s"
 
@@ -256,3 +256,94 @@ def test_find_files_skips_git_and_never_leaves_the_workspace(ws):
 
 def test_search_text_says_it_searches_contents_not_names(ws):
     assert "find_files" in SearchText(ws).spec.description
+
+
+
+# --- no input, and a timeout that ends the whole tree (rig, 2026-10-02) -------------
+
+
+def _run_with_open_stdin(ws, command: str, timeout_seconds: int) -> subprocess.CompletedProcess:
+    """Run the Shell tool in a child whose own stdin is a pipe kept open, as the
+    agent's is in a terminal. Without that, an inherited stdin may already be at
+    end-of-file and the test could not tell a closed stdin from an open one."""
+    code = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from personal_ai_core.agent.sandbox import Workspace\n"
+        "from personal_ai_core.agent.tools import Shell\n"
+        f"r = Shell(Workspace(Path({str(ws.root)!r})), timeout_seconds={timeout_seconds})"
+        ".run({'command': sys.argv[1]})\n"
+        "print('OK' if r.ok else 'FAIL', r.error)\n"
+    )
+    import os
+
+    # A raw pipe, not stdin=PIPE: communicate() would close a PIPE and hand the
+    # child end-of-file, which is exactly what is under test. The write end
+    # stays open here until the child is done.
+    read_end, write_end = os.pipe()
+    try:
+        child = subprocess.Popen(
+            [sys.executable, "-c", code, command], stdin=read_end, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True,
+            env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")},
+        )
+        os.close(read_end)
+        try:
+            out, err = child.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate()
+            pytest.fail(f"the command waited for input: {command}")
+    finally:
+        os.close(write_end)
+    return subprocess.CompletedProcess(child.args, child.returncode, out, err)
+
+
+def test_a_command_gets_no_input_so_a_debugger_cannot_wait_for_it(ws):
+    """The baseline hung for 26 minutes on `pytest --pdb`: the debugger waited for
+    input. With stdin closed it reads end-of-file and the command ends."""
+    (ws.root / "test_fails.py").write_text("def test_x():\n    assert False\n", encoding="utf-8")
+    done = _run_with_open_stdin(
+        ws, f'"{sys.executable}" -m pytest -q -p no:cacheprovider --pdb test_fails.py', 50)
+    assert done.stdout.startswith("FAIL exit code"), (done.stdout, done.stderr)
+
+
+def test_a_prompt_reads_end_of_file(ws):
+    done = _run_with_open_stdin(ws, f'"{sys.executable}" -c "input()"', 50)
+    assert done.stdout.startswith("FAIL exit code"), (done.stdout, done.stderr)
+
+
+def _alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        listed = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                                capture_output=True, text=True).stdout
+        return str(pid) in listed
+    import os
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_a_timeout_kills_the_grandchild_too(ws):
+    """Killing only the shell left the python grandchild holding the pipes, and
+    the call never returned. The whole tree goes: the call returns, and the
+    grandchild is no longer running."""
+    script = ws.root / "spawn.py"
+    script.write_text(
+        "import subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+        "open('grandchild.pid', 'w').write(str(child.pid))\n"
+        "child.wait()\n",
+        encoding="utf-8")
+    started = time.monotonic()
+    result = Shell(ws, timeout_seconds=3).run({"command": f'"{sys.executable}" spawn.py'})
+    assert time.monotonic() - started < 45
+    assert not result.ok and result.error == "timed out after 3s"
+    pid = int((ws.root / "grandchild.pid").read_text())
+    deadline = time.monotonic() + 10
+    while _alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert not _alive(pid), "the grandchild outlived the timeout"

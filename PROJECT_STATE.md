@@ -618,6 +618,8 @@ claim written in one place with nothing that notices it going stale.
   #160 3b2af21  feat(bench): ADR-022 unit 2 -- the benchmark runner
   #161 5bc81a1  feat(bench): ADR-022 unit 3 -- the v0 task set, 24 tasks in two
                languages
+  #163 cf629a2  fix(bench): what the rig smoke run found, fixed before the
+               baseline
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1083,7 +1085,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at 8fcfa88)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at cf629a2)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1133,7 +1135,12 @@ ADR-020 (evaluating a candidate model) -- where it stands
     knowledge (three corpora, one Arabic; three declines; one
     cross-document) (#161); smoke run on the rig 2026-10-02 (4 runs, clean;
     found: citation never asked for -> informational, python -m mypy refused
-    -> allowed, approval wording on steps); (4) the 240-run baseline on the rig. Before unit 4 runs, show the owner the allowlist
+    -> allowed, approval wording on steps (#163)); first baseline attempt at
+    cf629a2 stopped at 98/240: the model ran `pytest --pdb`, the debugger
+    waited for input, and the shell timeout killed only cmd.exe -- fixed in
+    the agent's tools (stdin closed, process tree killed); the partial file
+    is discarded, the 240 are re-run on the fixed commit. (4) the 240-run
+    baseline on the rig. Before unit 4 runs, show the owner the allowlist
     (`policy.describe()`). After the baseline: STOP and report the gaps; the
     owner picks the 2-3 biggest failure causes to work on.
   - Owner's order after the baseline: planning + execute/test + verification,
