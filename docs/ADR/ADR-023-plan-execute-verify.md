@@ -146,10 +146,17 @@ the proposed order of implementation (§6, decision 4):
 Environment context is information the model works with. It is never evidence that
 anything succeeded.
 
+**Each control is independently measurable.** Each can be switched on alone and
+recorded in the run record, so the benchmark can attribute a change to one control.
+
 ### 2.1 Environment context
 
 At the start of the loop, code (not the model) gathers authoritative facts about where
-the model is working and states them to it:
+the model is working and states them to it. The context has a **bounded budget**: a
+fixed maximum size, recorded per run, so it cannot crowd out the task on an 8192-token
+window. The figure is set at implementation, by measurement.
+
+The facts given:
 
 - operating system and shell, and what that shell does with quotes and wildcards;
 - the project's language or runtime, as found in the workspace;
@@ -160,11 +167,15 @@ the model is working and states them to it:
   3. verified repository configuration (for example a pytest configuration that is
      present and parses);
   4. constrained discovery, only as a fallback (for example a `tests/` directory with
-     pytest-style files);
+     pytest-style files). Discovery never overrides a command from 1-3;
 - the command tools and what each accepts.
 
 When a supported test command is known, the model does not choose another. A test run
 that counts as verification (§2.3) is a run of that command.
+
+- **Verification required, no authorized test command:** the agent must not claim
+  `tests_passed`, and no such claim can be accepted.
+- **A task that needs no test is not blocked** merely because no test command exists.
 
 ### 2.2 Action enforcement: no action, no completion
 
@@ -173,12 +184,18 @@ model (§6, decision 1):
 
     task contract -> action_required -> agent plan -> execution -> verification
 
-- **The task contract** states `action_required` and, where it applies, the evidence
-  that completes the task. The model may produce a plan, but its own statement that a
-  task does or does not need action decides nothing.
-- **When `action_required` is true** and no tool call has executed, a final answer is
-  not accepted as completion. The model receives a protocol message saying so. That
-  turn consumes one failure (§2.4).
+- **The task contract, or task mode,** states `action_required` and, where it applies,
+  the evidence that completes the task.
+- **The model's plan is a declaration, not the authority.** Its statement that a task
+  does or does not need action decides nothing.
+- **When `action_required` is true:**
+  - "no action needed" cannot satisfy the task;
+  - a final answer with no executed tool call is not accepted as completion;
+  - the model receives a protocol message saying so, and that turn consumes one failure
+    from the global budget (§2.4).
+- **When `action_required` is false,** a completion with no action may be accepted, but
+  only with a recorded reason: an event in the run record stating why no action was
+  taken.
 - **In the benchmark,** each task file is the contract.
 
 ### 2.3 Verification: no observable evidence, no accepted completion claim
@@ -199,9 +216,9 @@ evidence from a tool receipt or from the workspace:
 - **Rule:** no observable evidence means no accepted completion claim.
 - **An unsupported claim** is returned to the model with what the evidence shows, and
   consumes one failure (§2.4). It is not shown to the user as fact.
-- **Free-text wording is not the mechanism.** A phrase list may later be used only to
-  report an answer that asserts a completion without a structured claim. It never
-  accepts anything.
+- **Free-text wording is not the mechanism.** The lexical completion-phrase list (§1.2)
+  is telemetry only: it reports an answer that asserts a completion without a structured
+  claim. It is never the completion gate, and never accepts or rejects anything.
 - **For a project change that has a supported test command,** completion needs the full
   sequence:
   1. modify;
@@ -212,8 +229,15 @@ evidence from a tool receipt or from the workspace:
 
 ### 2.4 The failure budget
 
-The budget stays at **3 failures** (and 12 actions). It is not tuned from this
-benchmark (§6, decision 5). This is what consumes it.
+The **global** budget stays at exactly **3 failures** (and 12 actions). It is not tuned
+from this benchmark (§6, decision 5).
+
+- Every failure below draws on that one budget, whichever control caused it.
+- Per-control counters may exist for telemetry and diagnosis. They are **not** extra
+  retry budgets: two action rejections, two evidence rejections and two environment
+  failures do not make six tries. The third failure of any kind stops the run.
+
+What consumes the budget:
 
 **Today, in the code (`agent/recovery.py`, `agent/loop.py`), one failure is:**
 
@@ -259,7 +283,8 @@ context of §2.1.
   makes the loop correct for any task; the benchmark only measures whether it did.
 - No LoRA, fine-tuning or training.
 - No Neon, pgvector, migration, schema or production database change.
-- Output-language policy is not part of this ADR (§6, decision 6). The language guard
+- Output-language policy is not part of this ADR (§6, decision 6). It is a follow-up
+  under ADR-019/ADR-021, after the three controls here are measured. The language guard
   does not run in the agent loop today, and 31 of the 37 Arabic no-action answers
   contained no Arabic script. That is recorded as a separate finding and a dependency
   for whoever decides the agent loop's language behaviour. It is not a control here.
@@ -302,6 +327,16 @@ one thing.
 | Task success | the existing per-task success (all deciding checks pass) |
 | Regression rate | tasks, including knowledge tasks, whose success rate falls against the baseline |
 | False rejection rate | answers the new controls rejected although the task's checks would have passed. Each rejection is recorded so this is countable |
+| Failure-class transitions | for each attempt, its class (§1.2) on each side, so movement between classes is visible |
+| Global budget exhaustion | share of attempts stopped by the third failure, and which controls' rejections consumed it |
+
+**Class 1 failures may move instead of disappearing.**
+- An agent stopped from answering without action may act badly (Class 2), or reach for
+  wrong commands (Class 3).
+- It may also exhaust the budget on rejections, so it ends with no answer where it used
+  to give a wrong one.
+- The transitions table makes this visible. A fall in Class 1 alone is not read as
+  success.
 
 - **No target score is set.** A number to reach invites tuning toward these 24 tasks.
   The reading is per task and per class, as ADR-020's comparisons are.
@@ -313,16 +348,21 @@ one thing.
 
 ## 6. Decisions on the design questions (owner, 2026-10-02)
 
-These decide the design. They do not accept the ADR or authorize implementation.
+These decide the design. They do not accept the ADR or authorize implementation. They
+were confirmed, with the refinements below, in the owner's final review of the same
+day.
 
 1. **What requires action.**
-   - The task contract is the authority: `action_required`, then plan, execution,
-     verification.
-   - The model's plan is not the authority.
+   - The task contract or task mode is the authority: `action_required`, then plan,
+     execution, verification.
+   - The model's plan is a declaration, not the authority.
+   - If `action_required` is true, "no action needed" cannot satisfy the task.
+   - If false, a no-action completion is accepted only with a recorded reason (§2.2).
 2. **Claim verification.**
    - Structured claims tied to observable evidence and tool receipts: `file_created`,
      `file_modified`, `tests_passed`, `committed`, `pushed`, as in §2.3.
-   - Not a closed list of natural-language words.
+   - Not a closed list of natural-language words. The phrase list is telemetry only and
+     is never the gate.
    - No observable evidence means no accepted completion claim.
 3. **The test command.** In order of precedence:
    1. the task or repository contract;
@@ -330,20 +370,27 @@ These decide the design. They do not accept the ADR or authorize implementation.
    3. verified repository configuration;
    4. constrained discovery as a fallback.
 
-   The model does not invent a test command when one is defined.
+   - Discovery never overrides an authorized source.
+   - The model does not invent a test command when one is defined.
+   - If verification is required and no authorized test command exists, the agent must
+     not claim the tests passed.
+   - A task that needs no test is not blocked for lack of a test command.
 4. **Order.**
    1. Environment context.
    2. Action enforcement.
    3. Execution.
    4. Verification.
 
-   Environment context informs; it proves nothing.
+   - Environment context informs and proves nothing. It has a bounded context budget.
+   - Each control is independently measurable.
 5. **Failure budget.**
-   - It stays at 3 and is not tuned from this benchmark.
+   - One global budget of exactly 3, not tuned from this benchmark.
+   - Per-control counters are telemetry, never extra budgets.
    - §2.4 defines what consumes it and what happens after the third failure.
 6. **Language guard.**
-   - Out of this ADR.
-   - Recorded as a separate finding and dependency only (§3).
+   - Out of this ADR, neither implemented nor authorized through it.
+   - A separate ADR-019/ADR-021 follow-up, after the three execution controls have been
+     measured independently (§3).
 
 ## 7. Questions that remain open
 
