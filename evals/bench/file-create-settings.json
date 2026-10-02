@@ -2,6 +2,7 @@
   "id": "file-create-settings",
   "track": "agent",
   "category": "file_operations",
+  "action_required": true,
   "fixture": "fixtures/settings",
   "instruction": {
     "en": "Create config/settings.json containing a JSON object with \"debug\" set to false and \"workers\" set to 4.",

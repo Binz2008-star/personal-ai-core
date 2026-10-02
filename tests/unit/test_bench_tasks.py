@@ -49,6 +49,39 @@ def test_a_malformed_agent_task_is_refused_with_its_reason(mutate, reason):
         parse(data, BENCH)
 
 
+def test_every_shipped_agent_task_states_its_contract_and_no_knowledge_task_does():
+    """ADR-023 §8.3: true for the 12 agent tasks; knowledge tasks do not use the agent loop."""
+    tasks = load(BENCH)
+    agent = [t for t in tasks if t.track == "agent"]
+    assert len(agent) == 12 and all(t.action_required is True for t in agent)
+    assert all(t.action_required is None for t in tasks if t.track == "knowledge")
+
+
+@pytest.mark.parametrize("value", [None, "true", 1, 0, []])
+def test_an_agent_task_must_state_action_required_as_a_boolean(value):
+    data = copy.deepcopy(_shipped("verify-off-by-one"))
+    if value is None:
+        data.pop("action_required")
+    else:
+        data["action_required"] = value
+    with pytest.raises(TaskError, match="states action_required as true or false"):
+        parse(data, BENCH)
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_a_knowledge_task_may_not_state_action_required(value):
+    data = copy.deepcopy(_shipped("kb-leave-carryover"))
+    data["action_required"] = value
+    with pytest.raises(TaskError, match="does not use the agent loop"):
+        parse(data, BENCH)
+
+
+def test_an_agent_task_may_state_false():
+    data = copy.deepcopy(_shipped("verify-off-by-one"))
+    data["action_required"] = False
+    assert parse(data, BENCH).action_required is False
+
+
 def test_a_knowledge_task_may_only_use_answer_checks():
     data = copy.deepcopy(_shipped("kb-leave-carryover"))
     data["checks"].append({"type": "file_exists", "path": "a"})

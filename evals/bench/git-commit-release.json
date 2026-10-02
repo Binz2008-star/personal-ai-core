@@ -2,6 +2,7 @@
   "id": "git-commit-release",
   "track": "agent",
   "category": "git",
+  "action_required": true,
   "fixture": "fixtures/release",
   "git": true,
   "instruction": {

@@ -2,6 +2,7 @@
   "id": "toolsel-count-json",
   "track": "agent",
   "category": "tool_selection",
+  "action_required": true,
   "fixture": "fixtures/json_count",
   "instruction": {
     "en": "How many .json files are in this project, counting every subdirectory?",

@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -258,7 +259,7 @@ def test_a_commit_through_shell_lands_with_the_fixed_identity(tmp_path):
     (tasks / "fixtures" / "repo" / "notes.txt").write_text("draft\n", encoding="utf-8")
     task = {
         "id": "git-commit-notes", "track": "agent", "category": "git",
-        "fixture": "fixtures/repo", "git": True,
+        "action_required": True, "fixture": "fixtures/repo", "git": True,
         "instruction": {"en": "Change notes.txt to say final and commit it with the message "
                               "finalize notes.",
                         "ar": "غيّر notes.txt ليقول final ثم احفظه في git برسالة finalize notes."},
@@ -298,8 +299,8 @@ def test_the_fixture_repository_carries_its_own_identity(tmp_path):
     (tasks / "fixtures" / "repo").mkdir(parents=True)
     (tasks / "fixtures" / "repo" / "a.txt").write_text("x\n", encoding="utf-8")
     (tasks / "t.json").write_text(json.dumps({
-        "id": "t", "track": "agent", "category": "git", "fixture": "fixtures/repo",
-        "git": True, "instruction": {"en": "x", "ar": "س"},
+        "id": "t", "track": "agent", "category": "git", "action_required": True,
+        "fixture": "fixtures/repo", "git": True, "instruction": {"en": "x", "ar": "س"},
         "checks": [{"type": "git_clean"}], "reference": {}}), encoding="utf-8")
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -399,13 +400,66 @@ def test_a_right_fact_without_a_citation_succeeds_and_the_citation_is_its_own_ra
     assert "cites                0/1 (0%)" in output
 
 
+def _tasks_with_contract(tmp_path: Path, task_id: str, action_required: bool) -> Path:
+    """A copy of the shipped tasks in which one agent task states another contract."""
+    tasks = tmp_path / "tasks"
+    shutil.copytree(BENCH, tasks)
+    path = tasks / f"{task_id}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["action_required"] = action_required
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return tasks
+
+
 def test_an_agent_that_answers_without_acting_is_labelled(tmp_path):
+    # Under action_required=false an answer with no tool call is accepted, and the
+    # run says so: the label survives for the tasks the gate does not hold.
+    tasks = _tasks_with_contract(tmp_path, "verify-off-by-one", action_required=False)
     scripts = dict(SOLVES)
     scripts["test_calc.py"] = [_answer("I will look at calc.py and test_calc.py.")]
-    _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
+    _, _, lines = _run(tmp_path / "out", scripts, "--tasks", str(tasks),
+                       "--only", "verify-off-by-one", "--languages", "en")
     run = next(x for x in lines if x["kind"] == "run")
     assert not run["success"] and run["stop"] == "answered"
+    assert run["action_required"] is False and run["action_rejections"] == 0
     assert "answered_without_acting" in run["signals"]
+
+
+def test_an_action_required_task_rejects_an_answer_before_any_tool_call(tmp_path):
+    """ADR-023 §8.3: the runner passes the task file's contract, so the unit 1 gate engages."""
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = [_answer("It looks fine to me.")]
+    code, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
+    run = next(x for x in lines if x["kind"] == "run")
+    assert code == 0
+    assert run["action_required"] is True
+    # Three answers, three rejections, the third failure of the budget stops the run
+    # with no answer; the unit-1 message is the last thing the model was told.
+    assert run["stop"] == "budget" and run["answer"] is None
+    assert run["action_rejections"] == 3
+    assert len(run["model_calls"]) == 3
+    assert "action_rejected" in run["signals"] and "no_answer" in run["signals"]
+    assert "answered_without_acting" not in run["signals"]
+    assert not run["success"]
+
+
+def test_an_action_required_task_that_acts_is_not_rejected(tmp_path):
+    _, _, lines = _run(tmp_path, SOLVES, "--only", "verify-off-by-one", "--languages", "en")
+    run = next(x for x in lines if x["kind"] == "run")
+    assert run["success"] and run["action_required"] is True
+    assert run["action_rejections"] == 0 and "action_rejected" not in run["signals"]
+
+
+def test_a_knowledge_run_has_no_contract_keys(tmp_path):
+    _, _, lines = _run(tmp_path, SOLVES, "--only", "kb-leave-carryover", "--languages", "en")
+    run = next(x for x in lines if x["kind"] == "run")
+    assert run["track"] == "knowledge"
+    assert "action_required" not in run and "action_rejections" not in run
+
+
+def test_the_header_says_a_contract_was_passed(tmp_path):
+    _, _, lines = _run(tmp_path, SOLVES, "--only", "verify-off-by-one", "--languages", "en")
+    assert "AgentTaskContract" in lines[0]["contract"]
 
 
 def test_a_refused_step_carries_the_policy_reason(tmp_path):
@@ -506,3 +560,83 @@ def test_the_task_digest_does_not_depend_on_the_platforms_file_order(tmp_path):
         expected.update(name.encode("utf-8"))
         expected.update(contents[name].replace(b"\r\n", b"\n"))
     assert _task_digest(task) == expected.hexdigest()[:16]
+
+
+# --- ADR-023 §8.3: the contract is part of the task a run measured -------------
+
+
+def _contract_task(tmp_path: Path, action_required: bool | None):
+    from personal_ai_core.app.bench.tasks import Task
+
+    return Task(id="t", track="agent", category="c", instruction={"en": "do"},
+                checks=[], reference={}, base=tmp_path, action_required=action_required)
+
+
+def test_the_contract_is_part_of_the_task_digest(tmp_path):
+    from personal_ai_core.app.bench.runner import _task_digest
+
+    required, optional = _contract_task(tmp_path, True), _contract_task(tmp_path, False)
+    assert _task_digest(required) != _task_digest(optional)
+    # Without the field it is the digest from before the field existed, and a task
+    # that states no contract (a knowledge task) never had a different one.
+    assert _task_digest(required, with_contract=False) == _task_digest(
+        optional, with_contract=False) == _task_digest(_contract_task(tmp_path, None))
+
+
+def test_only_the_contract_changed_the_shipped_tasks_digests():
+    """Against the immutable baseline's header: a knowledge task keeps its digest, and an
+    agent task keeps it once the contract is left out. Nothing else about a task moved."""
+    from personal_ai_core.app.bench.runner import _task_digest
+    from personal_ai_core.app.bench.tasks import load
+
+    raw = (BENCH.parents[1] / "evals" / "results" / "bench" / "bench-20261002T081707Z.jsonl")
+    recorded = json.loads(raw.read_text(encoding="utf-8").splitlines()[0])["tasks"]
+    tasks = {t.id: t for t in load(BENCH)}
+    assert set(recorded) == set(tasks)
+    for task_id, task in tasks.items():
+        if task.track == "knowledge":
+            assert _task_digest(task) == recorded[task_id]["digest"], task_id
+        elif task_id == "file-create-settings":
+            # The baseline header keeps the pre-#170 Windows digest (ADR-022 §10); the
+            # task digests to 96fce7417d36a103 on every platform now.
+            assert _task_digest(task, with_contract=False) == "96fce7417d36a103"
+        else:
+            assert _task_digest(task, with_contract=False) == recorded[task_id]["digest"], task_id
+            assert _task_digest(task) != recorded[task_id]["digest"], task_id
+
+
+def test_a_file_from_before_the_contract_is_not_resumed(tmp_path):
+    """The baseline ran without a contract. Resuming it would mix two experiments."""
+    from personal_ai_core.app.bench.runner import _task_digest
+    from personal_ai_core.app.bench.tasks import load
+
+    _run(tmp_path, SOLVES, "--only", "verify-off-by-one", "--languages", "en")
+    path = next(tmp_path.glob("bench-*.jsonl"))
+    lines = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()]
+    task = next(t for t in load(BENCH) if t.id == "verify-off-by-one")
+    lines[0]["tasks"]["verify-off-by-one"]["digest"] = _task_digest(task, with_contract=False)
+    path.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines),
+                    encoding="utf-8")
+    out = io.StringIO()
+    code = main(["--tasks", str(BENCH), "--runs", "1", "--only", "verify-off-by-one",
+                 "--languages", "en", "--resume", str(path)],
+                transport=ScriptedModel(SOLVES), stdout=out, env={}, commit="abc1234",
+                probe=lambda url, body=None: {"models": []})
+    assert code == 2 and "tasks differs" in out.getvalue()
+
+
+def test_rescore_accepts_a_file_written_before_the_contract(tmp_path):
+    """The contract changes no check, so a file that recorded the older digest is still
+    the same task for the answer checks `rescore` re-judges (the baseline depends on it)."""
+    from personal_ai_core.app.bench.runner import _task_digest
+    from personal_ai_core.app.bench.tasks import load
+
+    path = _v1_file(tmp_path, "You can carry over 5 days (annual-leave.md).")
+    lines = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()]
+    answer_task = next(t for t in load(BENCH) if t.id == "tests-count-failures")
+    lines[0]["tasks"] = {"tests-count-failures": {
+        "track": "agent", "category": answer_task.category,
+        "digest": _task_digest(answer_task, with_contract=False)}}
+    path.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines),
+                    encoding="utf-8")
+    assert main(["--tasks", str(BENCH), "--rescore", str(path)], stdout=io.StringIO()) == 0

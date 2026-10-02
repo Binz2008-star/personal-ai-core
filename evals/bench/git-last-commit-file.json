@@ -2,6 +2,7 @@
   "id": "git-last-commit-file",
   "track": "agent",
   "category": "git",
+  "action_required": true,
   "fixture": "fixtures/history",
   "git": true,
   "git_commits": [

@@ -2,6 +2,7 @@
   "id": "multistep-change-port",
   "track": "agent",
   "category": "multi_step",
+  "action_required": true,
   "fixture": "fixtures/port",
   "instruction": {
     "en": "Find the configuration file that sets the server port, change the port to 8081, then run check.py and tell me which file you changed.",
