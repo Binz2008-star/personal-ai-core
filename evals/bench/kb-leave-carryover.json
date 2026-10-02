@@ -9,8 +9,14 @@
   },
   "checks": [
     {
-      "type": "answer_number",
-      "value": 5
+      "type": "answer_contains",
+      "any_of": [
+        "5",
+        "٥",
+        "five",
+        "خمسة",
+        "خمس"
+      ]
     },
     {
       "type": "cites",
@@ -20,7 +26,7 @@
   "reference": {
     "answer": {
       "en": "Up to 5 unused days carry over; the rest lapse on 31 March (annual-leave.md).",
-      "ar": "يمكنك ترحيل ٥ أيام كحد أقصى، والباقي يسقط في 31 مارس (annual-leave.md)."
+      "ar": "يمكنك ترحيل خمسة أيام كحد أقصى، والباقي يسقط في 31 مارس (annual-leave.md)."
     }
   }
 }

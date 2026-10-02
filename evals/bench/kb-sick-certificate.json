@@ -1,0 +1,32 @@
+{
+  "id": "kb-sick-certificate",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/leave_policy",
+  "instruction": {
+    "en": "After how many consecutive days of sick leave do I need a medical certificate?",
+    "ar": "بعد كم يوماً متتالياً من الإجازة المرضية أحتاج إلى شهادة طبية؟"
+  },
+  "checks": [
+    {
+      "type": "answer_contains",
+      "any_of": [
+        "3",
+        "٣",
+        "three",
+        "ثلاثة",
+        "ثلاث"
+      ]
+    },
+    {
+      "type": "cites",
+      "document": "sick-leave.md"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "A certificate is needed for absences longer than 3 consecutive days (sick-leave.md).",
+      "ar": "تلزم شهادة طبية لأي غياب يزيد على ثلاثة أيام متتالية (sick-leave.md)."
+    }
+  }
+}

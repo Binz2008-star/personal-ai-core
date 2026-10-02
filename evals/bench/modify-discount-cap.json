@@ -1,0 +1,33 @@
+{
+  "id": "modify-discount-cap",
+  "track": "agent",
+  "category": "code_modification",
+  "fixture": "fixtures/discount",
+  "instruction": {
+    "en": "Change price_after_discount in pricing.py so a discount never exceeds 50%: any larger percentage counts as 50. Keep the rest of its behaviour. test_pricing.py describes it; do not change the tests.",
+    "ar": "عدّل الدالة price_after_discount في pricing.py بحيث لا يتجاوز الخصم 50%: أي نسبة أكبر تُحسب 50. حافظ على بقية سلوكها. الملف test_pricing.py يصفها؛ لا تعدّل الاختبارات."
+  },
+  "checks": [
+    {
+      "type": "command_passes",
+      "argv": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ]
+    },
+    {
+      "type": "file_equals",
+      "path": "test_pricing.py",
+      "text": "from pricing import price_after_discount\n\n\ndef test_ten_percent():\n    assert price_after_discount(200, 10) == 180\n\n\ndef test_no_discount():\n    assert price_after_discount(99.5, 0) == 99.5\n\n\ndef test_discount_is_capped_at_fifty_percent():\n    assert price_after_discount(100, 80) == 50\n"
+    }
+  ],
+  "reference": {
+    "writes": {
+      "pricing.py": "\"\"\"Prices.\"\"\"\n\n\ndef price_after_discount(price, percent):\n    \"\"\"The price after a percentage discount.\"\"\"\n    percent = min(percent, 50)\n    return round(price * (100 - percent) / 100, 2)\n"
+    }
+  }
+}

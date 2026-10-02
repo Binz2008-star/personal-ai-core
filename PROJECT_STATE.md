@@ -615,6 +615,7 @@ claim written in one place with nothing that notices it going stale.
   #158 72133ab  docs(adr): ADR-022 (PROPOSED) -- a capability benchmark
   #159 57bc96b  feat(bench): ADR-022 unit 1 -- task format, mechanical checks,
                containment policy
+  #160 3b2af21  feat(bench): ADR-022 unit 2 -- the benchmark runner
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1125,8 +1126,10 @@ ADR-020 (evaluating a candidate model) -- where it stands
     reach the network; never describe it as isolated. Units: (1) format,
     checks, policy (#159); (2) runner -- `python -m
     personal_ai_core.app.bench`, JSONL written per run, --resume, --report,
-    --show-policy; (3) the 24 tasks; (4) the 240-run
-    baseline on the rig. Before unit 4 runs, show the owner the allowlist
+    --show-policy (#160); (3) the 24 tasks: 12 agent (every agent category;
+    each proved solvable through the real tools under the policy) and 12
+    knowledge (three corpora, one Arabic; three declines; one
+    cross-document); (4) the 240-run baseline on the rig. Before unit 4 runs, show the owner the allowlist
     (`policy.describe()`). After the baseline: STOP and report the gaps; the
     owner picks the 2-3 biggest failure causes to work on.
   - Owner's order after the baseline: planning + execute/test + verification,
@@ -1157,6 +1160,10 @@ Since the last handoff, also merged
     run is refused; the GPU percentage prints exactly.
 
 The rig (owner's Windows PC, GTX 1060 6GB)
+  - One worktree per session (a pull mid-review and a test run during an
+    evaluation, both 2026-10-02, came from sharing C:\Users\loyal\personal-ai-core).
+    Remote Control runs with --spawn=worktree. Measure from a clean tree:
+    the untracked evals/comparisons/ copy of #154 is to be deleted first.
   - Ollama: manual `ollama serve` at 8192 context on Vulkan (CUDA hidden from
     the server; the CUDA backend crashes on driver 560.94), about 85% GPU,
     60-100 s per contract run. The desktop app relaunches itself and loads

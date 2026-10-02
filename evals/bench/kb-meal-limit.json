@@ -1,0 +1,26 @@
+{
+  "id": "kb-meal-limit",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/arabic_policies",
+  "instruction": {
+    "en": "What is the maximum reimbursement for a single work meal?",
+    "ar": "ما الحد الأقصى للتعويض عن وجبة عمل واحدة؟"
+  },
+  "checks": [
+    {
+      "type": "answer_number",
+      "value": 150
+    },
+    {
+      "type": "cites",
+      "document": "expenses-ar.md"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "At most 150 dirhams per meal (expenses-ar.md).",
+      "ar": "بحد أقصى 150 درهماً للوجبة الواحدة (expenses-ar.md)."
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "kb-deploy-day",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/project_notes",
+  "instruction": {
+    "en": "On which day of the week are production deployments made?",
+    "ar": "في أي يوم من أيام الأسبوع تتم عمليات النشر إلى بيئة الإنتاج؟"
+  },
+  "checks": [
+    {
+      "type": "answer_contains",
+      "any_of": [
+        "Thursday",
+        "خميس"
+      ]
+    },
+    {
+      "type": "cites",
+      "document": "deployment.md"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "Every Thursday at 10:00 GST (deployment.md).",
+      "ar": "كل يوم خميس الساعة 10:00 بتوقيت الخليج (deployment.md)."
+    }
+  }
+}

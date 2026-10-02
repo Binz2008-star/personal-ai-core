@@ -1,0 +1,35 @@
+{
+  "id": "kb-remote-days",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/leave_policy",
+  "instruction": {
+    "en": "How many days a week can I work remotely?",
+    "ar": "كم يوماً في الأسبوع يمكنني العمل عن بُعد؟"
+  },
+  "checks": [
+    {
+      "type": "answer_contains",
+      "any_of": [
+        "2 days",
+        "two days",
+        "2 remote",
+        "٢",
+        "يومين",
+        "يومان",
+        "2 أيام",
+        "2 يوم"
+      ]
+    },
+    {
+      "type": "cites",
+      "document": "remote-work.md"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "Up to 2 days a week, with your manager's agreement (remote-work.md).",
+      "ar": "حتى يومين في الأسبوع بموافقة المدير (remote-work.md)."
+    }
+  }
+}

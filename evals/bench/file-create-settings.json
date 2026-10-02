@@ -1,0 +1,29 @@
+{
+  "id": "file-create-settings",
+  "track": "agent",
+  "category": "file_operations",
+  "fixture": "fixtures/settings",
+  "instruction": {
+    "en": "Create config/settings.json containing a JSON object with \"debug\" set to false and \"workers\" set to 4.",
+    "ar": "أنشئ الملف config/settings.json وفيه كائن JSON تكون فيه قيمة \"debug\" هي false وقيمة \"workers\" هي 4."
+  },
+  "checks": [
+    {
+      "type": "command_passes",
+      "argv": [
+        "python",
+        "check_settings.py"
+      ]
+    },
+    {
+      "type": "file_equals",
+      "path": "check_settings.py",
+      "text": "import json\nfrom pathlib import Path\n\ndata = json.loads(Path(\"config/settings.json\").read_text(encoding=\"utf-8\"))\nassert data == {\"debug\": False, \"workers\": 4}, data\nprint(\"settings ok\")\n"
+    }
+  ],
+  "reference": {
+    "writes": {
+      "config/settings.json": "{\"debug\": false, \"workers\": 4}\n"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "id": "git-last-commit-file",
+  "track": "agent",
+  "category": "git",
+  "fixture": "fixtures/history",
+  "git": true,
+  "git_commits": [
+    {
+      "message": "Add contributing guide",
+      "writes": {
+        "CONTRIBUTING.md": "# Contributing\n\nOpen an issue first.\n"
+      }
+    },
+    {
+      "message": "Fix typo in installation steps",
+      "writes": {
+        "README.md": "# Library\n\nInstall with: pip install library\n"
+      }
+    }
+  ],
+  "instruction": {
+    "en": "Which file did the most recent commit in this repository change? Give the file name.",
+    "ar": "ما الملف الذي غيّره آخر commit في هذا المستودع؟ اذكر اسم الملف."
+  },
+  "checks": [
+    {
+      "type": "answer_contains",
+      "any_of": [
+        "README.md"
+      ]
+    },
+    {
+      "type": "git_clean"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "The last commit changed README.md.",
+      "ar": "آخر commit غيّر الملف README.md."
+    }
+  }
+}

@@ -74,7 +74,9 @@ SOLVES = {
 
 def _run(tmp_path: Path, scripts=SOLVES, *argv: str) -> tuple[int, str, list[dict]]:
     out = io.StringIO()
-    code = main(["--tasks", str(BENCH), "--out", str(tmp_path), "--runs", "1", *argv],
+    # The two original tasks: the scripts below are written for them.
+    code = main(["--tasks", str(BENCH), "--out", str(tmp_path), "--runs", "1",
+                 "--only", "verify-off-by-one", "kb-leave-carryover", *argv],
                 transport=ScriptedModel(scripts), stdout=out, env={}, now=lambda: FIXED,
                 commit="abc1234", probe=lambda url, body=None: {"models": []})
     files = sorted(tmp_path.glob("bench-*.jsonl"))
@@ -101,7 +103,7 @@ def test_a_solved_task_passes_and_a_wrong_answer_fails(tmp_path):
         assert solved["signals"] == []
         wrong = by[("kb-leave-carryover", language)]
         assert not wrong["success"]
-        assert "check:answer_number" in wrong["signals"]
+        assert "check:answer_contains" in wrong["signals"]
     assert "overall: 2/4 (50%)" in output
 
 
@@ -207,7 +209,8 @@ def test_an_unproved_task_stops_the_benchmark_before_it_starts(tmp_path):
     data["reference"]["writes"] = {}
     (tasks / "verify-off-by-one.json").write_text(json.dumps(data), encoding="utf-8")
     out = io.StringIO()
-    code = main(["--tasks", str(tasks), "--out", str(tmp_path / "out")],
+    code = main(["--tasks", str(tasks), "--out", str(tmp_path / "out"),
+                 "--only", "verify-off-by-one"],
                 transport=ScriptedModel(SOLVES), stdout=out, env={}, commit="x")
     assert code == 2 and "not admitted: verify-off-by-one" in out.getvalue()
     assert not (tmp_path / "out").exists()
@@ -300,3 +303,83 @@ def test_the_fixture_repository_carries_its_own_identity(tmp_path):
     name = subprocess.run(["git", "config", "--local", "user.name"], cwd=workspace,
                           capture_output=True, text=True).stdout.strip()
     assert name == "bench"
+
+
+def _fixture_text(*parts: str) -> str:
+    return (BENCH / "fixtures" / Path(*parts)).read_text(encoding="utf-8")
+
+
+PYTEST_SHELL = _tool("shell", command="python -m pytest -q -p no:cacheprovider")
+# One scripted solve per agent task, through the agent's own tools under the
+# benchmark policy. If a task needs a tool or command the policy refuses, or
+# the tools cannot reach what the checks look at, it fails here, not on the rig.
+AGENT_SOLVES = {
+    "Create config/settings.json": [
+        _tool("write_file", path="config/settings.json",
+              content='{"debug": false, "workers": 4}\n'),
+        _answer("Created.")],
+    "Add a function slugify": [
+        _tool("write_file", path="text_utils.py",
+              content=_fixture_text("slugify", "text_utils.py").replace(
+                  '"""Text helpers."""\n', '"""Text helpers."""\nimport re\n')
+              + '\n\ndef slugify(text):\n'
+                '    return "-".join(re.findall(r"[a-z0-9]+", text.lower()))\n'),
+        _answer("Added.")],
+    "Change price_after_discount": [
+        _tool("write_file", path="pricing.py",
+              content=_fixture_text("discount", "pricing.py").replace(
+                  "    return round(", "    percent = min(percent, 50)\n    return round(")),
+        _answer("Capped.")],
+    "test_words.py fail": [
+        _tool("write_file", path="words.py",
+              content=_fixture_text("word_count", "words.py").replace(
+                  'text.split(" ")', "text.split()")),
+        _answer("Fixed.")],
+    "how many of them fail": [PYTEST_SHELL, _answer("3 of the 8 tests fail.")],
+    "total_sales in report.py": [
+        _tool("write_file", path="report.py",
+              content=_fixture_text("sales", "report.py").replace("rows[:-1]", "rows")),
+        PYTEST_SHELL, _answer("Fixed; the tests pass.")],
+    "Change VERSION": [
+        _tool("write_file", path="VERSION", content="1.5.0\n"),
+        _tool("shell", command="git add -A"),
+        _tool("shell", command='git commit -q -m "Release 1.5.0"'),
+        _answer("Committed.")],
+    "most recent commit": [
+        _tool("run_command", command="git show --stat --format=%s HEAD"),
+        _answer("README.md")],
+    "sets the server port": [
+        _tool("search_text", text="port"),
+        _tool("write_file", path="config/app.ini",
+              content="[server]\nhost = 127.0.0.1\nport = 8081\n"),
+        _tool("shell", command="python check.py"),
+        _answer("I changed config/app.ini.")],
+    "How many .json files": [_tool("find_files", pattern="*.json"),
+                             _answer("There are 4 .json files.")],
+    "Fixed the date parser": [
+        _tool("read_file", path="docs/CHANGELOG.md"),
+        _tool("find_files", pattern="CHANGELOG*"),
+        _tool("write_file", path="CHANGELOG.md",
+              content="# Changelog\n\n## 2.0.0\n- New export format.\n"
+                      "- Fixed the date parser.\n"),
+        _answer("Added.")],
+    "test_calc.py": SOLVES["test_calc.py"],
+}
+
+
+def test_every_agent_task_is_solvable_through_the_tools_under_the_policy(tmp_path):
+    from personal_ai_core.app.bench.tasks import load
+
+    agent_ids = [t.id for t in load(BENCH) if t.track == "agent"]
+    out = io.StringIO()
+    code = main(["--tasks", str(BENCH), "--out", str(tmp_path), "--runs", "1",
+                 "--languages", "en", "--only", *agent_ids],
+                transport=ScriptedModel(AGENT_SOLVES), stdout=out, env={}, now=lambda: FIXED,
+                commit="abc1234", probe=lambda url, body=None: {"models": []})
+    assert code == 0, out.getvalue()
+    runs = [json.loads(x) for x in next(tmp_path.glob("*.jsonl")).read_text(
+        encoding="utf-8").splitlines() if json.loads(x)["kind"] == "run"]
+    failed = {r["task"]: (r["checks"], r["approvals"], [s.get("error") for s in r["steps"]])
+              for r in runs if not r["success"]}
+    assert not failed, failed
+    assert len(runs) == 12

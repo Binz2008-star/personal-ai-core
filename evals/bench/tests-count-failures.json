@@ -1,0 +1,41 @@
+{
+  "id": "tests-count-failures",
+  "track": "agent",
+  "category": "test_execution",
+  "fixture": "fixtures/inventory",
+  "instruction": {
+    "en": "Run the tests in this project and tell me how many of them fail. Do not change any file.",
+    "ar": "شغّل الاختبارات في هذا المشروع وأخبرني كم اختباراً منها يفشل. لا تعدّل أي ملف."
+  },
+  "checks": [
+    {
+      "type": "answer_number",
+      "value": 3
+    },
+    {
+      "type": "file_equals",
+      "path": "inventory.py",
+      "text": "\"\"\"Stock keeping.\"\"\"\n\n\ndef restock(stock, item, amount):\n    stock[item] = stock.get(item, 0) + amount\n    return stock\n\n\ndef remove(stock, item, amount):\n    stock[item] = stock.get(item, 0) - amount\n    return stock\n\n\ndef total_items(stock):\n    return sum(stock.values())\n\n\ndef low_stock(stock, threshold):\n    return sorted(item for item, count in stock.items() if count < threshold)\n"
+    },
+    {
+      "type": "file_equals",
+      "path": "test_inventory.py",
+      "text": "from inventory import low_stock, remove, restock, total_items\n\n\ndef test_restock_a_new_item():\n    assert restock({}, \"pen\", 5) == {\"pen\": 5}\n\n\ndef test_restock_an_existing_item():\n    assert restock({\"pen\": 2}, \"pen\", 3) == {\"pen\": 5}\n\n\ndef test_remove_some():\n    assert remove({\"pen\": 5}, \"pen\", 2) == {\"pen\": 3}\n\n\ndef test_remove_never_goes_below_zero():\n    assert remove({\"pen\": 1}, \"pen\", 4) == {\"pen\": 0}\n\n\ndef test_remove_an_unknown_item_changes_nothing():\n    assert remove({\"pen\": 1}, \"ink\", 1) == {\"pen\": 1}\n\n\ndef test_total():\n    assert total_items({\"pen\": 2, \"ink\": 3}) == 5\n\n\ndef test_total_of_nothing():\n    assert total_items({}) == 0\n\n\ndef test_low_stock_includes_the_threshold():\n    assert low_stock({\"pen\": 2, \"ink\": 9}, 2) == [\"pen\"]\n"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "3 of the 8 tests fail.",
+      "ar": "يفشل 3 من أصل 8 اختبارات."
+    },
+    "calls": [
+      {
+        "tool": "run_command",
+        "arguments": {
+          "command": "pytest -q"
+        },
+        "ok": false
+      }
+    ]
+  }
+}

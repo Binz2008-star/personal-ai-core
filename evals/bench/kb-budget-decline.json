@@ -1,0 +1,21 @@
+{
+  "id": "kb-budget-decline",
+  "track": "knowledge",
+  "category": "knowledge_qa",
+  "corpus": "corpora/project_notes",
+  "instruction": {
+    "en": "What is the platform's monthly cloud budget?",
+    "ar": "ما الميزانية الشهرية للحوسبة السحابية الخاصة بالمنصة؟"
+  },
+  "checks": [
+    {
+      "type": "declines"
+    }
+  ],
+  "reference": {
+    "answer": {
+      "en": "The provided documents do not contain this information.",
+      "ar": "المستندات المتوفرة لا تحتوي على هذه المعلومة."
+    }
+  }
+}
