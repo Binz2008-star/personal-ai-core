@@ -167,6 +167,11 @@ def materialize(task: Task, workspace: Path) -> None:
     shutil.copytree(task.fixture, workspace, dirs_exist_ok=True)
     if task.git:
         _git(workspace, "init", "-q", "-b", "main")
+        # In the repository's own config, not only the environment: the agent's
+        # `shell` strips variables whose names look secret, and GIT_AUTHOR_*
+        # matches "AUTH". A commit the agent makes needs an identity too.
+        _git(workspace, "config", "user.name", GIT_ENV["GIT_AUTHOR_NAME"])
+        _git(workspace, "config", "user.email", GIT_ENV["GIT_AUTHOR_EMAIL"])
         _git(workspace, "add", "-A")
         _git(workspace, "commit", "-q", "-m", "initial")
 

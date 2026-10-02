@@ -221,6 +221,27 @@ failures, refusals and reviews on each side, and its result: PASS, FAIL (a regre
 ADR-020 D2), or INCOMPLETE (a required group missing). Improvements are listed but never
 offset a regression.
 
+## Capability benchmark (ADR-022)
+
+The contract harness measures whether the system keeps its rules. The benchmark measures whether it does the work: edit a file, fix a bug and confirm it, commit, answer from its documents. Tasks live in `evals/bench/*.json`, with their fixtures and corpora beside them. Every check is mechanical. There is no judge model.
+
+```powershell
+$env:PYTHONPATH = "src"
+# the approval policy the agent runs under, as the code applies it
+python -m personal_ai_core.app.bench --show-policy
+# the baseline: every task, both languages, 5 runs each
+python -m personal_ai_core.app.bench --runs 5 --num-ctx 8192
+# a run that was interrupted: continue the same file
+python -m personal_ai_core.app.bench --runs 5 --num-ctx 8192 --resume evals\results\bench\bench-<time>.jsonl
+# the summary of a result file
+python -m personal_ai_core.app.bench --report evals\results\bench\bench-<time>.jsonl
+```
+
+- Before the first run every task is proved: its reference solve must pass and an empty run must fail. A task that is not admitted stops the benchmark.
+- `evals/results/bench/bench-<time>.jsonl` is written run by run: a header, one line per run, and an end line with what Ollama had loaded. Commit it unmodified.
+- Each run records: success and every check's verdict; the tool calls in order with each policy decision; the commands run; the approvals and their reasons; whether a test ran after the last edit; how the run stopped; seconds; every model call with its tokens and the options actually sent; the workspace's final files and git state; and mechanical failure signals (`no_answer`, `tool_refused`, `not_tested_after_edit`, `check:<type>`, ...).
+- **Containment, not a sandbox.** Agent tools stay in a temporary workspace, network tools are denied, and `shell` accepts only local git and Python/pytest. Code the agent writes and runs is not isolated from the network. Do not describe a result as sandboxed or offline.
+
 ## Verdicts
 
 | Verdict | Meaning |
