@@ -639,6 +639,8 @@ claim written in one place with nothing that notices it going stale.
                [action_required=...] CLI prefix
   #173 dc57794  docs: handoff at 6d4fe15 -- #172 merged, its authority
                recorded, next steps for the owner
+  #174 d2b6cac  feat(agent): ADR-023 unit 1 -- an action_required answer
+               needs an executed tool call
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1104,7 +1106,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at 5009294)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at d2b6cac)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1115,23 +1117,33 @@ when the header above is more than 3 merges behind main: update it in the next
 PR, as with the ledger.
 
 WHERE THINGS STAND (2026-10-02)
-  - Since 6d4fe15: #167 (ADR-023 accepted) and #173 (the previous handoff)
-    merged; main is 5009294 and its `tests` run is green. Two PRs are open:
-    #174 (unit 1, next entry) and #162 (stale, "Open, not ours" below).
-  - Open, awaiting the owner: #174 (feat/adr-023-unit-1, opened 2026-10-02
-    17:09, 4 files, +195/-9, CI green at 9a8dac7: suite, static,
-    suite-windows). It implements ADR-023 section 8.2: with a contract and
-    action_required=true, an answer before any executed tool call is rejected,
-    the model is told once, each rejection is one failure from the global
+  - Since 6d4fe15: #167 (ADR-023 accepted), #173 (the previous handoff) and
+    #174 (unit 1) merged; main is d2b6cac. #162 is the one open PR (stale,
+    "Open, not ours" below).
+  - Merged: #174 (feat/adr-023-unit-1, 2026-10-02 18:14 UTC, 4 files,
+    +195/-9, CI green at 9a8dac7: suite, static, suite-windows). ADR-023
+    unit 1, section 8.2: with a contract and action_required=true, an answer
+    before any executed tool call is rejected, the model is told once
+    (ACTION_REQUIRED_MESSAGE), each rejection is one failure from the global
     budget of 3, and an AGENT_ANSWER_REJECTED event records it (counts, never
-    text). Read against section 8.2 the behaviour matches. Three things this
-    entry does not settle: (a) its description is empty, so it records no
-    owner approval -- section 8 and the "Not authorized yet" line below say
-    implementation needs one; (b) ACTION_REQUIRED_MESSAGE is the new
-    model-facing text section 8.2 reserves for the owner's review; (c) it
-    does not change the benchmark, so it cannot be measured yet (section
-    8.3). It does not touch this file, so merging it makes the handoff 3
-    merges behind -- the limit; the next PR after it must refresh the header.
+    text). A denied or invalid call does not count as executed; an executed
+    call that failed does (requiring evidence is unit 3). Read against
+    section 8.2 while it was open, the behaviour matches. The gate is live
+    only in `pac --agent`, for lines prefixed `[action_required=true]`.
+    Recorded about the merge, not decided here:
+      (a) authority: the PR has no review and no comment, so it records no
+          owner approval of the rejection wording that section 8.2 reserves
+          for the owner. The merge came from the repository's one account, so
+          the PR cannot show who decided. If the approval was given
+          elsewhere, the owner adds it here.
+      (b) the PR itself says the wording is English text injected as the
+          latest user message and may pull an Arabic task's answer into
+          English -- an inference, not an observation. The benchmark
+          measures it.
+      (c) not measured: the benchmark passes plain strings, so the gate never
+          engages there. Measuring it needs the section 8.3 change.
+      (d) ADR-023's status table and section 8.1 still say no control is in
+          the code; the PR asks for them to be updated after the merge.
   - Implemented with the owner's approval (#172): the caller-owned
     `AgentTaskContract(task_text, action_required)` in core/agent.py, and the
     strict per-line `pac --agent` prefix `[action_required=true|false] TASK`.
@@ -1139,7 +1151,8 @@ WHERE THINGS STAND (2026-10-02)
     model call, the next line continues, the session exits 2; `false` means
     only "action not required" (tools stay under RiskPolicy); AgentLoop.run
     still takes a plain string (bench runner, tests), recorded as "no
-    contract" in AGENT_* payloads. The contract is RECORDED, NOT ENFORCED.
+    contract" in AGENT_* payloads. #172 only recorded the contract; #174
+    enforces it for action_required=true (see "Merged" above).
   - Authority for #172: the owner's explicit decisions of 2026-10-02 (the
     caller-owned contract, the CLI syntax, decisions 1-3, "start
     implementation"), given before ADR-023 was accepted. #172 built only its
@@ -1153,11 +1166,10 @@ WHERE THINGS STAND (2026-10-02)
     rejected, the model told once, one failure from the global budget of 3.
     The owner chose it ahead of environment context (decision 4's order)
     because it targets Class 1, the largest.
-  - Not authorized yet: implementing unit 1 (its rejection message is new
-    model-facing text, reviewed in that PR), and the benchmark change that
-    lets it be measured (task files state action_required; the runner passes
-    a contract). Each needs the owner's approval as its own PR. No other
-    ADR-023 control is authorized.
+  - Not authorized yet: the benchmark change that lets unit 1 be measured
+    (task files state action_required; the runner passes a contract), and
+    every other ADR-023 control. Each needs the owner's approval as its own
+    PR.
   - The capability baseline is done and is the reference for every later
     measurement:
       raw   evals/results/bench/bench-20261002T081707Z.jsonl  (#165, a609f69,
@@ -1178,9 +1190,10 @@ WHERE THINGS STAND (2026-10-02)
     six Arabic failures (script drift, one invented figure); citations 5/80,
     informational (the grounding prompt never asks for them).
   - ADR-023 (planning -> execution/test -> verification): ACCEPTED
-    2026-10-02 (#167); only the contract is built (#172), recorded and not
-    enforced. It records the owner's six design decisions: the task
-    contract (not the model) sets action_required; structured claims need
+    2026-10-02 (#167); built so far: the contract (#172) and the unit 1
+    gate (#174), not yet measured. It records the owner's six design
+    decisions: the task contract (not the model) sets action_required;
+    structured claims need
     observable evidence (the phrase list is telemetry, never the gate); test
     command precedence contract > caller > verified repo config > constrained
     discovery; order environment -> action -> execution -> evidence; ONE
@@ -1222,14 +1235,17 @@ WHERE THINGS STAND (2026-10-02)
     fresh CI run; the owner decides whether it goes ahead.
   - Next, for the owner to decide (nothing is in progress):
       1. Done: ADR-023 accepted with unit 1 (#167).
-      2. Unit 1, action enforcement in agent/loop.py (ADR-023 section 8.2),
-         aimed at Class 1 (52 of 111 agent failures): built in #174, open,
-         CI green; the owner reviews the rejection wording and records the
-         approval in the PR.
-      3. Then measure: the same 240 runs (#165 setup, fresh worktree on the
-         rig), compared by failure class with the baseline, never by a
-         target score. The bench runner passes plain strings, so #172 alone
-         does not change what the benchmark measures.
+      2. Done: unit 1, action enforcement in agent/loop.py (ADR-023
+         section 8.2), aimed at Class 1 (52 of 111 agent failures): #174.
+         Not yet measurable. The owner records the approval of its wording
+         (see "Merged" above).
+      3. Next, needing the owner's approval: the section 8.3 benchmark change
+         (task files state action_required, the runner passes a contract, the
+         digest includes the field, the baseline files are not edited). Then
+         measure: the same 240 runs (#165 setup, fresh worktree on the rig),
+         compared by failure class with the baseline, never by a target
+         score. The bench runner passes plain strings, so #172 and #174
+         alone do not change what the benchmark measures.
   - Rules learned today: update this header in any PR that finds it 3 merges
     behind (main went red after #163 when it slipped to 4); a scorer fix is
     the smallest rule that fixes the defect, proved by re-judging the same
@@ -1377,8 +1393,7 @@ Not every ADR is accepted. PROPOSED, not accepted:
 - ADR-021 (grammar during decoding) — PROPOSED / DEFERRED until after the
   capability baseline; Phases A-C only when revisited.
 - ADR-023 (planning, execution/test, verification) — ACCEPTED 2026-10-02 with
-  its first unit specified (section 8); only the task contract is built (#172),
-  recorded and not enforced.
+  its first unit specified (section 8); no other control is authorized.
 
 Record what is PROPOSED versus accepted, never whether a PR has merged. The
 previous wording said ADR-011 was "NOT merged (PR #24)", which was true when it
