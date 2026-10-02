@@ -17,7 +17,8 @@
     },
     {
       "type": "cites",
-      "document": "deployment.md"
+      "document": "deployment.md",
+      "informational": true
     }
   ],
   "reference": {

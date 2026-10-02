@@ -97,7 +97,9 @@ def _check_spec(task_id: str, spec: Mapping[str, Any], track: str) -> None:
         raise _fail(task_id, f"unknown check type {kind!r}")
     if track == "knowledge" and kind not in ANSWER_CHECKS:
         raise _fail(task_id, f"a knowledge task has no workspace; {kind} cannot apply")
-    params = {k: v for k, v in spec.items() if k != "type"}
+    if not isinstance(spec.get("informational", False), bool):
+        raise _fail(task_id, f"check {kind}: informational must be true or false")
+    params = {k: v for k, v in spec.items() if k not in ("type", "informational")}
     try:
         inspect.signature(CHECKS[kind]).bind(None, **params)
     except TypeError as exc:
@@ -125,6 +127,8 @@ def parse(data: Mapping[str, Any], base: Path) -> Task:
         raise _fail(task_id, "a task without checks cannot fail")
     for spec in checks:
         _check_spec(task_id, spec, track)
+    if all(spec.get("informational") for spec in checks):
+        raise _fail(task_id, "every check is informational; nothing decides success")
 
     fixture = corpus = None
     if track == "agent":
@@ -229,10 +233,10 @@ def prove(task: Task, scratch: Path) -> list[str]:
             materialize(task, workspace)
             if kind == "reference":
                 evidence = _apply_reference(task, workspace, language)
-                ok, results = judge(evidence, task.checks)
-                if not ok:
-                    failed = [f"{r['check']}: {r['detail']}" for r in results
-                              if r["verdict"] != PASS]
+                _, results = judge(evidence, task.checks)
+                failed = [f"{r['check']}: {r['detail']}" for r in results
+                          if r["verdict"] != PASS]
+                if failed:
                     problems.append(f"{language}: the reference solve fails {failed}")
             else:
                 ok, _ = judge(RunEvidence(workspace=workspace, answer=None), task.checks)

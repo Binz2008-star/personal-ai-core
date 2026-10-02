@@ -14,7 +14,8 @@
     },
     {
       "type": "cites",
-      "document": "expenses-ar.md"
+      "document": "expenses-ar.md",
+      "informational": true
     }
   ],
   "reference": {

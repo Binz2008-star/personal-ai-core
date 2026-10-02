@@ -159,3 +159,16 @@ def test_the_interpreter_is_the_one_running_the_benchmark(tmp_path):
         f"import sys; raise SystemExit(0 if sys.executable == {sys.executable!r} else 1)\n",
         encoding="utf-8")
     assert _verdict(_ev(tmp_path), "command_passes", argv=["python", "which.py"]) == PASS
+
+
+def test_an_informational_check_is_recorded_but_does_not_decide(tmp_path):
+    ok, results = judge(_ev(tmp_path, "5 days"), [
+        {"type": "answer_number", "value": 5},
+        {"type": "cites", "document": "annual-leave.md", "informational": True}])
+    assert ok
+    assert results[1] == {"check": "cites", "verdict": FAIL, "detail": "does not name annual-leave.md",
+                          "informational": True}
+    ok, _ = judge(_ev(tmp_path, "4 days (annual-leave.md)"), [
+        {"type": "answer_number", "value": 5},
+        {"type": "cites", "document": "annual-leave.md", "informational": True}])
+    assert not ok, "a right citation does not rescue a wrong fact"

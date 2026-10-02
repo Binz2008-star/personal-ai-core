@@ -20,7 +20,8 @@
     },
     {
       "type": "cites",
-      "document": "travel-ar.md"
+      "document": "travel-ar.md",
+      "informational": true
     }
   ],
   "reference": {

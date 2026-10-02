@@ -148,3 +148,21 @@ def test_a_malformed_git_history_is_refused(mutate, reason):
     mutate(data)
     with pytest.raises(TaskError, match=reason):
         parse(data, BENCH)
+
+
+def test_a_task_needs_a_check_that_decides():
+    data = copy.deepcopy(_shipped("kb-leave-carryover"))
+    for check in data["checks"]:
+        check["informational"] = True
+    with pytest.raises(TaskError, match="nothing decides"):
+        parse(data, BENCH)
+    data["checks"][0]["informational"] = "yes"
+    with pytest.raises(TaskError, match="true or false"):
+        parse(data, BENCH)
+
+
+def test_every_citation_check_is_informational():
+    """Owner decision 2026-10-02: success is the fact; the citation is its own rate,
+    because the grounding prompt never asks the model to name its source."""
+    cites = [c for t in load(BENCH) for c in t.checks if c["type"] == "cites"]
+    assert cites and all(c.get("informational") is True for c in cites)
