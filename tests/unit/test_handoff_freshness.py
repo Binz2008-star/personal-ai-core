@@ -17,11 +17,14 @@ runs it at the start of every session.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Mapping, Sequence
 
 import pytest
+from support.lag_limit import effective_limit
 
 REPO = Path(__file__).resolve().parents[2]
 STATE = REPO / "PROJECT_STATE.md"
@@ -53,16 +56,42 @@ def test_the_handoff_names_a_commit_in_this_history():
         f"the handoff says it was written at {stated}, which is not an ancestor of HEAD")
 
 
+def _lag_failure(behind: Sequence[str], stated: str, environ: Mapping[str, str]) -> str | None:
+    """Why the handoff is too far behind, or None. The limit is one lower on a pull request
+    (tests/support/lag_limit.py): its own merge will count once it lands."""
+    limit = effective_limit(MAX_HANDOFF_LAG, environ)
+    if len(behind) <= limit:
+        return None
+    return (f"the handoff was written at {stated} and {len(behind)} merges have landed since "
+            f"(limit {limit}"
+            + (f": {MAX_HANDOFF_LAG} on main, one fewer on a pull request, because this PR's own "
+               "merge will count" if limit != MAX_HANDOFF_LAG else "")
+            + "). Update NEXT SESSION HANDOFF and its header in this PR; "
+            "`python tools/session_state.py` prints what changed.")
+
+
 def test_the_handoff_is_at_most_a_few_merges_behind_main():
     stated = _stated_commit()
     # Only PR merges count: merging main into a branch is not a landing.
     behind = [line for line in _git("log", "--merges", "--first-parent", "--format=%s",
                                     f"{stated}..HEAD").stdout.splitlines()
               if line.startswith("Merge pull request #")]
-    assert len(behind) <= MAX_HANDOFF_LAG, (
-        f"the handoff was written at {stated} and {len(behind)} merges have landed since "
-        f"(limit {MAX_HANDOFF_LAG}). Update NEXT SESSION HANDOFF and its header in this PR; "
-        "`python tools/session_state.py` prints what changed.")
+    failure = _lag_failure(behind, stated, os.environ)
+    assert failure is None, failure
+
+
+def test_a_pull_request_is_held_one_merge_below_the_limit():
+    """The incident of 2026-10-02: at the limit, a PR is green in CI and turns main red when it
+    lands. On main the same state is allowed; on a pull request it is not."""
+    at_limit = [f"Merge pull request #{n}" for n in range(MAX_HANDOFF_LAG)]
+    assert _lag_failure(at_limit, "abc1234", {"GITHUB_EVENT_NAME": "push"}) is None
+    assert _lag_failure(at_limit, "abc1234", {}) is None
+    failure = _lag_failure(at_limit, "abc1234", {"GITHUB_EVENT_NAME": "pull_request"})
+    assert failure is not None and "one fewer on a pull request" in failure
+    below = at_limit[:-1]
+    assert _lag_failure(below, "abc1234", {"GITHUB_EVENT_NAME": "pull_request"}) is None
+    over = [*at_limit, "Merge pull request #99"]
+    assert _lag_failure(over, "abc1234", {"GITHUB_EVENT_NAME": "push"}) is not None
 
 
 def test_every_session_starts_by_computing_the_state():

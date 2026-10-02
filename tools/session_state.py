@@ -89,8 +89,8 @@ def report() -> list[str]:
     unrecorded = sorted(n for n, _, _ in seen if n not in recorded and n >= 3)
     flag = "OVER THE LIMIT, CI fails" if len(unrecorded) > MAX_UNRECORDED_MERGES else "ok"
     lines.append(f"ledger: {len(unrecorded)} merge(s) not recorded "
-                 f"{['#%d' % n for n in unrecorded]} (limit {MAX_UNRECORDED_MERGES}: {flag}); "
-                 "the next PR adds their rows")
+                 f"{['#%d' % n for n in unrecorded]} (limit {MAX_UNRECORDED_MERGES} on main, "
+                 f"{MAX_UNRECORDED_MERGES - 1} for a PR: {flag}); the next PR adds their rows")
 
     match = HANDOFF.search(text)
     if match is None:
@@ -103,7 +103,8 @@ def report() -> list[str]:
         else:
             state = "STALE, CI fails" if lag > MAX_HANDOFF_LAG else "ok"
             lines.append(f"handoff: written {match.group(1)} at {match.group(2)}, "
-                         f"{lag} merge(s) behind (limit {MAX_HANDOFF_LAG}: {state})")
+                         f"{lag} merge(s) behind (limit {MAX_HANDOFF_LAG} on main, "
+                         f"{MAX_HANDOFF_LAG - 1} for a PR: {state})")
     lines.append("read next: PROJECT_STATE.md, section NEXT SESSION HANDOFF")
     return lines
 
