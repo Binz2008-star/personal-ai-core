@@ -151,13 +151,17 @@ design background, not current architecture.
   requirement to preserve (ADR-002 owner note).
 - **[CURRENT]** The model is reached through `ModelProvider`. `pac` uses Ollama. A llama.cpp
   adapter exists for the evaluation harness only.
+- **[TARGET]** A foreign script is impossible to sample, not only caught afterwards: a
+  llama.cpp grammar applied per turn under the guard's exemptions, the guard kept as a
+  second line. Proposed in ADR-021, phased: rig feasibility, `compare --vary`, a
+  measurement, then adoption on the owner's decision.
 - **[CURRENT]** The harness scores the contract with mechanical checks and no judge model.
   Raw replies and verdicts are committed unmodified. Each result names the commit, the
   cases version and the scorer version.
-- **[CURRENT]** Three case files exist: `contract_v0` (kept for comparison), `contract_v1`
-  (language and contract) and `refusal_v1` (open-response). A `refusal_v1` baseline is
-  committed: two runs at `c8738e9`, no refusals, one case scored REVIEW in one run.
-  `evals/README.md` asks for at least three runs.
+- **[CURRENT]** Case files: `contract_v0` (kept for comparison), `contract_v1` (language and
+  contract), `refusal_v1` (kept) and `refusal_v2` (open-response, with a script check on
+  every case). The scorer is `contract-checks-v3`. The Boss model's acceptance
+  self-comparison (#154, 15 + 9 runs per side) passed the calibrated gate.
 - **[CURRENT]** The harness refuses to run under any model name but the Boss model's,
   unless the model is named with `--candidate`: that run is recorded under the
   candidate's own name with `role: candidate` (ordinary runs: `role: boss`), and changes

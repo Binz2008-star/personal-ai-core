@@ -606,6 +606,8 @@ claim written in one place with nothing that notices it going stale.
   #153 29abb4e  docs: the handoff refreshed and kept fresh -- state computed at
                session start, lag checked in CI
   #154 b1f80be  eval: ADR-020 acceptance self-comparison at 29abb4e -- PASS
+  #155 b080a98  fix(eval): contract-checks-v3 -- a misreading is not a refusal;
+               acceptance rescored, still PASS
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1071,7 +1073,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at c47efb7)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at b080a98)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1109,7 +1111,12 @@ ADR-020 (evaluating a candidate model) -- where it stands
   - Open from #154: ground-decline-ar failed 2/15 vs 9/15 on identical weights
     (p about 1% by chance; below the +8 threshold). The case is the noisiest
     in the set; cause unresolved.
-  - NEXT: candidate evaluation is open. The first real candidate (a LoRA of
+  - Owner's order after acceptance (2026-10-02): first the foreign-script problem
+    by constrained decoding -- ADR-021 PROPOSED, phased (rig feasibility of
+    llama.cpp on the GPU with Smart App Control on; `compare --vary`; a 48-run
+    grammar measurement; adoption only on the owner's D1) -- then the guard's
+    blind spot for Hebrew and other "other" scripts (a small production fix).
+  - Candidate evaluation is open as well. The first real candidate (a LoRA of
     the Boss model) needs: its weights served by Ollama with an ADAPTER line
     (so adapters are recorded), a fresh baseline at the same commit, and the
     same 15 + 9 runs per side. Adoption still needs the owner (ADR-002, D4).
