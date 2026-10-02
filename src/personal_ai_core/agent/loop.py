@@ -208,8 +208,10 @@ class AgentLoop:
         """
         if self._session_exists is not None and not self._session_exists(session_id):
             raise KeyError(f"unknown session: {session_id}")
-        contract = task if isinstance(task, AgentTaskContract) else None
-        task_text = contract.task_text if contract is not None else task.strip()
+        if isinstance(task, AgentTaskContract):
+            contract, task_text = task, task.task_text
+        else:
+            contract, task_text = None, task.strip()
         task_text = task_text[:MAX_TASK_CHARS]
         budget = ActionBudget(max_actions=self._max_actions, max_failures=self._max_failures)
         messages = self._opening(task_text, session_id)
