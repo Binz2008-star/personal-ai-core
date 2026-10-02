@@ -635,6 +635,8 @@ claim written in one place with nothing that notices it going stale.
   #171 2ac9994  test: the state-script test reads and writes UTF-8 on both ends
   #172 6d4fe15  feat(agent): caller-owned AgentTaskContract and the
                [action_required=...] CLI prefix
+  #174 d2b6cac  feat(agent): ADR-023 unit 1 -- action enforcement: an answer with
+               no executed tool call is rejected when action is required
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
