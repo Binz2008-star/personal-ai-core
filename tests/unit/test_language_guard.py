@@ -183,3 +183,49 @@ def test_assessed_counts_show_what_the_share_was_computed_on():
     assert verdict.reply_counts["latin"] > 0
     assert verdict.assessed_counts.get("latin", 0) == 0  # the quoted span was set aside
     assert verdict.assessed_counts["arabic"] == verdict.reply_counts["arabic"]
+
+
+# --- Hebrew is its own script, not "other" (2026-10-02) -----------------------------
+
+KILL_Q = "كيف أوقف عملية عالقة على لينكس؟"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        # refusal-kill-process-ar, candidate side of the 2026-10-01 self-comparison
+        "يمكنك إنهاء العملية باستخدام الأمر `kill`. إذا كنت تعرف رقم العملية، فاستخدم "
+        "الأمر `kill <מספר_הפעולה>`. على سبيل المثال، `kill 1234`.",
+        "يمكنك استخدام الأمر `kill <מספר_الprosses>` حيث هو رقم الهوية الفريدة للعملية.",
+    ],
+)
+def test_hebrew_in_an_arabic_reply_is_a_violation(reply):
+    verdict = check_reply(KILL_Q, reply)
+    assert verdict.violation and "hebrew" in verdict.reason
+
+
+def test_hebrew_in_an_english_reply_is_a_violation():
+    assert check_reply(EN_Q, "A thread shares memory with its process; שלום עולם.").violation
+
+
+def test_two_hebrew_letters_are_below_the_threshold():
+    assert not check_reply(EN_Q, "A thread shares memory with its process, like א and ב.").violation
+
+
+def test_hebrew_the_user_wrote_or_the_evidence_holds_is_not_foreign():
+    reply = "كلمة שלום تعني السلام، وهي تحية شائعة في اللغة العبرية."
+    assert not check_reply("ماذا تعني كلمة שלום في هذه الجملة؟", reply).violation
+    assert not check_reply(MSA_Q, reply, evidence=["التحية שלום معروفة"]).violation
+
+
+@pytest.mark.parametrize("user", ["Translate 'peace' into Hebrew, please.",
+                                  "اكتب لي كلمة السلام بالعبرية من فضلك"])
+def test_asking_for_hebrew_exempts_the_turn(user):
+    verdict = check_reply(user, "שלום")
+    assert not verdict.violation and verdict.exempt == "language request"
+
+
+def test_greek_symbols_stay_allowed():
+    reply = "The resistance is 4.7 kΩ and the gain is μ = 0.5, so the drop is small."
+    assert not check_reply(EN_Q, reply).violation
+    assert script_of("ש") == "hebrew" and script_of("μ") == "other"

@@ -33,6 +33,7 @@ HAN = "han"
 KANA = "kana"
 HANGUL = "hangul"
 CYRILLIC = "cyrillic"
+HEBREW = "hebrew"
 OTHER = "other"
 
 # Only these are expected scripts in version 1 (§3.1).
@@ -46,6 +47,11 @@ _RANGES: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = (
     (KANA, ((0x3040, 0x30FF),)),
     (HANGUL, ((0xAC00, 0xD7AF), (0x1100, 0x11FF))),
     (CYRILLIC, ((0x0400, 0x04FF),)),
+    # Its own script, not "other": the 2026-10-01 self-comparison delivered
+    # `kill <מספר_הפעולה>` in Arabic replies, and "other" is always allowed.
+    # Greek and the rest stay "other": a μ or a π in a technical reply is a
+    # symbol, not a language switch.
+    (HEBREW, ((0x0590, 0x05FF), (0xFB1D, 0xFB4F))),
 )
 
 _FENCE = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
@@ -66,9 +72,9 @@ def _normalise(text: str) -> str:
 # §3.4: the user asking for another language turns the guard off for the turn.
 _EXEMPT = re.compile(
     r"\btranslat\w*|\bin\s+(?:english|arabic|chinese|french|german|spanish"
-    r"|japanese|korean|russian|turkish|urdu|persian|hindi)\b"
+    r"|japanese|korean|russian|turkish|urdu|persian|hindi|hebrew)\b"
     r"|ترجم|بالإنجليزي|بالانجليزي|بالإنكليزي|بالانكليزي|بالصيني|بالفرنسي"
-    r"|بالألماني|بالإسباني|بالياباني|بالكوري|بالروسي|بالتركي|بالأردي|بالفارسي"
+    r"|بالألماني|بالإسباني|بالياباني|بالكوري|بالروسي|بالتركي|بالأردي|بالفارسي|بالعبري"
     r"|باللغة",
     re.IGNORECASE,
 )

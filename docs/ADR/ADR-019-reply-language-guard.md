@@ -173,6 +173,18 @@ provider is recorded as `GENERATION_FAILED` with `attempt: 2`.
   run copied verbatim (case- and whitespace-insensitive) from the user's message or the
   evidence.
 
+**Hebrew (2026-10-02, owner-approved production change).**
+- **The gap.** Unit 1 counted Hebrew as "other", and "other" is always allowed. So
+  `kill <מספר_הפעולה>` passed the guard inside Arabic replies, twice in the 2026-10-01
+  self-comparison, while the scorer failed it.
+- **The fix.** Hebrew is now its own script, foreign unless the user's message or the
+  evidence contains it. "In Hebrew" and «بالعبري» join the exemption list, so a user
+  who asks for Hebrew gets it.
+- **What stays "other".** Greek and the rest stay "other": a μ or an Ω in a technical
+  reply is a symbol, not a language switch.
+- **Measured.** Over all 2,096 recorded user–reply pairs, exactly the two Hebrew leaks
+  change verdict; no other Arabic or English verdict moves.
+
 ## 7. Proposed units, if authorized
 
 1. `check_reply` as a pure function with its tests. No wiring and no behaviour change.
