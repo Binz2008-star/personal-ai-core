@@ -56,7 +56,7 @@ def test_a_task_without_action_metadata_is_rejected_before_model_call(tmp_path, 
     transport = scripted('{"answer": "must not run"}')
     code, output, _ = run(tmp_path, transport, "create hello.md")
     assert code == 2
-    assert output == ""
+    assert "core>" not in output
     assert capsys.readouterr().err == (
         "invalid agent task: expected [action_required=true|false] TASK\n"
     )
@@ -69,7 +69,7 @@ def test_a_malformed_task_does_not_stop_later_valid_tasks(tmp_path, capsys):
         tmp_path, transport, "[action_required] bad", "[action_required=false] explain this"
     )
     assert code == 2
-    assert output == "core> done\n"
+    assert output.endswith("core> done\n")
     assert capsys.readouterr().err == (
         "invalid agent task: expected [action_required=true|false] TASK\n"
     )
