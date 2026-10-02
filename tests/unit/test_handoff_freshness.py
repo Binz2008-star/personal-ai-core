@@ -73,9 +73,14 @@ def test_every_session_starts_by_computing_the_state():
 
 
 def test_the_state_script_runs_and_never_fails():
+    import os
     import sys
 
+    # Both ends in UTF-8. With PYTHONIOENCODING=utf-8 inherited and a cp1252 locale
+    # (the rig's Claude Code shell), the child wrote UTF-8, the parent read cp1252,
+    # and the failed decode left stdout None.
     result = subprocess.run([sys.executable, str(REPO / "tools" / "session_state.py")],
-                            cwd=REPO, capture_output=True, text=True, timeout=60)
+                            cwd=REPO, capture_output=True, encoding="utf-8", timeout=60,
+                            env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert result.returncode == 0
     assert "handoff:" in result.stdout and "ledger:" in result.stdout
