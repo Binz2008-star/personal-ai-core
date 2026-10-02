@@ -96,8 +96,13 @@ def test_agent_task_prefix_is_parsed_once(line, task_text, action_required):
         "create the file",
         "[action_required] create the file",
         "[action_required=yes] create the file",
+        "[action_required = true] x",
+        "[action_required=TRUE] x",
+        "[action_required=true]x",
         "[action_required=true]",
         "[action_required=true] [action_required=false] explain",
+        "[action_required=true][action_required=false] x",
+        "   [action_required=true] x",
     ],
 )
 def test_agent_task_prefix_rejects_missing_malformed_or_repeated_metadata(line):

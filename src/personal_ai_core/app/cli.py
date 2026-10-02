@@ -77,7 +77,7 @@ _AGENT_TASK = re.compile(r"^\[action_required=(true|false)\]\s+(.+?)\s*$")
 
 def parse_agent_task(line: str) -> AgentTaskContract:
     """Parse one explicit caller-owned agent task contract."""
-    match = _AGENT_TASK.fullmatch(line.strip())
+    match = _AGENT_TASK.fullmatch(line.rstrip("\r\n"))
     if match is None:
         raise ValueError("expected [action_required=true|false] TASK")
     task_text = match.group(2)
