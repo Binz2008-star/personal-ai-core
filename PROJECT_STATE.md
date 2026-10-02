@@ -651,6 +651,8 @@ claim written in one place with nothing that notices it going stale.
                asked for
   #179 c812cb1  docs(readme): pac --agent lines start with
                [action_required=true|false]
+  #180 b8ee118  ci: run the PostgreSQL-gated suites against a real server on
+               the Linux job
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1116,7 +1118,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at 1514e3e)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at b8ee118)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1150,8 +1152,16 @@ WHERE THINGS STAND (2026-10-02)
     #175: after #174 the ledger and the handoff were exactly 3 merges behind,
     and #176 made it 4. A PR cannot count its own merge, so its CI could not
     warn. The rule below ("update this header in any PR that finds it 3 merges
-    behind") is the one that was not applied; merge the PR that refreshes the
-    header BEFORE, or WITH, the one that makes it 4.
+    behind") is the one that was not applied. NOW ENFORCED: on a pull_request
+    run the two gates (tests/unit/test_merge_ledger.py and
+    test_handoff_freshness.py, through tests/support/lag_limit.py) hold the PR
+    one merge below the limit, because its own merge will count -- 2 on a PR, 3
+    on main. Replaying the incident state with only that change: as main sees
+    it, it passes; as a pull request sees it, both gates fail and say why. A PR
+    that finds the record 3 behind must refresh the header and the ledger itself.
+    Because the repository also requires every branch to be up to date with
+    main, merges are sequential: after one lands, update the next PR's branch
+    and let CI re-run before merging it.
   - Merged (#178): ADR-023 unit 2, environment context, section 2.1.
     OFF unless asked for: `build_agent(environment_context=True)` and the
     benchmark flag `--environment-context`; `pac --agent` is not changed
@@ -1323,8 +1333,9 @@ WHERE THINGS STAND (2026-10-02)
          compared with the unit-1 file. Class 3 is the one expected to move;
          read the Arabic rows (the English block sits in a system message, not
          the latest user message, but that is an inference, not an observation).
-  - Rules learned today: update this header in any PR that finds it 3 merges
-    behind (main went red after #163 when it slipped to 4); a scorer fix is
+  - Rules learned today: update this header in any PR that finds it 2 or more
+    merges behind -- CI now fails a PR at 3 (main went red after #163, and again
+    after #176, when it slipped to 4); a scorer fix is
     the smallest rule that fixes the defect, proved by re-judging the same
     recorded runs both ways.
 
