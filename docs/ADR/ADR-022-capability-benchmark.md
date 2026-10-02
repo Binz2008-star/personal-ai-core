@@ -263,3 +263,10 @@ Each unit is its own PR.
 - **Result.** 123/240: knowledge 114/120, agent 9/120. The reported accuracy changed
   because of a scorer correction, not because of any change to the system.
   `tests/unit/test_bench_baseline_rescore.py` pins the 17 changes.
+- **Digest provenance (#170).** The raw file's header records `file-create-settings` as
+  `150017ff71cb768d`: the digest the rig computed before #170, when fixture files were
+  ordered by Windows' case-insensitive `Path` comparison. From #170 every platform orders
+  by the relative path as text and computes `96fce7417d36a103`, the value Linux always
+  gave; the other 23 digests are unchanged. The raw and rescored files are not edited. The
+  #166 rescore is unaffected (this task has no answer checks); a `--resume` of this file
+  would see the one task as changed.
