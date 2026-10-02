@@ -177,6 +177,11 @@ design background, not current architecture.
 - **[TARGET]** Each reply and each evaluation run names the weights and the runtime that
   produced it.
 - **[TARGET]** A change to the instrument is never approved by the result it produces.
+- **[TARGET]** Capability is measured, not only compliance: agent tasks (files, code,
+  debugging, tests, git, multi-step, tool choice, recovery) and knowledge QA, in English
+  and Arabic, each checked mechanically, repeated, and recorded with tools, steps and
+  latency. Proposed in ADR-022; it is the baseline every later improvement is chosen
+  from.
 - **[CURRENT]** `python -m personal_ai_core.app.compare BASELINE_DIR CANDIDATE_DIR`
   judges a candidate per case over several runs against a baseline with the same cases
   version, scorer, commit and settings. It refuses mixed inputs and names the field that
