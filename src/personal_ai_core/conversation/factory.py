@@ -83,7 +83,10 @@ from ..runtime.llamacpp import GRAMMARS, LlamaCppProvider
 from ..runtime.llamacpp.status import loaded_status as llamacpp_loaded_status
 from ..runtime.ollama.status import http_probe
 from ..runtime.ollama.status import loaded_status as ollama_loaded_status
+# `http_transport` is re-exported for the benchmark runner (ADR-022), which
+# wraps it to time each model call and may not import `runtime/` itself.
 from ..runtime.ollama.provider import OllamaProvider, Transport
+from ..runtime.ollama.provider import http_transport as http_transport
 from .grounding import ContextBuilder, RenderedEvidenceCost
 from .language_guard import GUARD_NOTE
 from .service import ConversationService

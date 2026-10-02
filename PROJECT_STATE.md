@@ -613,6 +613,8 @@ claim written in one place with nothing that notices it going stale.
   #157 8fcfa88  fix(conversation): the language guard treats Hebrew as a
                foreign script
   #158 72133ab  docs(adr): ADR-022 (PROPOSED) -- a capability benchmark
+  #159 57bc96b  feat(bench): ADR-022 unit 1 -- task format, mechanical checks,
+               containment policy
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1121,7 +1123,9 @@ ADR-020 (evaluating a candidate model) -- where it stands
     tools, local git and Python/pytest via a command policy, no network tools,
     no unrestricted shell. NOT a security sandbox -- code the agent writes can
     reach the network; never describe it as isolated. Units: (1) format,
-    checks, policy -- this PR; (2) runner; (3) the 24 tasks; (4) the 240-run
+    checks, policy (#159); (2) runner -- `python -m
+    personal_ai_core.app.bench`, JSONL written per run, --resume, --report,
+    --show-policy; (3) the 24 tasks; (4) the 240-run
     baseline on the rig. Before unit 4 runs, show the owner the allowlist
     (`policy.describe()`). After the baseline: STOP and report the gaps; the
     owner picks the 2-3 biggest failure causes to work on.
