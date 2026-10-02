@@ -2,6 +2,7 @@
   "id": "recover-moved-changelog",
   "track": "agent",
   "category": "recovery",
+  "action_required": true,
   "fixture": "fixtures/changelog",
   "instruction": {
     "en": "Add the line \"- Fixed the date parser.\" under the 2.0.0 heading of the changelog. It used to be at docs/CHANGELOG.md, but it was moved, and that path no longer exists.",

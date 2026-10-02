@@ -23,6 +23,11 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ..evaluate import FAIL, PASS, _fold, check_declines
 
+# Which version of the checks produced a verdict; recorded in every result file,
+# and a rescore names the version it applied (as the contract harness does).
+#   v1  the first baseline (a609f69, 2026-10-02)
+#   v2  a number that ends a sentence ("port 8443.") is a number
+SCORER = "bench-checks-v2"
 COMMAND_TIMEOUT_SECONDS = 120
 # Tools that change files; a test run must come after the last of them.
 EDITING_TOOLS = frozenset({"write_file", "delete_file", "shell"})
@@ -103,6 +108,7 @@ def interpreter(argv: Sequence[str]) -> list[str]:
 def _run(ev: RunEvidence, argv: Sequence[str]) -> subprocess.CompletedProcess[str] | None:
     try:
         return subprocess.run(interpreter(argv), cwd=ev.workspace, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL,
                               timeout=COMMAND_TIMEOUT_SECONDS)
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -152,7 +158,11 @@ def answer_contains(ev: RunEvidence, *, any_of: Sequence[str]) -> tuple[str, str
     return (PASS, f"contains {hit!r}") if hit else (FAIL, f"none of {list(any_of)}")
 
 
-_NUMBER = re.compile(r"(?<![\d.])\d+(?![\d.])")
+# A whole number, not part of a longer number or of a decimal ("3.5" states
+# neither 3 nor 5). v1 refused any "." after the number, so it missed every
+# number that ended a sentence; v2 refuses a "." after it only when a digit
+# follows. That is the whole change: before the number, v1's rule stands.
+_NUMBER = re.compile(r"(?<![\d.])\d+(?!\d)(?!\.\d)")
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 

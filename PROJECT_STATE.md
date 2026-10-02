@@ -618,6 +618,45 @@ claim written in one place with nothing that notices it going stale.
   #160 3b2af21  feat(bench): ADR-022 unit 2 -- the benchmark runner
   #161 5bc81a1  feat(bench): ADR-022 unit 3 -- the v0 task set, 24 tasks in two
                languages
+  #163 cf629a2  fix(bench): what the rig smoke run found, fixed before the
+               baseline
+  #164 a609f69  fix(agent): a command gets no input, and a timeout ends its
+               whole process tree
+  #165 6c2d1f5  eval: ADR-022 capability benchmark baseline -- 240 runs at
+               a609f69
+  #166 1449930  fix(bench): a number that ends a sentence is a number; rescore
+               the baseline
+  #167 5009294  docs(adr): ADR-023 -- planning, execution/test, verification --
+               ACCEPTED with unit 1 (action enforcement)
+  #168 3128fb9  docs: handoff at 1449930 -- the baseline done, ADR-023 a draft,
+               nothing in progress
+  #169 641707e  docs: handoff -- the fixture digest difference explained; the
+               17 claims made exact
+  #170 9c77078  fix(bench): the task digest orders fixture files by their
+               relative path as text
+  #171 2ac9994  test: the state-script test reads and writes UTF-8 on both ends
+  #172 6d4fe15  feat(agent): caller-owned AgentTaskContract and the
+               [action_required=...] CLI prefix
+  #173 dc57794  docs: handoff at 6d4fe15 -- #172 merged, its authority
+               recorded, next steps for the owner
+  #174 d2b6cac  feat(agent): ADR-023 unit 1 -- action enforcement: an answer with
+               no executed tool call is rejected when action is required
+  #175 aedc27f  docs: record #174 and #176 -- handoff at de5a79e, ADR-023
+               status (the owner's commit folded in), #162 diagnosed
+  #176 de5a79e  feat(bench): ADR-023 section 8.3 -- agent tasks state
+               action_required; the runner passes the contract
+  #177 5d681b4  feat(bench): ADR-023 section 5 -- compare two result files:
+               what moved, never a verdict
+  #178 1514e3e  feat(agent): ADR-023 unit 2 -- environment context, off unless
+               asked for
+  #179 c812cb1  docs(readme): pac --agent lines start with
+               [action_required=true|false]
+  #180 b8ee118  ci: run the PostgreSQL-gated suites against a real server on
+               the Linux job
+  #181 3328062  test: the ledger and handoff gates hold a pull request one
+               merge below the limit
+  #182 3196641  feat(app): pac --documents says which files a directory walk
+               passed over
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1083,7 +1122,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at 8fcfa88)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at 3196641)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1092,6 +1131,226 @@ unrecorded ledger rows, and how far this section is behind main. This section
 holds only what git cannot know. tests/unit/test_handoff_freshness.py fails CI
 when the header above is more than 3 merges behind main: update it in the next
 PR, as with the ledger.
+
+WHERE THINGS STAND (2026-10-02)
+  - Since 6d4fe15: #167 (ADR-023 accepted), #173 (the previous handoff),
+    #174 (unit 1), #176 (the section 8.3 benchmark change), #175 (the record
+    of those two), #177 (the comparison tool), #179 (README: the agent line
+    prefix), #178 (unit 2), #180 (PostgreSQL in CI), #181 (the lag gates)
+    and #182 (`pac --documents` names the files a directory walk skipped)
+    merged; main is 3196641. Open: #162 (stale, "Open, not ours" below).
+  - Merged (#182): `pac --documents DIR` used to read only the `.md` and
+    `.txt` files in DIR and drop the rest without a word. It now prints one
+    line before the `documents:` summary naming the kinds passed over and how
+    many of each (`skipped: 4 file(s) that are not .md or .txt -- .pdf (3),
+    .env (1); ...`): kinds and counts, never contents; six kinds then "and N
+    more"; a file named explicitly is read and so never reported. What is
+    ingested did not change. (This was item 8 of the rig session's list, left
+    to the lead.)
+  - CI (#180): the PostgreSQL-gated suites -- 55 tests on persistence/postgres.py,
+    ADR-016, the largest module in the repository -- now run on the Linux job
+    against a postgres:16 service container. Until now CI advertised no server
+    and they skipped, and a skip reads like a pass. They passed 55 of 55 against
+    PostgreSQL 16 when first run (2026-10-02) and on GitHub's runner (the suite
+    job: 2107 passed, 24 skipped; the 24 are the allowed token-estimator and
+    dependency-direction skips). suite-windows still has no server (Windows
+    runners cannot run service containers) and still skips them with the
+    accounted reason. The URL is set per step, not job-wide, because "Test
+    support package resolves" asserts that none is advertised; it says
+    `localhost`, not 127.0.0.1, because a test builds another host spelling from
+    it. Check names are unchanged, so branch protection is untouched. The
+    service is a throwaway container, not Neon and not any database the owner
+    uses.
+  - main went red for one run (2026-10-02, the #176 merge) and was fixed by
+    #175: after #174 the ledger and the handoff were exactly 3 merges behind,
+    and #176 made it 4. A PR cannot count its own merge, so its CI could not
+    warn. The rule below ("update this header in any PR that finds it 3 merges
+    behind") is the one that was not applied. NOW ENFORCED: on a pull_request
+    run the two gates (tests/unit/test_merge_ledger.py and
+    test_handoff_freshness.py, through tests/support/lag_limit.py) hold the PR
+    one merge below the limit, because its own merge will count -- 2 on a PR, 3
+    on main. Replaying the incident state with only that change: as main sees
+    it, it passes; as a pull request sees it, both gates fail and say why. A PR
+    that finds the record 3 behind must refresh the header and the ledger itself.
+    Because the repository also requires every branch to be up to date with
+    main, merges are sequential: after one lands, update the next PR's branch
+    and let CI re-run before merging it.
+  - Merged (#178): ADR-023 unit 2, environment context, section 2.1.
+    OFF unless asked for: `build_agent(environment_context=True)` and the
+    benchmark flag `--environment-context`; `pac --agent` is not changed
+    (adopting a control there is the owner's, on the measured result, section
+    4). At the start of a run the program reads the system and what its shell
+    does with quotes and wildcards, the runtime, whether the workspace is a
+    repository, the supported test command and what run_command accepts, and
+    shows them to the model in one extra system block of at most 400 tokens
+    (about 5% of an 8192 window). The test command is resolved in the ADR's
+    order (contract, caller, verified configuration, discovery) and is offered
+    only if the command policy already accepts it. It reads files only: it
+    does NOT run `git status`, which can execute programs a repository's own
+    config names (core.fsmonitor, filters). Not built: the contract and caller
+    inputs have no plumbing, and the verification rules of section 2.1 belong
+    to unit 3. Built under the owner's standing instruction of 2026-10-02 to
+    the lead to decide and handle merges; NOT measured.
+  - Merged: #177, `python -m personal_ai_core.app.bench.compare BASELINE NEW`:
+    ADR-023 section 5 as one command. Its failure classes are computed from
+    the records and reproduce section 1.2 exactly on the baseline (52, 43, 14,
+    2 of 111, by language); a test pins that. It warns when two files are not
+    comparable (model, scorer, num_ctx, runs, languages, weights, task set, a
+    digest the contract does not explain) and decides nothing.
+  - Merged: #176 (feat/bench-action-required-contract, 2026-10-02, 16 files,
+    +238/-13, CI green: suite, static, suite-windows; merged on the owner's
+    instruction). ADR-023 section 8.3 and nothing else: the 12 agent task
+    files state action_required=true; the runner builds an AgentTaskContract
+    from the task file and passes it to the loop, so unit 1's gate now
+    engages in the benchmark; each agent run records action_required and
+    action_rejections, with the descriptive signal action_rejected; the
+    header's `contract` key says a contract was passed (a file without it ran
+    without one); the task digest includes the contract, so the baseline is
+    not resumed; rescore also accepts the digest from before the field,
+    because the contract changes no check -- without that the immutable
+    baseline could not be rescored (four agent tasks have answer checks). The
+    baseline files and their pinned sha256 are untouched. NOT RUN: the 240
+    runs are the owner's, on the rig.
+  - Merged: #174 (feat/adr-023-unit-1, 2026-10-02 18:14 UTC, 4 files,
+    +195/-9, CI green at 9a8dac7: suite, static, suite-windows). ADR-023
+    unit 1, section 8.2: with a contract and action_required=true, an answer
+    before any executed tool call is rejected, the model is told once
+    (ACTION_REQUIRED_MESSAGE), each rejection is one failure from the global
+    budget of 3, and an AGENT_ANSWER_REJECTED event records it (counts, never
+    text). A denied or invalid call does not count as executed; an executed
+    call that failed does (requiring evidence is unit 3). Read against
+    section 8.2 while it was open, the behaviour matches. The gate is live
+    only in `pac --agent`, for lines prefixed `[action_required=true]`.
+    Recorded about the merge, not decided here:
+      (a) authority: the PR has no review and no comment. The owner's own
+          record in ADR-023 (status table and section 8.4) says it was
+          merged on the owner's instruction and that the message was
+          reviewed for correctness against section 8.2.
+      (b) the PR itself says the wording is English text injected as the
+          latest user message and may pull an Arabic task's answer into
+          English -- an inference, not an observation. The benchmark
+          measures it.
+      (c) not measured: until #176 the benchmark passed plain strings and
+          the gate never engaged there. It now does; the runs are not made.
+      (d) ADR-023 said no control was in the code. The owner corrected it
+          (status line, table, sections 2.2, 8.1, 8.2 and a new 8.4, commit
+          1becda0), and that commit is carried by the PR that records this
+          handoff. It still says the section 8.3 change is not yet approved:
+          true when written, out of date since #176; see "Next".
+  - Implemented with the owner's approval (#172): the caller-owned
+    `AgentTaskContract(task_text, action_required)` in core/agent.py, and the
+    strict per-line `pac --agent` prefix `[action_required=true|false] TASK`.
+    Owner decisions: a missing or malformed prefix is rejected before any
+    model call, the next line continues, the session exits 2; `false` means
+    only "action not required" (tools stay under RiskPolicy); AgentLoop.run
+    still takes a plain string (bench runner, tests), recorded as "no
+    contract" in AGENT_* payloads. #172 only recorded the contract; #174
+    enforces it for action_required=true (see "Merged" above).
+  - Authority for #172: the owner's explicit decisions of 2026-10-02 (the
+    caller-owned contract, the CLI syntax, decisions 1-3, "start
+    implementation"), given before ADR-023 was accepted. #172 built only its
+    first design decision (the task contract sets action_required) as a
+    recorded value, none of its controls. Codex built #172 in its own
+    worktree; the lead reviewed it, fixed a pyright error (f780498) and
+    opened the PR.
+  - ADR-023 ACCEPTED by the owner (2026-10-02, #167) with its first unit
+    specified in its section 8: action enforcement -- with a contract and
+    action_required=true, an answer with no executed tool call in the run is
+    rejected, the model told once, one failure from the global budget of 3.
+    The owner chose it ahead of environment context (decision 4's order)
+    because it targets Class 1, the largest.
+  - Not authorized yet: every other ADR-023 control (unit 3, verification, and
+    later). Each needs the owner's approval as its own PR. Built: the
+    benchmark change that lets unit 1 be measured (#176) and unit 2 (#178).
+  - The capability baseline is done and is the reference for every later
+    measurement:
+      raw   evals/results/bench/bench-20261002T081707Z.jsonl  (#165, a609f69,
+            240/240, bench-checks-v1: 106/240). Immutable; its sha256 is pinned
+            in tests/unit/test_bench_baseline_rescore.py.
+      v2    ...rescored-bench-checks-v2.jsonl (#166): 123/240 -- knowledge
+            114/120, agent 9/120. The only difference is the scorer: v1 did not
+            read a number that ended a sentence; 17 answer_number verdicts
+            FAIL->PASS (kb-api-port 10, kb-crossdoc-failed-port 7), each checked
+            by hand; nothing else changed. "Reported accuracy changed because of
+            a scorer correction", never "the system improved".
+  - Agent failures (111 of 120), partitioned from the records: 52 answered
+    without executing a tool (17 matched completion phrases -- on reading, 16
+    clearly claim an action that never happened and 1 is ambiguous; 31 of
+    37 Arabic ones had no Arabic script), 43 executed without adequate
+    verification, 14 refused on wrong or unknown environment commands
+    (python -m unittest, dotnet, cmd quoting), 2 protocol only. Knowledge:
+    six Arabic failures (script drift, one invented figure); citations 5/80,
+    informational (the grounding prompt never asks for them).
+  - ADR-023 (planning -> execution/test -> verification): ACCEPTED
+    2026-10-02 (#167); built so far: the contract (#172) and the unit 1
+    gate (#174), not yet measured. It records the owner's six design
+    decisions: the task contract (not the model) sets action_required;
+    structured claims need
+    observable evidence (the phrase list is telemetry, never the gate); test
+    command precedence contract > caller > verified repo config > constrained
+    discovery; order environment -> action -> execution -> evidence; ONE
+    global failure budget of 3 (per-control counters are telemetry only);
+    language guard out of scope (ADR-019/021 follow-up after the three
+    controls are measured). Measurement: the same 240, the same scorer, no
+    target score, failure-class transitions and budget exhaustion tracked.
+  - The owner's preliminary positions on ADR-023 section 7, kept as a review
+    record and deliberately NOT written into the ADR:
+      1. action_required without a task file needs a defined authority before
+         any implementation; never the model's judgement.
+      2. structured claims in the protocol are a prompt change: separate
+         review, not part of any implementation automatically.
+      3. created-then-modified is not a blocker: several claims on one artifact
+         are fine when each has its own evidence.
+      4. folding the plan into the first reply is a protocol-design decision,
+         not needed before accepting the principles.
+  - What changed agent behaviour today: only #164 (a609f69) -- the command
+    tools close stdin and kill the whole process tree on timeout. Merged with
+    the owner's approval BEFORE the baseline, which was measured on it. No
+    prompt, Boss model, benchmark task, Neon/pgvector/schema or legacy-repo
+    change.
+  - Fixed (#170): the task digest orders fixture files by their relative
+    POSIX path as text, so every platform gives `file-create-settings`
+    96fce7417d36a103. The raw baseline header keeps 150017ff71cb768d, the
+    pre-fix Windows digest; recorded in ADR-022 section 10. The other 23
+    digests are unchanged; the #166 rescore is unaffected.
+  - Rig notes: run pytest with PYTEST_DEBUG_TEMPROOT set to a writable folder
+    (the default temp root is locked there). Claude Code's shell on the rig
+    sets PYTHONIOENCODING=utf-8 with a cp1252 locale; #171 made the one test
+    that broke on it independent of that. One session per worktree: Codex
+    works in personal-ai-core-codex, never in the shared checkout.
+  - Open, not ours: #162 (docs/brand logo assets, branch ccr-4d137493-sqp6vv)
+    is based on cf629a2. Diagnosed from its CI logs: suite and suite-windows
+    each fail one test, test_the_handoff_is_at_most_a_few_merges_behind_main
+    (the header then named 8fcfa88, 4 merges behind), and nothing else; the
+    static job passes. The cause is a stale branch, not its assets or code.
+    Merging main into the branch gives it the current handoff header and a
+    fresh CI run; the owner decides whether it goes ahead.
+  - Next, for the owner to decide (nothing is in progress):
+      1. Done: ADR-023 accepted with unit 1 (#167).
+      2. Done: unit 1, action enforcement in agent/loop.py (ADR-023
+         section 8.2), aimed at Class 1 (52 of 111 agent failures): #174.
+         Not yet measurable. The owner records the approval of its wording
+         (see "Merged" above).
+      3. Done: the section 8.3 benchmark change (#176).
+      4. Next, the owner's, on the rig: measure. Fresh worktree of main;
+         `ai status` showing 8192 on the GPU; `python -m
+         personal_ai_core.app.bench --runs 5 --num-ctx 8192` (about 25
+         minutes; it writes a new file and never touches the baseline);
+         commit the new file unmodified as an eval PR, as #165 did. Read it
+         against the baseline by failure class, never by a target score
+         (ADR-023 section 5): `python -m personal_ai_core.app.bench.compare
+         BASELINE NEW` (#177) reproduces the ADR's 52/43/14/2 on the baseline
+         and decides nothing.
+      5. Then, the owner's, on the rig: the same run with
+         `--environment-context` (unit 1 + unit 2, the same code and one flag),
+         compared with the unit-1 file. Class 3 is the one expected to move;
+         read the Arabic rows (the English block sits in a system message, not
+         the latest user message, but that is an inference, not an observation).
+  - Rules learned today: update this header in any PR that finds it 2 or more
+    merges behind -- CI now fails a PR at 3 (main went red after #163, and again
+    after #176, when it slipped to 4); a scorer fix is
+    the smallest rule that fixes the defect, proved by re-judging the same
+    recorded runs both ways.
 
 Who decides
   - The owner delegated engineering direction to the lead session. In practice
@@ -1133,15 +1392,22 @@ ADR-020 (evaluating a candidate model) -- where it stands
     knowledge (three corpora, one Arabic; three declines; one
     cross-document) (#161); smoke run on the rig 2026-10-02 (4 runs, clean;
     found: citation never asked for -> informational, python -m mypy refused
-    -> allowed, approval wording on steps); (4) the 240-run baseline on the rig. Before unit 4 runs, show the owner the allowlist
-    (`policy.describe()`). After the baseline: STOP and report the gaps; the
-    owner picks the 2-3 biggest failure causes to work on.
+    -> allowed, approval wording on steps (#163)); first baseline attempt at
+    cf629a2 stopped at 98/240: the model ran `pytest --pdb`, the debugger
+    waited for input, and the shell timeout killed only cmd.exe -- fixed in
+    the agent's tools (stdin closed, process tree killed); the partial file
+    is discarded, the 240 are re-run on the fixed commit. (4) DONE: the
+    240-run baseline at a609f69 (#165): 106/240 under bench-checks-v1;
+    rescored with v2 (a number ending a sentence was not read; 17 answers)
+    123/240 -- knowledge 114/120, agent 9/120. Agent failures: answers
+    without acting, acts without verifying, wrong environment commands.
+    See WHERE THINGS STAND above.
   - Owner's order after the baseline: planning + execute/test + verification,
     semantic RAG, experience/memory, real sandbox, stronger models,
     multi-agent only if needed; LoRA last, only on evidence.
   - Owner's priorities (2026-10-02): MEASUREMENT FIRST. Build the system --
     model, planning, memory, RAG, tools, agent loop, verification, sandbox,
-    multi-agent when needed -- against a capability benchmark (ADR-022, next),
+    multi-agent when needed -- against a capability benchmark (ADR-022, done),
     and look at LoRA/fine-tuning only if the baseline shows a recurring weakness
     that prompting, RAG, tools, memory, architecture or model choice cannot fix.
   - ADR-021 (grammar during decoding): PROPOSED / DEFERRED. D1 Phases A-C only,
@@ -1178,6 +1444,13 @@ The rig (owner's Windows PC, GTX 1060 6GB)
     before a measurement and never pull during one.
   - Do not delete the locked pytest-of-loyal folder; use --basetemp or
     PYTEST_DEBUG_TEMPROOT. No CPU-heavy work (pytest included) during runs.
+    The benchmark needs PYTEST_DEBUG_TEMPROOT=%TEMP%\pt on the rig (a fixture
+    test uses tmp_path); its results header records it.
+  - Benchmark on the rig: a fresh worktree from main, PYTHONPATH=src,
+    PYTEST_DEBUG_TEMPROOT set, `python -m personal_ai_core.app.bench --runs 5
+    --num-ctx 8192`; about 20-25 minutes for 240. A hang is stopped and
+    reported, never rescued by hand and continued (#164 exists because of
+    that). Results go in their own PR, unmodified.
   - Keep Smart App Control on. No driver update, no OLLAMA_GPU_LAYERS change.
   - pac experiments use --database pointing at a temporary file. 50 test
     sessions from 2026-10-01 sit in the owner's real ~/.personal-ai-core/core.db;
@@ -1218,6 +1491,10 @@ Not every ADR is accepted. PROPOSED, not accepted:
 - ADR-010 (persistence) — recommends without selecting; nothing is selected.
 - ADR-011 (identity layer contract) — fixes the shape of the contract;
   authorises no implementation.
+- ADR-021 (grammar during decoding) — PROPOSED / DEFERRED until after the
+  capability baseline; Phases A-C only when revisited.
+- ADR-023 (planning, execution/test, verification) — ACCEPTED 2026-10-02 with
+  its first unit specified (section 8); no other control is authorized.
 
 Record what is PROPOSED versus accepted, never whether a PR has merged. The
 previous wording said ADR-011 was "NOT merged (PR #24)", which was true when it

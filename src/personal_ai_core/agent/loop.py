@@ -34,17 +34,22 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
-from ..core.agent import AuditRecord, Decision, ToolRequest
+from ..core.agent import AgentTaskContract, AuditRecord, Decision, ToolRequest
 from ..core.contracts import EventRepository, IdentityComposer, ModelProvider
 from ..core.domain import Event, EventType, Message, Role
+from .environment import EnvironmentContext
 from .executor import ToolExecutor
 from .recovery import ActionBudget, Checkpoints
 from .verifier import Verifier
 
 MAX_TASK_CHARS = 8_000
 RESULT_TOKEN_LENGTH = 16
+ACTION_REQUIRED_MESSAGE = (
+    "Action required: this task requires you to act with a tool before answering, "
+    "and no tool call has run yet. Reply with one tool call."
+)
 
 PROTOCOL = """You are working as an agent in the user's workspace, with tools.
 
@@ -86,6 +91,9 @@ class AgentOutcome:
     stopped_reason: str | None
     touched_files: tuple[str, ...] = field(default=())
     protocol_errors: int = 0
+    action_rejections: int = 0
+    # What the environment context recorded for this run (ADR-023 §2.1); None when off.
+    environment: Mapping[str, Any] | None = None
 
     @property
     def finished(self) -> bool:
@@ -173,6 +181,7 @@ class AgentLoop:
         identity: IdentityComposer | None = None,
         events: EventRepository | None = None,
         session_exists: Callable[[str], bool] | None = None,
+        environment: EnvironmentContext | None = None,
         max_actions: int = 12,
         max_failures: int = 3,
         generation_limit: int = 1024,
@@ -185,13 +194,14 @@ class AgentLoop:
         self._checkpoints = checkpoints
         self._identity = identity
         self._events = events
+        self._environment = environment
         self._max_actions = max_actions
         self._max_failures = max_failures
         self._generation_limit = generation_limit
 
     def run(
         self,
-        task: str,
+        task: str | AgentTaskContract,
         *,
         session_id: str,
         on_step: Callable[[Step], None] | None = None,
@@ -208,11 +218,19 @@ class AgentLoop:
         """
         if self._session_exists is not None and not self._session_exists(session_id):
             raise KeyError(f"unknown session: {session_id}")
-        task = task.strip()[:MAX_TASK_CHARS]
+        if isinstance(task, AgentTaskContract):
+            contract, task_text = task, task.task_text
+        else:
+            contract, task_text = None, task.strip()
+        task_text = task_text[:MAX_TASK_CHARS]
         budget = ActionBudget(max_actions=self._max_actions, max_failures=self._max_failures)
-        messages = self._opening(task, session_id)
+        composed = self._environment.compose() if self._environment is not None else None
+        environment = dict(composed.record) if composed is not None else None
+        messages = self._opening(task_text, session_id, composed.text if composed else None)
         steps: list[Step] = []
         protocol_errors = 0
+        action_rejections = 0
+        tool_executed = False
 
         while budget.allowed():
             reply = self._provider.generate(
@@ -232,7 +250,27 @@ class AgentLoop:
                 continue
 
             if "answer" in proposal:
-                return self._finish(proposal["answer"], steps, session_id, protocol_errors)
+                if (
+                    contract is not None
+                    and contract.action_required
+                    and not tool_executed
+                ):
+                    action_rejections += 1
+                    budget.record(ok=False)
+                    self._record_answer_rejected(
+                        session_id, action_rejections, contract
+                    )
+                    messages.append(self._user(session_id, ACTION_REQUIRED_MESSAGE))
+                    continue
+                return self._finish(
+                    proposal["answer"],
+                    steps,
+                    session_id,
+                    protocol_errors,
+                    contract,
+                    action_rejections,
+                    environment,
+                )
 
             record = self._executor.execute(
                 ToolRequest(tool=proposal["tool"], arguments=proposal["arguments"])
@@ -246,17 +284,28 @@ class AgentLoop:
                 ),
             )
             steps.append(step)
+            tool_executed = tool_executed or record.executed
             budget.record(ok=step.verified)
-            self._record_step(step, session_id)
+            self._record_step(step, session_id, contract)
             if on_step is not None:
                 on_step(step)
             messages.append(self._user(session_id, _describe(step)))
 
-        return self._stop(budget.summary(), steps, session_id, protocol_errors)
+        return self._stop(
+            budget.summary(),
+            steps,
+            session_id,
+            protocol_errors,
+            contract,
+            action_rejections,
+            environment,
+        )
 
     # --- helpers ---------------------------------------------------------------
 
-    def _opening(self, task: str, session_id: str) -> list[Message]:
+    def _opening(
+        self, task: str, session_id: str, environment: str | None = None
+    ) -> list[Message]:
         messages: list[Message] = []
         if self._identity is not None:
             messages.append(self._identity.compose(session_id=session_id))
@@ -267,6 +316,10 @@ class AgentLoop:
                 content=PROTOCOL + _tool_catalogue(self._executor),
             )
         )
+        if environment is not None:
+            messages.append(
+                Message(session_id=session_id, role=Role.SYSTEM, content=environment)
+            )
         messages.append(self._user(session_id, task))
         return messages
 
@@ -275,7 +328,14 @@ class AgentLoop:
         return Message(session_id=session_id, role=Role.USER, content=content)
 
     def _finish(
-        self, answer: str, steps: list[Step], session_id: str, protocol_errors: int
+        self,
+        answer: str,
+        steps: list[Step],
+        session_id: str,
+        protocol_errors: int,
+        contract: AgentTaskContract | None,
+        action_rejections: int,
+        environment: Mapping[str, Any] | None = None,
     ) -> AgentOutcome:
         check = self._verifier.verify_response(answer)
         if not check.passed:
@@ -287,12 +347,21 @@ class AgentLoop:
             stopped_reason=None,
             touched_files=self._touched(),
             protocol_errors=protocol_errors,
+            action_rejections=action_rejections,
+            environment=environment,
         )
-        self._record_finish(outcome, session_id)
+        self._record_finish(outcome, session_id, contract)
         return outcome
 
     def _stop(
-        self, reason: str, steps: list[Step], session_id: str, protocol_errors: int
+        self,
+        reason: str,
+        steps: list[Step],
+        session_id: str,
+        protocol_errors: int,
+        contract: AgentTaskContract | None,
+        action_rejections: int,
+        environment: Mapping[str, Any] | None = None,
     ) -> AgentOutcome:
         outcome = AgentOutcome(
             answer=None,
@@ -300,14 +369,18 @@ class AgentLoop:
             stopped_reason=reason,
             touched_files=self._touched(),
             protocol_errors=protocol_errors,
+            action_rejections=action_rejections,
+            environment=environment,
         )
-        self._record_finish(outcome, session_id)
+        self._record_finish(outcome, session_id, contract)
         return outcome
 
     def _touched(self) -> tuple[str, ...]:
         return self._checkpoints.touched() if self._checkpoints is not None else ()
 
-    def _record_step(self, step: Step, session_id: str) -> None:
+    def _record_step(
+        self, step: Step, session_id: str, contract: AgentTaskContract | None
+    ) -> None:
         if self._events is None:
             return
         record = step.record
@@ -333,25 +406,56 @@ class AgentLoop:
                     "verified": step.verified,
                     "duration_ms": result.duration_ms if result is not None else 0,
                     "truncated": result.truncated if result is not None else False,
+                    "action_required": (
+                        contract.action_required if contract is not None else "no contract"
+                    ),
                 },
             )
         )
 
-    def _record_finish(self, outcome: AgentOutcome, session_id: str) -> None:
+    def _record_answer_rejected(
+        self, session_id: str, rejection: int, contract: AgentTaskContract
+    ) -> None:
         if self._events is None:
             return
         self._events.append(
             Event(
                 session_id=session_id,
-                type=EventType.AGENT_FINISHED,
+                type=EventType.AGENT_ANSWER_REJECTED,
                 actor="agent",
                 payload={
-                    "finished": outcome.finished,
-                    "steps": len(outcome.steps),
-                    "protocol_errors": outcome.protocol_errors,
-                    "stopped_reason": outcome.stopped_reason,
-                    "touched_files": list(outcome.touched_files),
+                    "reason": "action_required",
+                    "rejection": rejection,
+                    "action_required": contract.action_required,
                 },
+            )
+        )
+
+    def _record_finish(
+        self, outcome: AgentOutcome, session_id: str, contract: AgentTaskContract | None
+    ) -> None:
+        if self._events is None:
+            return
+        payload: dict[str, Any] = {
+            "finished": outcome.finished,
+            "steps": len(outcome.steps),
+            "protocol_errors": outcome.protocol_errors,
+            "stopped_reason": outcome.stopped_reason,
+            "touched_files": list(outcome.touched_files),
+            "action_rejections": outcome.action_rejections,
+            "action_required": (
+                contract.action_required if contract is not None else "no contract"
+            ),
+        }
+        # Only when the context was on: with it off the event is what it always was.
+        if outcome.environment is not None:
+            payload["environment"] = dict(outcome.environment)
+        self._events.append(
+            Event(
+                session_id=session_id,
+                type=EventType.AGENT_FINISHED,
+                actor="agent",
+                payload=payload,
             )
         )
 

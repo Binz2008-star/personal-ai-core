@@ -33,7 +33,7 @@ earlier run to continue it.
 | `--session ID` | continue an earlier conversation |
 | `--language ar` | tag the turn. Left undetermined when not given, because guessing it would record a claim nothing measured |
 | `--documents PATH` | answer from a file, or a directory of `.md` and `.txt` files. Repeatable |
-| `--agent --workspace DIR` | each line is a task the agent carries out inside `DIR` |
+| `--agent --workspace DIR` | each line is `[action_required=true\|false] TASK`, carried out by the agent inside `DIR` |
 | `--profile PATH` | a Markdown file about you. Also `$PAC_PROFILE`; defaults to `profile.md` beside the database |
 | `--remember "..."` | add one line to your profile, and exit |
 
@@ -57,13 +57,25 @@ embedder: it matches surface overlap, not meaning. There is no semantic model ye
 
 ```console
 $ pac --documents ~/notes
+skipped: 4 file(s) that are not .md or .txt -- .pdf (3), .env (1); name a file itself to read it whatever its type
 documents: 12 file(s), 31 chunk(s) -- held in memory, read again on every run
 ```
 
+A directory contributes only its `.md` and `.txt` files, and `pac` says what it passed over:
+the kinds and how many of each, never what a file holds. A file you name yourself is read
+whatever its type, so a `.pdf` or a `.rst` you want is a path away.
+
 **The agent: it acts, inside one directory, and asks before anything risky.** With
-`--agent --workspace DIR`, each line you type is a task. The model proposes one tool call
-at a time; the policy gate, the sandbox and the verifier decide what happens
-(`docs/AGENT_ARCHITECTURE.md`).
+`--agent --workspace DIR`, each line you type is a task, and it starts with whether the task
+requires action: `[action_required=true]` or `[action_required=false]`, then a space, then the
+task. With `true`, the agent may not answer until a tool call has actually run (a call you
+refused, or one with invalid arguments, does not count); an answer before that is rejected, the
+model is told, and the rejection counts as a failure; after three failures of any kind the run
+stops without an answer.
+With `false` it may answer in words; tools stay under the same policy. A line without the
+prefix is refused before the model is called, the next line carries on, and the session exits
+with code 2. The model proposes one tool call at a time; the policy gate, the sandbox and the
+verifier decide what happens (`docs/AGENT_ARCHITECTURE.md`, `docs/ADR/ADR-023-plan-execute-verify.md`).
 
 | Tool | Risk | What happens |
 |---|---|---|
@@ -77,7 +89,7 @@ at a time; the policy gate, the sandbox and the verifier decide what happens
 
 ```console
 $ pac --agent --workspace ~/projects/notes
-you> summarise notes.md into summary.md
+you> [action_required=true] summarise notes.md into summary.md
   · read_file {"path": "notes.md"} -> ok
   · write_file {"path": "summary.md", ...} -> ok
 core> I wrote the summary to summary.md.

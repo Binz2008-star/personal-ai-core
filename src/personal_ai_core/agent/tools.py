@@ -27,7 +27,9 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import signal
 import subprocess
+import sys
 from typing import Any, Mapping
 
 from ..core.agent import RiskLevel, ToolResult, ToolSpec
@@ -47,6 +49,54 @@ def _bounded(text: str) -> tuple[str, bool]:
     if len(text) <= MAX_OUTPUT_CHARS:
         return text, False
     return text[:MAX_OUTPUT_CHARS], True
+
+
+def run_bounded(
+    args: str | list[str], *, cwd: Any, env: Mapping[str, str], timeout: int, shell: bool = False
+) -> tuple[int, str, str]:
+    """Run a command with no input and a timeout that actually ends it.
+
+    Found on the rig, 2026-10-02 (ADR-022 baseline): the model ran
+    `python -m pytest --pdb`; the failing test opened the debugger, which waited
+    for input forever. `subprocess.run(timeout=...)` then killed only `cmd.exe`,
+    the python grandchild kept the output pipes open, and the run hung for 26
+    minutes. So: stdin is closed (a debugger or prompt reads end-of-file and
+    exits), and on timeout the whole process tree is killed, not only the
+    direct child. Raises subprocess.TimeoutExpired after the kill.
+    """
+    extra: dict[str, Any] = {}
+    if sys.platform != "win32":
+        extra["start_new_session"] = True  # its own process group, killed as one
+    process = subprocess.Popen(  # noqa: S603 -- callers validate or confirm the command
+        args, shell=shell, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+        errors="replace", **extra,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(process)
+        try:
+            process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass  # something outside the tree holds the pipes; give up on its output
+        raise
+    return process.returncode, stdout, stderr
+
+
+def _kill_tree(process: subprocess.Popen[str]) -> None:
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                       capture_output=True, timeout=30, check=False)
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    try:
+        process.kill()
+    except OSError:
+        pass
 
 
 class ReadFile:
@@ -343,29 +393,20 @@ class RunCommand:
         if os.name == "nt":
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
         try:
-            completed = subprocess.run(
-                args,
-                cwd=self._workspace.root,
-                env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=self.spec.timeout_seconds,
-                shell=False,
-                check=False,
+            returncode, stdout, stderr = run_bounded(
+                args, cwd=self._workspace.root, env=env, timeout=self.spec.timeout_seconds
             )
         except subprocess.TimeoutExpired:
             return ToolResult(ok=False, error=f"timed out after {self.spec.timeout_seconds}s")
         except FileNotFoundError:
             return ToolResult(ok=False, error=f"command not installed: {args[0]}")
-        combined = completed.stdout + (f"\n[stderr]\n{completed.stderr}" if completed.stderr else "")
+        combined = stdout + (f"\n[stderr]\n{stderr}" if stderr else "")
         output, truncated = _bounded(combined)
-        if completed.returncode != 0:
+        if returncode != 0:
             return ToolResult(
                 ok=False,
                 output=output,
-                error=f"exit code {completed.returncode}",
+                error=f"exit code {returncode}",
                 truncated=truncated,
             )
         return ToolResult(ok=True, output=output, truncated=truncated)
@@ -418,25 +459,18 @@ class Shell:
         if not command:
             return ToolResult(ok=False, error="no command")
         try:
-            completed = subprocess.run(
-                command,
-                shell=True,  # noqa: S602 -- the point of this tool; every command is confirmed
-                cwd=self._workspace.root,
-                env=shell_environment(),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+            # shell=True is the point of this tool; every command is confirmed.
+            returncode, stdout, stderr = run_bounded(
+                command, shell=True, cwd=self._workspace.root, env=shell_environment(),
                 timeout=self.spec.timeout_seconds,
-                check=False,
             )
         except subprocess.TimeoutExpired:
             return ToolResult(ok=False, error=f"timed out after {self.spec.timeout_seconds}s")
-        combined = completed.stdout + (f"\n[stderr]\n{completed.stderr}" if completed.stderr else "")
+        combined = stdout + (f"\n[stderr]\n{stderr}" if stderr else "")
         output, truncated = _bounded(combined)
-        if completed.returncode != 0:
+        if returncode != 0:
             return ToolResult(
-                ok=False, output=output, error=f"exit code {completed.returncode}", truncated=truncated
+                ok=False, output=output, error=f"exit code {returncode}", truncated=truncated
             )
         return ToolResult(ok=True, output=output or "(no output)", truncated=truncated)
 

@@ -15,7 +15,13 @@ from __future__ import annotations
 import io
 from typing import Any, Mapping
 
-from personal_ai_core.app.cli import _document_id, main
+from personal_ai_core.app.cli import (
+    UNREAD_KINDS_SHOWN,
+    _document_files,
+    _document_id,
+    _unread_line,
+    main,
+)
 from personal_ai_core.context import ScriptAwareTokenEstimator
 from personal_ai_core.conversation.factory import build_persistent_service
 from personal_ai_core.conversation.grounding import GROUNDING_PREAMBLE
@@ -196,6 +202,99 @@ def test_a_directory_contributes_only_text_files(tmp_path):
     code, output, _ = run(["--ephemeral", "--documents", str(folder)])
     assert code == 0
     assert "documents: 2 file(s)" in output
+
+
+def test_a_directory_says_which_files_it_passed_over(tmp_path):
+    """The corpus must not be quietly smaller than the folder.
+
+    `.env` and `.pdf` are the examples that matter: a user who points
+    `--documents` at a project folder and asks about a PDF in it should hear,
+    before the first answer, that the PDF was never read.
+    """
+    folder = notes(tmp_path)
+    (folder / "a.pdf").write_bytes(b"%PDF-1.7")
+    (folder / "b.PDF").write_bytes(b"%PDF-1.7")
+    (folder / "pic.png").write_bytes(b"\x89PNG")
+    (folder / ".env").write_text("TOKEN=hunter2-never-printed\n", encoding="utf-8")
+    (folder / "Makefile").write_text("all:\n", encoding="utf-8")
+    code, output, transport = run(["--ephemeral", "--documents", str(folder)])
+    assert code == 0
+    skipped = next(x for x in output.splitlines() if "not .md or .txt" in x)
+    assert skipped.startswith("skipped: 5 file(s)")
+    # Case does not make a second kind; a dotfile is named, not "no extension".
+    assert ".pdf (2)" in skipped and ".png (1)" in skipped
+    assert ".env (1)" in skipped and "(no extension) (1)" in skipped
+    assert "documents: 1 file(s)" in output
+    # Said before the corpus is summarised, so it is read with it.
+    assert output.index(skipped) < output.index("documents:")
+
+
+def test_what_was_passed_over_is_named_never_read(tmp_path):
+    """The report is a count of kinds. A skipped `.env` stays unread."""
+    folder = notes(tmp_path)
+    (folder / ".env").write_text("TOKEN=hunter2-never-printed\n", encoding="utf-8")
+    code, output, transport = run(["--ephemeral", "--documents", str(folder)])
+    assert code == 0
+    assert ".env (1)" in output
+    assert "hunter2" not in output
+    assert "hunter2" not in str(transport.payloads)
+
+
+def test_a_directory_of_text_files_has_nothing_to_report(tmp_path):
+    folder = notes(tmp_path)
+    (folder / "more.txt").write_text("more text here", encoding="utf-8")
+    code, output, _ = run(["--ephemeral", "--documents", str(folder)])
+    assert code == 0
+    assert "not .md or .txt" not in output
+
+
+def test_a_file_named_explicitly_is_not_reported_as_passed_over(tmp_path):
+    named = tmp_path / "notes.rst"
+    named.write_text(NOTE, encoding="utf-8")
+    code, output, _ = run(["--ephemeral", "--documents", str(named)])
+    assert code == 0
+    assert "not .md or .txt" not in output
+    assert "documents: 1 file(s)" in output
+
+
+def test_a_walk_passes_over_what_the_filter_refuses_and_nothing_else(tmp_path):
+    folder = notes(tmp_path)
+    (folder / "deep").mkdir()
+    (folder / "deep" / "x.png").write_bytes(b"\x89PNG")
+    (folder / "deep" / "y.txt").write_text("y", encoding="utf-8")
+    scan = _document_files([folder])
+    # Sorted by path, so `deep/y.txt` comes before `rrf.md`.
+    assert [p.name for p in scan.files] == ["y.txt", "rrf.md"]
+    assert [p.name for p in scan.unread] == ["x.png"]
+    assert scan.missing == []
+
+
+def test_the_report_is_one_bounded_line(tmp_path):
+    """A repository's `.git` holds hundreds of kinds; the line does not."""
+    kinds = UNREAD_KINDS_SHOWN + 3
+    unread = [tmp_path / f"f.k{i:02d}" for i in range(kinds)]
+    line = _unread_line(unread)
+    assert line is not None and "\n" not in line
+    assert f"skipped: {kinds} file(s)" in line
+    assert "and 3 more kind(s)" in line
+    assert line.count(" (1)") == UNREAD_KINDS_SHOWN
+
+
+def test_the_report_is_stable_and_most_common_first(tmp_path):
+    unread = [
+        tmp_path / "a.png",
+        tmp_path / "b.pdf",
+        tmp_path / "c.pdf",
+        tmp_path / "d.json",
+    ]
+    first = _unread_line(unread)
+    assert first == _unread_line(list(reversed(unread)))
+    assert first is not None
+    assert first.index(".pdf (2)") < first.index(".json (1)") < first.index(".png (1)")
+
+
+def test_nothing_passed_over_is_no_line():
+    assert _unread_line([]) is None
 
 
 def test_a_file_named_explicitly_is_read_whatever_its_suffix(tmp_path):

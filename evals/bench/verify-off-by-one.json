@@ -2,6 +2,7 @@
   "id": "verify-off-by-one",
   "track": "agent",
   "category": "verification",
+  "action_required": true,
   "fixture": "fixtures/off_by_one",
   "instruction": {
     "en": "The tests in test_calc.py fail. Fix the bug in calc.py without changing the tests, then run the tests to confirm they pass.",

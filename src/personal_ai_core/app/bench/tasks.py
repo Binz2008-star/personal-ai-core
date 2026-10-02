@@ -6,6 +6,7 @@ A task file is JSON:
       "id": "debug-off-by-one",
       "track": "agent",                     # or "knowledge"
       "category": "debugging",              # one of CATEGORIES
+      "action_required": true,              # agent only: the task contract (ADR-023 §8.3)
       "fixture": "fixtures/off_by_one",     # agent: copied into the workspace
       "git": true,                          # optional: the fixture is committed first
       "git_commits": [                      # optional, needs git: history on top of it
@@ -22,6 +23,11 @@ A task file is JSON:
         "calls": [{"tool": "run_command", "arguments": {"command": "pytest -q"}}]
       }
     }
+
+`action_required` is the task's contract (ADR-023 §8.3): an agent task states it
+as true or false and the runner passes it to the agent loop; a knowledge task
+does not use the agent loop and must not state it. The task file, never the
+model, says whether the task requires action.
 
 Paths are relative to the task file's directory. A task is admitted only when
 the reference solve passes every check and an empty run fails the task
@@ -78,6 +84,8 @@ class Task:
     corpus: Path | None = None
     git: bool = False
     git_commits: Sequence[Mapping[str, Any]] = ()
+    # The contract an agent task runs under; None for a knowledge task.
+    action_required: bool | None = None
 
 
 def _fail(task_id: str, reason: str) -> TaskError:
@@ -130,6 +138,14 @@ def parse(data: Mapping[str, Any], base: Path) -> Task:
     if all(spec.get("informational") for spec in checks):
         raise _fail(task_id, "every check is informational; nothing decides success")
 
+    action_required = data.get("action_required")
+    if track == "agent":
+        if not isinstance(action_required, bool):
+            raise _fail(task_id, "an agent task states action_required as true or false")
+    elif action_required is not None:
+        raise _fail(task_id, "a knowledge task does not use the agent loop; "
+                             "action_required cannot apply")
+
     fixture = corpus = None
     if track == "agent":
         if "fixture" not in data:
@@ -155,7 +171,8 @@ def parse(data: Mapping[str, Any], base: Path) -> Task:
         raise _fail(task_id, "no reference solve; a task is admitted only on one")
     return Task(id=task_id, track=track, category=category, instruction=dict(instruction),
                 checks=list(checks), reference=reference, base=base, fixture=fixture,
-                corpus=corpus, git=bool(data.get("git", False)), git_commits=list(git_commits))
+                corpus=corpus, git=bool(data.get("git", False)), git_commits=list(git_commits),
+                action_required=action_required)
 
 
 def load(directory: Path) -> list[Task]:

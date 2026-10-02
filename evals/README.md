@@ -233,6 +233,8 @@ python -m personal_ai_core.app.bench --show-policy
 python -m personal_ai_core.app.bench --runs 5 --num-ctx 8192
 # a run that was interrupted: continue the same file
 python -m personal_ai_core.app.bench --runs 5 --num-ctx 8192 --resume evals\results\bench\bench-<time>.jsonl
+# re-judge a result file's answer checks after a scorer fix (writes a new file beside it)
+python -m personal_ai_core.app.bench --rescore evals\results\bench\bench-<time>.jsonl
 # the summary of a result file
 python -m personal_ai_core.app.bench --report evals\results\bench\bench-<time>.jsonl
 ```
@@ -240,6 +242,7 @@ python -m personal_ai_core.app.bench --report evals\results\bench\bench-<time>.j
 - Before the first run every task is proved: its reference solve must pass and an empty run must fail. A task that is not admitted stops the benchmark.
 - `evals/results/bench/bench-<time>.jsonl` is written run by run: a header, one line per run, and an end line with what Ollama had loaded. Commit it unmodified.
 - Each run records: success and every check's verdict; the tool calls in order with each policy decision; the commands run; the approvals and their reasons; whether a test ran after the last edit; how the run stopped; seconds; every model call with its tokens and the options actually sent; the workspace's final files and git state; and mechanical failure signals (`no_answer`, `tool_refused`, `answered_without_acting`, `not_tested_after_edit`, `check:<type>`, ...).
+- The header records the environment variables that change how the tasks' own commands behave (`PYTEST_DEBUG_TEMPROOT`, `PYTHONPATH`, `PYTHONHASHSEED`, `PYTHONUTF8`), by name and value. On the rig, `PYTEST_DEBUG_TEMPROOT=%TEMP%\pt` is needed: the default pytest temp folder is access-denied there.
 - A check marked `"informational": true` is judged and reported as its own rate but does not decide success. The citation checks are informational: the system does not ask the model to cite.
 - **Containment, not a sandbox.** Agent tools stay in a temporary workspace, network tools are denied, and `shell` accepts only local git and Python/pytest. Code the agent writes and runs is not isolated from the network. Do not describe a result as sandboxed or offline.
 

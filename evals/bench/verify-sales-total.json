@@ -2,6 +2,7 @@
   "id": "verify-sales-total",
   "track": "agent",
   "category": "verification",
+  "action_required": true,
   "fixture": "fixtures/sales",
   "instruction": {
     "en": "total_sales in report.py gives the wrong total for sales.csv. Fix it, then run the tests and confirm they pass.",

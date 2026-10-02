@@ -2,6 +2,7 @@
   "id": "codegen-slugify",
   "track": "agent",
   "category": "code_generation",
+  "action_required": true,
   "fixture": "fixtures/slugify",
   "instruction": {
     "en": "Add a function slugify(text) to text_utils.py. It lowercases the text, keeps only letters and digits, and joins the words with single dashes. test_text_utils.py already tests it; do not change the tests.",

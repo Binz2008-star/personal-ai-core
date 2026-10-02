@@ -26,6 +26,7 @@ import dataclasses
 import hashlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -41,13 +42,22 @@ from ...conversation.factory import (
     describe_loaded,
     http_transport,
 )
+from ...core.agent import AgentTaskContract
 from ...core.config import DEFAULT_BOSS_MODEL, Settings
 from ...core.errors import ProviderError
 from ..cli import _ingest
 from ..evaluate import PASS, _git_commit, _machine
-from .checks import EDITING_TOOLS, RunEvidence, ToolCall, judge, tested_after_last_edit
+from .checks import (
+    CHECKS,
+    EDITING_TOOLS,
+    SCORER,
+    RunEvidence,
+    ToolCall,
+    judge,
+    tested_after_last_edit,
+)
 from .policy import BenchmarkConfirm, describe
-from .tasks import LANGUAGES, Task, load, materialize, prove
+from .tasks import ANSWER_CHECKS, LANGUAGES, Task, load, materialize, prove
 
 HARNESS = "ADR-022 capability benchmark v0"
 DEFAULT_TASKS = Path("evals/bench")
@@ -55,6 +65,11 @@ DEFAULT_OUT = Path("evals/results/bench")
 CLIP_CHARS = 2_000
 OUTPUT_CLIP_CHARS = 2_000
 # Not part of a workspace's final state: caches the checks or tests leave.
+# Environment variables that change how the tasks' own commands behave, recorded
+# in the header by name and value (paths, never secrets). PYTEST_DEBUG_TEMPROOT:
+# the rig needs it because its default pytest temp folder is access-denied
+# (2026-10-02); without it every `tmp_path` test errors there.
+RECORDED_ENVIRONMENT = ("PYTEST_DEBUG_TEMPROOT", "PYTHONPATH", "PYTHONHASHSEED", "PYTHONUTF8")
 IGNORED_PARTS = frozenset({".git", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"})
 
 Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
@@ -129,6 +144,8 @@ def _signals(record: Mapping[str, Any], evidence: RunEvidence) -> list[str]:
         signals.append("no_answer")
     if record.get("protocol_errors"):
         signals.append("protocol_errors")
+    if record.get("action_rejections"):
+        signals.append("action_rejected")
     steps = record.get("steps", [])
     if any(not s["executed"] and s["decision"] in ("deny", "ask") for s in steps):
         signals.append("tool_refused")
@@ -146,22 +163,36 @@ def _signals(record: Mapping[str, Any], evidence: RunEvidence) -> list[str]:
     return signals
 
 
+def _contract(task: Task, language: str) -> AgentTaskContract:
+    """The contract the task file states (ADR-023 §8.3), in the run's language."""
+    if task.action_required is None:
+        raise ValueError(f"{task.id}: an agent task states action_required")
+    return AgentTaskContract(task_text=task.instruction[language],
+                             action_required=task.action_required)
+
+
 def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
-                   workspace: Path) -> dict[str, Any]:
+                   workspace: Path, *, environment_context: bool = False) -> dict[str, Any]:
     workspace.mkdir(parents=True)
     materialize(task, workspace)
     confirm = BenchmarkConfirm()
-    record: dict[str, Any] = {"track": "agent"}
+    # The contract the run was held to, so a reader of the file need not guess
+    # whether the gate was engaged: baseline runs carry neither key ("no contract").
+    record: dict[str, Any] = {"track": "agent", "action_required": task.action_required}
     started = time.perf_counter()
     answer = None
     steps: tuple = ()
     try:
-        agent = build_agent(settings, workspace=workspace, transport=log, confirm=confirm)
-        outcome = agent.loop.run(task.instruction[language], session_id="bench")
+        agent = build_agent(settings, workspace=workspace, transport=log, confirm=confirm,
+                            environment_context=environment_context)
+        outcome = agent.loop.run(_contract(task, language), session_id="bench")
         answer, steps = outcome.answer, outcome.steps
         record["stop"] = "answered" if outcome.finished else "budget"
         record["stopped_reason"] = outcome.stopped_reason
         record["protocol_errors"] = outcome.protocol_errors
+        record["action_rejections"] = outcome.action_rejections
+        if outcome.environment is not None:
+            record["environment"] = dict(outcome.environment)
     except ProviderError as exc:
         record["stop"], record["error"] = "error", str(exc)
     record["seconds"] = round(time.perf_counter() - started, 3)
@@ -235,17 +266,30 @@ def run_knowledge_task(task: Task, language: str, settings: Settings, log: CallL
     return record
 
 
-def _task_digest(task: Task) -> str:
-    """The task and its fixture or corpus: a resumed run must measure the same tasks."""
+def _task_digest(task: Task, *, with_contract: bool = True) -> str:
+    """The task and its fixture or corpus: a resumed run must measure the same tasks.
+
+    The contract (`action_required`) is part of the task a run measured, so it is
+    in the digest: a file written before the contract existed, or under another
+    one, is not resumed (ADR-023 §8.3). A knowledge task has no contract and keeps
+    the digest it always had. `with_contract=False` is the digest from before the
+    field existed; `rescore` accepts it, because the contract changes no check.
+    """
+    parts: dict[str, Any] = {"instruction": task.instruction, "checks": task.checks,
+                             "git": task.git, "git_commits": task.git_commits}
+    if with_contract and task.action_required is not None:
+        parts["action_required"] = task.action_required
     digest = hashlib.sha256(json.dumps(
-        {"instruction": task.instruction, "checks": task.checks, "git": task.git,
-         "git_commits": task.git_commits},
-        sort_keys=True, ensure_ascii=False).encode("utf-8"))
+        parts, sort_keys=True, ensure_ascii=False).encode("utf-8"))
     for root in (task.fixture, task.corpus):
         if root is None:
             continue
-        for path in sorted(p for p in root.rglob("*") if p.is_file()):
-            digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        # Ordered by the relative path as text: Path ordering ignores letter case
+        # on Windows only, which put check_settings.py before README.md there and
+        # gave file-create-settings another digest than on Linux.
+        files = sorted((p.relative_to(root).as_posix(), p) for p in root.rglob("*") if p.is_file())
+        for relative, path in files:
+            digest.update(relative.encode("utf-8"))
             digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     return digest.hexdigest()[:16]
 
@@ -259,8 +303,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--only", nargs="+", metavar="TASK_ID")
     parser.add_argument("--languages", nargs="+", choices=LANGUAGES, default=list(LANGUAGES))
     parser.add_argument("--num-ctx", type=int, help="the context Ollama was started with")
+    parser.add_argument("--environment-context", action="store_true",
+                        help="give each agent run the environment facts the program read "
+                             "(ADR-023 §2.1, unit 2). Off by default, so a run is comparable "
+                             "with the baseline and with unit 1 alone")
     parser.add_argument("--resume", type=Path, help="continue an interrupted result file")
     parser.add_argument("--report", type=Path, help="print the summary of a result file")
+    parser.add_argument("--rescore", type=Path,
+                        help="re-judge the answer checks of a result file with the current "
+                             "checks, into a new file beside it (never overwrites)")
     parser.add_argument("--show-policy", action="store_true",
                         help="print the containment policy and exit")
     return parser
@@ -288,6 +339,8 @@ def main(
     if args.report is not None:
         print(report(_read(args.report)), file=out)
         return 0
+    if args.rescore is not None:
+        return rescore(args.rescore, args.tasks, out)
     if args.runs < 1:
         print("--runs must be at least 1", file=out)
         return 2
@@ -331,21 +384,29 @@ def main(
         "num_ctx_measured_by_owner": args.num_ctx,
         "num_ctx_sent_by_core": False,
         "profile": "none (deliberately empty)",
+        "environment_context": args.environment_context,
+        "contract": "each agent task file states action_required and the runner passes an "
+                    "AgentTaskContract built from it (ADR-023 §8.3); a file without this key "
+                    "ran without a contract",
         "judge_model": "none (ADR-013)",
+        "scorer": SCORER,
         "language_guard": settings.language_guard,
         "sampling": "recorded per model call as sent (options_sent); the agent loop "
                     "sends only num_predict",
         "policy": describe(),
         "environment": "benchmark containment, not a sandbox: code the agent runs is not "
                        "isolated from the network (ADR-022 §3.5)",
+        "environment_variables": {name: os.environ[name] for name in RECORDED_ENVIRONMENT
+                                  if name in os.environ},
     }
 
     done: set[tuple[str, str, int]] = set()
     if args.resume is not None:
         previous = _read(args.resume)
         old = previous[0] if previous and previous[0].get("kind") == "header" else {}
-        for key in ("commit", "model", "tasks", "runs", "languages"):
-            if old.get(key) != header[key]:
+        for key in ("commit", "model", "tasks", "runs", "languages", "environment_context"):
+            # A file from before the flag existed ran without the context.
+            if (bool(old.get(key)) if key == "environment_context" else old.get(key)) != header[key]:
                 print(f"refusing to resume: {key} differs from the file's header", file=out)
                 return 2
         done = {(r["task"], r["language"], r["run"]) for r in previous if r.get("kind") == "run"}
@@ -368,8 +429,11 @@ def main(
             if (task.id, language, run) in done:
                 continue
             workspace = Path(tmp) / f"{task.id}-{language}-{run}"
-            runner = run_agent_task if task.track == "agent" else run_knowledge_task
-            record = runner(task, language, settings, log, workspace)
+            if task.track == "agent":
+                record = run_agent_task(task, language, settings, log, workspace,
+                                        environment_context=args.environment_context)
+            else:
+                record = run_knowledge_task(task, language, settings, log, workspace)
             calls = log.take()
             record = {"kind": "run", "task": task.id, "track": task.track,
                       "category": task.category, "language": language, "run": run,
@@ -397,6 +461,80 @@ def main(
         print(f"WARNING: --num-ctx says {args.num_ctx} but Ollama has the model loaded at "
               f"{measured}; the file is marked context_mismatch.", file=out)
         return 3
+    return 0
+
+
+def rescore(path: Path, tasks_dir: Path, out: TextIO) -> int:
+    """Re-judge a result file's answer checks with the current checks.
+
+    Only checks that read the answer alone are re-judged: the answer is in the
+    record, the workspace is gone. Workspace checks keep their recorded verdict.
+    The result goes to a new file beside the source, which is never modified,
+    and whose header names the source and the scorer applied. A task whose
+    answer checks are re-judged must not have changed since the run (its digest
+    must match): otherwise its checks would not be the ones the run was judged by.
+    """
+    lines = _read(path)
+    header = lines[0] if lines and lines[0].get("kind") == "header" else None
+    if header is None:
+        print(f"refusing to rescore: {path} has no header", file=out)
+        return 2
+    before = header.get("scorer", "bench-checks-v1")
+    if before == SCORER:
+        print(f"nothing to do: {path} was scored with {SCORER}", file=out)
+        return 2
+    target = path.with_name(f"{path.stem}.rescored-{SCORER}.jsonl")
+    if target.exists():
+        print(f"refusing to rescore: {target} exists; results are never overwritten", file=out)
+        return 2
+    tasks = {t.id: t for t in load(tasks_dir)}
+    for task_id, recorded in header.get("tasks", {}).items():
+        task = tasks.get(task_id)
+        if task is None:
+            print(f"refusing to rescore: task {task_id} is missing", file=out)
+            return 2
+        # Only a task whose answer checks are re-judged must be the same task;
+        # the others keep their recorded verdicts and are not re-read.
+        # A file from before the contract recorded the digest without it; the
+        # contract changes no check, so that form still proves the task is the one.
+        rejudged = any(c["type"] in ANSWER_CHECKS for c in task.checks)
+        if rejudged and recorded.get("digest") not in (
+                _task_digest(task), _task_digest(task, with_contract=False)):
+            print(f"refusing to rescore: task {task_id} changed since the run", file=out)
+            return 2
+    rescored = [{**header, "scorer": SCORER, "rescored_from": path.name, "rescored_with": SCORER,
+                 "scorer_before": before}]
+    changed = 0
+    for line in lines[1:]:
+        if line.get("kind") != "run":
+            rescored.append(line)
+            continue
+        task = tasks[line["task"]]
+        if len(task.checks) != len(line["checks"]):
+            print(f"refusing to rescore: {line['task']} has another number of checks", file=out)
+            return 2
+        evidence = RunEvidence(workspace=Path("."), answer=line.get("answer"))
+        checks = []
+        for spec, old in zip(task.checks, line["checks"]):
+            if spec["type"] not in ANSWER_CHECKS:
+                checks.append(old)
+                continue
+            params = {k: v for k, v in spec.items() if k not in ("type", "informational")}
+            verdict, detail = CHECKS[spec["type"]](evidence, **params)
+            new = {**old, "verdict": verdict, "detail": detail}
+            changed += new["verdict"] != old["verdict"]
+            checks.append(new)
+        success = all(c["verdict"] == PASS for c in checks if not c.get("informational"))
+        signals = [s for s in line.get("signals", []) if not s.startswith("check:")]
+        if not success:
+            signals += [f"check:{c['check']}" for c in checks
+                        if c["verdict"] != PASS and not c.get("informational")]
+        rescored.append({**line, "checks": checks, "success": success, "signals": signals})
+    target.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in rescored),
+                      encoding="utf-8")
+    print(report(rescored), file=out)
+    print(f"{changed} check verdict(s) changed ({before} -> {SCORER})", file=out)
+    print(f"rescored: {target}", file=out)
     return 0
 
 

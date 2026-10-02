@@ -125,6 +125,9 @@ class EventType(str, Enum):
     # when a run ends. Emitted only by agent/loop.py.
     AGENT_STEP = "agent.step"
     AGENT_FINISHED = "agent.finished"
+    # ADR-023 unit 1: an answer was rejected because action was required.
+    # Counts only, never text. Emitted only by agent/loop.py.
+    AGENT_ANSWER_REJECTED = "agent.answer_rejected"
     # Phase 7 (ADR-017): the durable form of a FeedbackRecord. Deliberately
     # no "memory." prefix -- feedback is judgement of what happened, not a
     # promotion event, so a leak into the conversation stream cannot

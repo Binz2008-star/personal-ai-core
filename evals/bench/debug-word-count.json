@@ -2,6 +2,7 @@
   "id": "debug-word-count",
   "track": "agent",
   "category": "debugging",
+  "action_required": true,
   "fixture": "fixtures/word_count",
   "instruction": {
     "en": "The tests in test_words.py fail. Find the bug in words.py and fix it. Do not change the tests.",
