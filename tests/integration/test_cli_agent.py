@@ -77,6 +77,26 @@ def test_a_malformed_task_does_not_stop_later_valid_tasks(tmp_path, capsys):
     assert len(transport.sent) == 1  # type: ignore[attr-defined]
 
 
+def test_action_required_answer_only_task_is_rejected_until_budget_stops(tmp_path):
+    transport = scripted(
+        '{"answer": "first"}',
+        '{"answer": "second"}',
+        '{"answer": "third"}',
+    )
+    code, output, _ = run(tmp_path, transport, "[action_required=true] change the workspace")
+    assert code == 0
+    assert "stopped: 3 failed actions" in output
+    assert "core> first" not in output
+    assert len(transport.sent) == 3  # type: ignore[attr-defined]
+
+
+def test_action_not_required_answer_only_task_is_accepted(tmp_path):
+    transport = scripted('{"answer": "just explaining"}')
+    code, output, _ = run(tmp_path, transport, "[action_required=false] explain this")
+    assert code == 0
+    assert "core> just explaining" in output
+
+
 @pytest.mark.parametrize(
     ("line", "task_text", "action_required"),
     [
@@ -115,7 +135,7 @@ def test_a_command_waits_for_the_users_yes(tmp_path):
         '{"tool": "run_command", "arguments": {"command": "git status"}}',
         '{"answer": "done"}',
     )
-    _code, output, _ = run(tmp_path, transport, "[action_required=true] check git", "n")
+    _code, output, _ = run(tmp_path, transport, "[action_required=false] check git", "n")
     assert "? run_command" in output and "high risk. Allow? [y/N]" in output
     assert "-> not allowed by you" in output
 
@@ -126,7 +146,7 @@ def test_the_answer_to_a_prompt_is_not_taken_as_a_task(tmp_path):
         '{"tool": "run_command", "arguments": {"command": "git status"}}',
         '{"answer": "done"}',
     )
-    run(tmp_path, transport, "[action_required=true] check git", "y")
+    run(tmp_path, transport, "[action_required=false] check git", "y")
     assert len(transport.sent) == 2  # type: ignore[attr-defined]
 
 
@@ -135,7 +155,7 @@ def test_end_of_input_at_a_prompt_is_a_no(tmp_path):
         '{"tool": "run_command", "arguments": {"command": "git status"}}',
         '{"answer": "done"}',
     )
-    _, output, _ = run(tmp_path, transport, "[action_required=true] check git")
+    _, output, _ = run(tmp_path, transport, "[action_required=false] check git")
     assert "-> not allowed by you" in output
 
 

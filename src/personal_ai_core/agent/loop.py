@@ -45,6 +45,10 @@ from .verifier import Verifier
 
 MAX_TASK_CHARS = 8_000
 RESULT_TOKEN_LENGTH = 16
+ACTION_REQUIRED_MESSAGE = (
+    "Action required: this task requires you to act with a tool before answering, "
+    "and no tool call has run yet. Reply with one tool call."
+)
 
 PROTOCOL = """You are working as an agent in the user's workspace, with tools.
 
@@ -86,6 +90,7 @@ class AgentOutcome:
     stopped_reason: str | None
     touched_files: tuple[str, ...] = field(default=())
     protocol_errors: int = 0
+    action_rejections: int = 0
 
     @property
     def finished(self) -> bool:
@@ -217,6 +222,8 @@ class AgentLoop:
         messages = self._opening(task_text, session_id)
         steps: list[Step] = []
         protocol_errors = 0
+        action_rejections = 0
+        tool_executed = False
 
         while budget.allowed():
             reply = self._provider.generate(
@@ -236,8 +243,25 @@ class AgentLoop:
                 continue
 
             if "answer" in proposal:
+                if (
+                    contract is not None
+                    and contract.action_required
+                    and not tool_executed
+                ):
+                    action_rejections += 1
+                    budget.record(ok=False)
+                    self._record_answer_rejected(
+                        session_id, action_rejections, contract
+                    )
+                    messages.append(self._user(session_id, ACTION_REQUIRED_MESSAGE))
+                    continue
                 return self._finish(
-                    proposal["answer"], steps, session_id, protocol_errors, contract
+                    proposal["answer"],
+                    steps,
+                    session_id,
+                    protocol_errors,
+                    contract,
+                    action_rejections,
                 )
 
             record = self._executor.execute(
@@ -252,13 +276,21 @@ class AgentLoop:
                 ),
             )
             steps.append(step)
+            tool_executed = tool_executed or record.executed
             budget.record(ok=step.verified)
             self._record_step(step, session_id, contract)
             if on_step is not None:
                 on_step(step)
             messages.append(self._user(session_id, _describe(step)))
 
-        return self._stop(budget.summary(), steps, session_id, protocol_errors, contract)
+        return self._stop(
+            budget.summary(),
+            steps,
+            session_id,
+            protocol_errors,
+            contract,
+            action_rejections,
+        )
 
     # --- helpers ---------------------------------------------------------------
 
@@ -287,6 +319,7 @@ class AgentLoop:
         session_id: str,
         protocol_errors: int,
         contract: AgentTaskContract | None,
+        action_rejections: int,
     ) -> AgentOutcome:
         check = self._verifier.verify_response(answer)
         if not check.passed:
@@ -298,6 +331,7 @@ class AgentLoop:
             stopped_reason=None,
             touched_files=self._touched(),
             protocol_errors=protocol_errors,
+            action_rejections=action_rejections,
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
@@ -309,6 +343,7 @@ class AgentLoop:
         session_id: str,
         protocol_errors: int,
         contract: AgentTaskContract | None,
+        action_rejections: int,
     ) -> AgentOutcome:
         outcome = AgentOutcome(
             answer=None,
@@ -316,6 +351,7 @@ class AgentLoop:
             stopped_reason=reason,
             touched_files=self._touched(),
             protocol_errors=protocol_errors,
+            action_rejections=action_rejections,
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
@@ -358,6 +394,24 @@ class AgentLoop:
             )
         )
 
+    def _record_answer_rejected(
+        self, session_id: str, rejection: int, contract: AgentTaskContract
+    ) -> None:
+        if self._events is None:
+            return
+        self._events.append(
+            Event(
+                session_id=session_id,
+                type=EventType.AGENT_ANSWER_REJECTED,
+                actor="agent",
+                payload={
+                    "reason": "action_required",
+                    "rejection": rejection,
+                    "action_required": contract.action_required,
+                },
+            )
+        )
+
     def _record_finish(
         self, outcome: AgentOutcome, session_id: str, contract: AgentTaskContract | None
     ) -> None:
@@ -374,6 +428,7 @@ class AgentLoop:
                     "protocol_errors": outcome.protocol_errors,
                     "stopped_reason": outcome.stopped_reason,
                     "touched_files": list(outcome.touched_files),
+                    "action_rejections": outcome.action_rejections,
                     "action_required": (
                         contract.action_required if contract is not None else "no contract"
                     ),
