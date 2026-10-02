@@ -57,8 +57,13 @@ embedder: it matches surface overlap, not meaning. There is no semantic model ye
 
 ```console
 $ pac --documents ~/notes
+skipped: 4 file(s) that are not .md or .txt -- .pdf (3), .env (1); name a file itself to read it whatever its type
 documents: 12 file(s), 31 chunk(s) -- held in memory, read again on every run
 ```
+
+A directory contributes only its `.md` and `.txt` files, and `pac` says what it passed over:
+the kinds and how many of each, never what a file holds. A file you name yourself is read
+whatever its type, so a `.pdf` or a `.rst` you want is a path away.
 
 **The agent: it acts, inside one directory, and asks before anything risky.** With
 `--agent --workspace DIR`, each line you type is a task, and it starts with whether the task

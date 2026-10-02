@@ -26,7 +26,7 @@ import re
 import sys
 import uuid
 from pathlib import Path
-from typing import Callable, Iterable, Sequence, TextIO
+from typing import Callable, Iterable, NamedTuple, Sequence, TextIO
 
 from ..conversation.factory import (
     build_agent,
@@ -46,6 +46,11 @@ from ..core.knowledge import Document
 # walking one without a filter would feed the index lock files, images and
 # whatever else happens to live there.
 DOCUMENT_SUFFIXES = (".md", ".txt")
+
+# How many kinds of unread file one line names. A directory can hold hundreds
+# of kinds (a repository's `.git`); the line stays one line, and says how many
+# it left out.
+UNREAD_KINDS_SHOWN = 6
 
 DEFAULT_DATABASE_ENV = "PAC_DATABASE"
 
@@ -201,29 +206,76 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _document_files(paths: Sequence[Path]) -> tuple[list[Path], list[Path]]:
-    """The files to read, and the paths that do not exist.
+class DocumentScan(NamedTuple):
+    """What the paths named on the command line come to."""
+
+    files: list[Path]
+    # Named paths that do not exist.
+    missing: list[Path]
+    # Files a directory walk passed over because of their type. Never a file
+    # named explicitly: that one is read.
+    unread: list[Path]
+
+
+def _document_files(paths: Sequence[Path]) -> DocumentScan:
+    """The files to read, the paths that do not exist, and the files passed over.
 
     Sorted, so two runs over the same tree ingest in the same order and
     produce the same index. A missing path is returned rather than skipped:
     a typo in a path should stop the command, not quietly shrink the corpus.
+    A file a directory walk passes over is returned too, for the same reason:
+    the user should learn that the corpus is smaller than the folder.
     """
     files: list[Path] = []
     missing: list[Path] = []
+    unread: list[Path] = []
     for path in paths:
         if path.is_dir():
-            files.extend(
-                sorted(
-                    p
-                    for p in path.rglob("*")
-                    if p.is_file() and p.suffix.lower() in DOCUMENT_SUFFIXES
-                )
+            found = sorted(p for p in path.rglob("*") if p.is_file())
+            files.extend(p for p in found if p.suffix.lower() in DOCUMENT_SUFFIXES)
+            unread.extend(
+                p for p in found if p.suffix.lower() not in DOCUMENT_SUFFIXES
             )
         elif path.is_file():
             files.append(path)
         else:
             missing.append(path)
-    return files, missing
+    return DocumentScan(files, missing, unread)
+
+
+def _kind(path: Path) -> str:
+    """What to call a file's type: its suffix, or for `.env` its whole name.
+
+    `Path(".env").suffix` is empty, and a line that said "(no extension)" for
+    the one file a user most wants to hear about would be no help.
+    """
+    if path.suffix:
+        return path.suffix.lower()
+    return path.name.lower() if path.name.startswith(".") else "(no extension)"
+
+
+def _unread_line(unread: Sequence[Path]) -> str | None:
+    """One line saying what a directory walk passed over, or None if nothing.
+
+    Names kinds and counts, never contents: a `.env` is reported as a `.env`
+    and nothing about what it holds. Most common first, then by name, so two
+    runs over the same tree print the same line.
+    """
+    if not unread:
+        return None
+    counts: dict[str, int] = {}
+    for path in unread:
+        counts[_kind(path)] = counts.get(_kind(path), 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    shown = ", ".join(f"{kind} ({n})" for kind, n in ranked[:UNREAD_KINDS_SHOWN])
+    left_out = len(ranked) - UNREAD_KINDS_SHOWN
+    if left_out > 0:
+        shown += f", and {left_out} more kind(s)"
+    return (
+        f"skipped: {len(unread)} file(s) that are not "
+        f"{' or '.join(DOCUMENT_SUFFIXES)} -- {shown}; "
+        "name a file itself to read it whatever its type"
+    )
 
 
 def _document_id(uri: str) -> str:
@@ -562,10 +614,12 @@ def main(
     # is a mistake in the command, and it should cost nothing but a message.
     grounded = args.documents is not None
     files: list[Path] = []
+    unread: list[Path] = []
     if grounded:
-        files, missing = _document_files(args.documents)
-        if missing:
-            for path in missing:
+        scan = _document_files(args.documents)
+        files, unread = scan.files, scan.unread
+        if scan.missing:
+            for path in scan.missing:
                 print(f"no such file or directory: {path}", file=out)
             return 2
 
@@ -595,6 +649,9 @@ def main(
 
     try:
         if ingestion is not None:
+            passed_over = _unread_line(unread)
+            if passed_over is not None:
+                print(passed_over, file=out)
             _ingest(ingestion, files, out)
 
         if args.session:
