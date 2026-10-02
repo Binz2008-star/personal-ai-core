@@ -479,3 +479,30 @@ def test_rescore_refuses_a_changed_task_whose_answers_it_would_rejudge(tmp_path)
 def test_a_new_result_file_names_its_scorer(tmp_path):
     _, _, lines = _run(tmp_path, SOLVES, "--only", "kb-leave-carryover", "--languages", "en")
     assert lines[0]["scorer"] == "bench-checks-v2"
+
+
+def test_the_task_digest_does_not_depend_on_the_platforms_file_order(tmp_path):
+    """file-create-settings had digest 150017ff... on the rig and 96fce741... on
+    Linux: Windows sorts paths without regard to case, so check_settings.py came
+    before README.md there. The order is now the relative path as text."""
+    import hashlib
+
+    from personal_ai_core.app.bench.runner import _task_digest
+    from personal_ai_core.app.bench.tasks import Task
+
+    fixture = tmp_path / "fixture"
+    (fixture / "sub").mkdir(parents=True)
+    contents = {"README.md": b"# r\r\n", "check_settings.py": b"x = 1\n", "sub/Z.txt": b"z"}
+    for name, data in contents.items():
+        (fixture / name).write_bytes(data)
+    task = Task(id="t", track="agent", category="c", instruction={"en": "do"},
+                checks=[], reference={}, base=tmp_path, fixture=fixture)
+
+    expected = hashlib.sha256(json.dumps(
+        {"instruction": task.instruction, "checks": task.checks, "git": task.git,
+         "git_commits": task.git_commits},
+        sort_keys=True, ensure_ascii=False).encode("utf-8"))
+    for name in sorted(contents):  # code-point order: README.md, check_settings.py, sub/Z.txt
+        expected.update(name.encode("utf-8"))
+        expected.update(contents[name].replace(b"\r\n", b"\n"))
+    assert _task_digest(task) == expected.hexdigest()[:16]

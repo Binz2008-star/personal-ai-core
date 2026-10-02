@@ -626,6 +626,8 @@ claim written in one place with nothing that notices it going stale.
                a609f69
   #166 1449930  fix(bench): a number that ends a sentence is a number; rescore
                the baseline
+  #168 3128fb9  docs: handoff at 1449930 -- the baseline done, ADR-023 a draft,
+               nothing in progress
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1091,7 +1093,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at 1449930)
+NEXT SESSION HANDOFF (updated 2026-10-02, main at 3128fb9)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1117,7 +1119,8 @@ WHERE THINGS STAND (2026-10-02) -- STOPPED by the owner, nothing in progress
             by hand; nothing else changed. "Reported accuracy changed because of
             a scorer correction", never "the system improved".
   - Agent failures (111 of 120), partitioned from the records: 52 answered
-    without executing a tool (17 claimed actions that never happened; 31 of
+    without executing a tool (17 matched completion phrases -- on reading, 16
+    clearly claim an action that never happened and 1 is ambiguous; 31 of
     37 Arabic ones had no Arabic script), 43 executed without adequate
     verification, 14 refused on wrong or unknown environment commands
     (python -m unittest, dotnet, cmd quoting), 2 protocol only. Knowledge:
@@ -1149,11 +1152,20 @@ WHERE THINGS STAND (2026-10-02) -- STOPPED by the owner, nothing in progress
     the owner's approval BEFORE the baseline, which was measured on it. No
     prompt, Boss model, benchmark task, Neon/pgvector/schema or legacy-repo
     change.
-  - Open, small: the rig's results header gives `file-create-settings` a
-    different task digest from the repository's (likely an untracked file in
-    that fixture folder on the rig). It does not affect the rescore (that task
-    has no answer checks). Ask the rig for `Get-ChildItem -Recurse -Force
-    evals\bench\fixtures\settings` in pac-bench-baseline before the next run.
+  - Explained: `file-create-settings` has digest 150017ff71cb768d on Windows
+    and 96fce7417d36a103 on Linux, from identical tracked content (two files,
+    no extra file anywhere). Cause: `_task_digest` in app/bench/runner.py
+    iterates `sorted(paths)`, and Windows paths compare case-insensitively, so
+    README.md and check_settings.py are hashed in a different order. Line
+    endings are not the cause (the digest already normalises CRLF). Verified
+    by recomputing on Linux with the Windows ordering: 150017ff71cb768d, the
+    rig's value. Only this task of the 24 is affected (the only fixture mixing
+    an upper-case and a lower-case file name). It did not affect the rescore
+    (that task has no answer checks). Consequence until fixed: --resume or
+    --rescore across platforms refuses this task. Proposed fix, NOT
+    authorized (a benchmark tool change): sort by the relative POSIX path
+    string, with a test for mixed-case names; best done before the next
+    measurement.
   - Rules learned today: update this header in any PR that finds it 3 merges
     behind (main went red after #163 when it slipped to 4); a scorer fix is
     the smallest rule that fixes the defect, proved by re-judging the same
