@@ -22,6 +22,7 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -33,6 +34,7 @@ from ..conversation.factory import (
     build_in_memory_service,
     build_persistent_service,
 )
+from ..core.agent import AgentTaskContract
 from ..core.config import Settings
 from ..core.domain import EventType
 from ..core.errors import ProviderError
@@ -70,6 +72,20 @@ MAX_PROFILE_CHARS = 12_000
 
 PROMPT = "you> "
 REPLY = "core> "
+_AGENT_TASK = re.compile(r"^\[action_required=(true|false)\]\s+(.+?)\s*$")
+
+
+def parse_agent_task(line: str) -> AgentTaskContract:
+    """Parse one explicit caller-owned agent task contract."""
+    match = _AGENT_TASK.fullmatch(line.rstrip("\r\n"))
+    if match is None:
+        raise ValueError("expected [action_required=true|false] TASK")
+    task_text = match.group(2)
+    if task_text.startswith("[action_required="):
+        raise ValueError("expected [action_required=true|false] TASK")
+    return AgentTaskContract(
+        task_text=task_text, action_required=match.group(1) == "true"
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -500,6 +516,7 @@ def main(
     transport: Callable[..., object] | None = None,
     stdin: Iterable[str] | None = None,
     stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
     env: dict[str, str] | None = None,
 ) -> int:
     """Run one chat session. Returns a process exit code.
@@ -510,6 +527,7 @@ def main(
     """
     args = _parser().parse_args(argv)
     out = stdout if stdout is not None else sys.stdout
+    err = stderr if stderr is not None else sys.stderr
     environment = os.environ.copy() if env is None else env
     settings = Settings.from_env(environment)
     # One iterator, shared by the conversation and by the agent's
@@ -627,7 +645,7 @@ def main(
                 file=out,
             )
             print(file=out)
-            return _agent_session(agent=agent, session_id=session_id, lines=lines, out=out)
+            return _agent_session(agent=agent, session_id=session_id, lines=lines, out=out, err=err)
 
         print(file=out)
 
@@ -713,10 +731,16 @@ def _describe_step(step) -> str:
     return f"  · {record.request.tool} {arguments} -> {status}"
 
 
-def _agent_session(*, agent, session_id, lines, out) -> int:
+def _agent_session(*, agent, session_id, lines, out, err) -> int:
+    invalid_tasks = False
     for line in lines:
-        task = line.strip()
-        if not task:
+        if not line.strip():
+            continue
+        try:
+            task = parse_agent_task(line)
+        except ValueError as exc:
+            print(f"invalid agent task: {exc}", file=err)
+            invalid_tasks = True
             continue
         try:
             outcome = agent.loop.run(
@@ -754,4 +778,4 @@ def _agent_session(*, agent, session_id, lines, out) -> int:
             print(f"         restored: {', '.join(restored)}", file=out)
         else:
             agent.checkpoints.commit()
-    return 0
+    return 2 if invalid_tasks else 0

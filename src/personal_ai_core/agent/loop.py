@@ -36,7 +36,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from ..core.agent import AuditRecord, Decision, ToolRequest
+from ..core.agent import AgentTaskContract, AuditRecord, Decision, ToolRequest
 from ..core.contracts import EventRepository, IdentityComposer, ModelProvider
 from ..core.domain import Event, EventType, Message, Role
 from .executor import ToolExecutor
@@ -191,7 +191,7 @@ class AgentLoop:
 
     def run(
         self,
-        task: str,
+        task: str | AgentTaskContract,
         *,
         session_id: str,
         on_step: Callable[[Step], None] | None = None,
@@ -208,9 +208,13 @@ class AgentLoop:
         """
         if self._session_exists is not None and not self._session_exists(session_id):
             raise KeyError(f"unknown session: {session_id}")
-        task = task.strip()[:MAX_TASK_CHARS]
+        if isinstance(task, AgentTaskContract):
+            contract, task_text = task, task.task_text
+        else:
+            contract, task_text = None, task.strip()
+        task_text = task_text[:MAX_TASK_CHARS]
         budget = ActionBudget(max_actions=self._max_actions, max_failures=self._max_failures)
-        messages = self._opening(task, session_id)
+        messages = self._opening(task_text, session_id)
         steps: list[Step] = []
         protocol_errors = 0
 
@@ -232,7 +236,9 @@ class AgentLoop:
                 continue
 
             if "answer" in proposal:
-                return self._finish(proposal["answer"], steps, session_id, protocol_errors)
+                return self._finish(
+                    proposal["answer"], steps, session_id, protocol_errors, contract
+                )
 
             record = self._executor.execute(
                 ToolRequest(tool=proposal["tool"], arguments=proposal["arguments"])
@@ -247,12 +253,12 @@ class AgentLoop:
             )
             steps.append(step)
             budget.record(ok=step.verified)
-            self._record_step(step, session_id)
+            self._record_step(step, session_id, contract)
             if on_step is not None:
                 on_step(step)
             messages.append(self._user(session_id, _describe(step)))
 
-        return self._stop(budget.summary(), steps, session_id, protocol_errors)
+        return self._stop(budget.summary(), steps, session_id, protocol_errors, contract)
 
     # --- helpers ---------------------------------------------------------------
 
@@ -275,7 +281,12 @@ class AgentLoop:
         return Message(session_id=session_id, role=Role.USER, content=content)
 
     def _finish(
-        self, answer: str, steps: list[Step], session_id: str, protocol_errors: int
+        self,
+        answer: str,
+        steps: list[Step],
+        session_id: str,
+        protocol_errors: int,
+        contract: AgentTaskContract | None,
     ) -> AgentOutcome:
         check = self._verifier.verify_response(answer)
         if not check.passed:
@@ -288,11 +299,16 @@ class AgentLoop:
             touched_files=self._touched(),
             protocol_errors=protocol_errors,
         )
-        self._record_finish(outcome, session_id)
+        self._record_finish(outcome, session_id, contract)
         return outcome
 
     def _stop(
-        self, reason: str, steps: list[Step], session_id: str, protocol_errors: int
+        self,
+        reason: str,
+        steps: list[Step],
+        session_id: str,
+        protocol_errors: int,
+        contract: AgentTaskContract | None,
     ) -> AgentOutcome:
         outcome = AgentOutcome(
             answer=None,
@@ -301,13 +317,15 @@ class AgentLoop:
             touched_files=self._touched(),
             protocol_errors=protocol_errors,
         )
-        self._record_finish(outcome, session_id)
+        self._record_finish(outcome, session_id, contract)
         return outcome
 
     def _touched(self) -> tuple[str, ...]:
         return self._checkpoints.touched() if self._checkpoints is not None else ()
 
-    def _record_step(self, step: Step, session_id: str) -> None:
+    def _record_step(
+        self, step: Step, session_id: str, contract: AgentTaskContract | None
+    ) -> None:
         if self._events is None:
             return
         record = step.record
@@ -333,11 +351,16 @@ class AgentLoop:
                     "verified": step.verified,
                     "duration_ms": result.duration_ms if result is not None else 0,
                     "truncated": result.truncated if result is not None else False,
+                    "action_required": (
+                        contract.action_required if contract is not None else "no contract"
+                    ),
                 },
             )
         )
 
-    def _record_finish(self, outcome: AgentOutcome, session_id: str) -> None:
+    def _record_finish(
+        self, outcome: AgentOutcome, session_id: str, contract: AgentTaskContract | None
+    ) -> None:
         if self._events is None:
             return
         self._events.append(
@@ -351,6 +374,9 @@ class AgentLoop:
                     "protocol_errors": outcome.protocol_errors,
                     "stopped_reason": outcome.stopped_reason,
                     "touched_files": list(outcome.touched_files),
+                    "action_required": (
+                        contract.action_required if contract is not None else "no contract"
+                    ),
                 },
             )
         )

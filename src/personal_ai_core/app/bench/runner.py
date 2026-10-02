@@ -46,9 +46,17 @@ from ...core.config import DEFAULT_BOSS_MODEL, Settings
 from ...core.errors import ProviderError
 from ..cli import _ingest
 from ..evaluate import PASS, _git_commit, _machine
-from .checks import EDITING_TOOLS, RunEvidence, ToolCall, judge, tested_after_last_edit
+from .checks import (
+    CHECKS,
+    EDITING_TOOLS,
+    SCORER,
+    RunEvidence,
+    ToolCall,
+    judge,
+    tested_after_last_edit,
+)
 from .policy import BenchmarkConfirm, describe
-from .tasks import LANGUAGES, Task, load, materialize, prove
+from .tasks import ANSWER_CHECKS, LANGUAGES, Task, load, materialize, prove
 
 HARNESS = "ADR-022 capability benchmark v0"
 DEFAULT_TASKS = Path("evals/bench")
@@ -250,8 +258,12 @@ def _task_digest(task: Task) -> str:
     for root in (task.fixture, task.corpus):
         if root is None:
             continue
-        for path in sorted(p for p in root.rglob("*") if p.is_file()):
-            digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        # Ordered by the relative path as text: Path ordering ignores letter case
+        # on Windows only, which put check_settings.py before README.md there and
+        # gave file-create-settings another digest than on Linux.
+        files = sorted((p.relative_to(root).as_posix(), p) for p in root.rglob("*") if p.is_file())
+        for relative, path in files:
+            digest.update(relative.encode("utf-8"))
             digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     return digest.hexdigest()[:16]
 
@@ -267,6 +279,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-ctx", type=int, help="the context Ollama was started with")
     parser.add_argument("--resume", type=Path, help="continue an interrupted result file")
     parser.add_argument("--report", type=Path, help="print the summary of a result file")
+    parser.add_argument("--rescore", type=Path,
+                        help="re-judge the answer checks of a result file with the current "
+                             "checks, into a new file beside it (never overwrites)")
     parser.add_argument("--show-policy", action="store_true",
                         help="print the containment policy and exit")
     return parser
@@ -294,6 +309,8 @@ def main(
     if args.report is not None:
         print(report(_read(args.report)), file=out)
         return 0
+    if args.rescore is not None:
+        return rescore(args.rescore, args.tasks, out)
     if args.runs < 1:
         print("--runs must be at least 1", file=out)
         return 2
@@ -338,6 +355,7 @@ def main(
         "num_ctx_sent_by_core": False,
         "profile": "none (deliberately empty)",
         "judge_model": "none (ADR-013)",
+        "scorer": SCORER,
         "language_guard": settings.language_guard,
         "sampling": "recorded per model call as sent (options_sent); the agent loop "
                     "sends only num_predict",
@@ -405,6 +423,77 @@ def main(
         print(f"WARNING: --num-ctx says {args.num_ctx} but Ollama has the model loaded at "
               f"{measured}; the file is marked context_mismatch.", file=out)
         return 3
+    return 0
+
+
+def rescore(path: Path, tasks_dir: Path, out: TextIO) -> int:
+    """Re-judge a result file's answer checks with the current checks.
+
+    Only checks that read the answer alone are re-judged: the answer is in the
+    record, the workspace is gone. Workspace checks keep their recorded verdict.
+    The result goes to a new file beside the source, which is never modified,
+    and whose header names the source and the scorer applied. A task whose
+    answer checks are re-judged must not have changed since the run (its digest
+    must match): otherwise its checks would not be the ones the run was judged by.
+    """
+    lines = _read(path)
+    header = lines[0] if lines and lines[0].get("kind") == "header" else None
+    if header is None:
+        print(f"refusing to rescore: {path} has no header", file=out)
+        return 2
+    before = header.get("scorer", "bench-checks-v1")
+    if before == SCORER:
+        print(f"nothing to do: {path} was scored with {SCORER}", file=out)
+        return 2
+    target = path.with_name(f"{path.stem}.rescored-{SCORER}.jsonl")
+    if target.exists():
+        print(f"refusing to rescore: {target} exists; results are never overwritten", file=out)
+        return 2
+    tasks = {t.id: t for t in load(tasks_dir)}
+    for task_id, recorded in header.get("tasks", {}).items():
+        task = tasks.get(task_id)
+        if task is None:
+            print(f"refusing to rescore: task {task_id} is missing", file=out)
+            return 2
+        # Only a task whose answer checks are re-judged must be the same task;
+        # the others keep their recorded verdicts and are not re-read.
+        rejudged = any(c["type"] in ANSWER_CHECKS for c in task.checks)
+        if rejudged and _task_digest(task) != recorded.get("digest"):
+            print(f"refusing to rescore: task {task_id} changed since the run", file=out)
+            return 2
+    rescored = [{**header, "scorer": SCORER, "rescored_from": path.name, "rescored_with": SCORER,
+                 "scorer_before": before}]
+    changed = 0
+    for line in lines[1:]:
+        if line.get("kind") != "run":
+            rescored.append(line)
+            continue
+        task = tasks[line["task"]]
+        if len(task.checks) != len(line["checks"]):
+            print(f"refusing to rescore: {line['task']} has another number of checks", file=out)
+            return 2
+        evidence = RunEvidence(workspace=Path("."), answer=line.get("answer"))
+        checks = []
+        for spec, old in zip(task.checks, line["checks"]):
+            if spec["type"] not in ANSWER_CHECKS:
+                checks.append(old)
+                continue
+            params = {k: v for k, v in spec.items() if k not in ("type", "informational")}
+            verdict, detail = CHECKS[spec["type"]](evidence, **params)
+            new = {**old, "verdict": verdict, "detail": detail}
+            changed += new["verdict"] != old["verdict"]
+            checks.append(new)
+        success = all(c["verdict"] == PASS for c in checks if not c.get("informational"))
+        signals = [s for s in line.get("signals", []) if not s.startswith("check:")]
+        if not success:
+            signals += [f"check:{c['check']}" for c in checks
+                        if c["verdict"] != PASS and not c.get("informational")]
+        rescored.append({**line, "checks": checks, "success": success, "signals": signals})
+    target.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in rescored),
+                      encoding="utf-8")
+    print(report(rescored), file=out)
+    print(f"{changed} check verdict(s) changed ({before} -> {SCORER})", file=out)
+    print(f"rescored: {target}", file=out)
     return 0
 
 

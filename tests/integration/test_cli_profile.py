@@ -26,7 +26,7 @@ def recording(reply='{"answer": "ok"}'):
     return transport
 
 
-def run(tmp_path, *argv, lines=("hello",), transport=None, env=None):
+def run(tmp_path, *argv, lines=("[action_required=false] hello",), transport=None, env=None):
     out = io.StringIO()
     transport = transport or recording("hi")
     code = main(

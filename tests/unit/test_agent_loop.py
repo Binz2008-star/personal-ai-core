@@ -9,6 +9,7 @@ from personal_ai_core.agent.policy import RiskPolicy
 from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import Workspace
 from personal_ai_core.agent.tools import default_tools
+from personal_ai_core.core.agent import AgentTaskContract
 from personal_ai_core.core.domain import EventType, ModelResponse, Role
 from personal_ai_core.persistence.in_memory import InMemoryEventRepository
 
@@ -97,6 +98,17 @@ def test_a_task_runs_tools_then_answers(ws):
     # The model saw the file's content, fenced as data.
     assert "the answer is 42" in script.calls[1]["messages"][-1].content
     assert script.calls[1]["messages"][-1].content.startswith("<<<result ")
+
+
+def test_action_required_is_recorded_but_does_not_enforce_tool_use(ws):
+    events = InMemoryEventRepository()
+    outcome = loop(ws, Script('{"answer": "done"}'), events=events).run(
+        AgentTaskContract(task_text="change the workspace", action_required=True),
+        session_id="s1",
+    )
+    assert outcome.finished
+    finish = events.list_for_session("s1")[-1]
+    assert finish.payload["action_required"] is True
 
 
 def test_the_model_is_told_the_protocol_and_the_tools(ws):
@@ -214,6 +226,8 @@ def test_every_step_and_the_finish_are_events(ws):
     assert decisions == ["allow", "ask", "deny"]
     assert recorded[1].payload["ran"] is False
     assert recorded[-1].payload["finished"] is True
+    assert recorded[0].payload["action_required"] == "no contract"
+    assert recorded[-1].payload["action_required"] == "no contract"
 
 
 def test_an_event_payload_carries_no_error_text(ws):
