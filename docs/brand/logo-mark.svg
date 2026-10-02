@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="personal-ai-core">
+  <title>personal-ai-core</title>
+  <defs>
+    <linearGradient id="m-g" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#2F6BEA"/><stop offset="1" stop-color="#2EC4D6"/>
+    </linearGradient>
+    <clipPath id="m-c"><circle cx="256" cy="256" r="240"/></clipPath>
+  </defs>
+  <circle cx="256" cy="256" r="240" fill="#1B2A5B"/>
+  <g clip-path="url(#m-c)">
+    <path fill="url(#m-g)" d="M52 300 C56 424 160 506 290 494 C380 486 444 430 464 346 C424 404 350 424 276 408 C190 390 112 360 52 300 Z"/>
+    <path fill="#fff" d="M186 266 C184 226 186 186 196 148 C200 128 214 106 234 90 C252 112 266 138 274 166 C292 140 310 120 326 104 C336 140 342 172 350 200 C378 214 402 238 424 264 C428 270 426 276 418 280 C394 292 366 298 342 300 C330 314 322 328 318 340 C340 346 350 366 344 388 C336 412 306 428 270 428 C206 430 150 390 150 330 C150 298 164 276 186 266 Z"/>
+    <path fill="#1B2A5B" d="M222 164 C224 144 230 128 236 116 C244 132 250 148 254 168 C244 164 232 162 222 164 Z"/>
+  </g>
+  <path d="M340 240 Q356 252 376 247" fill="none" stroke="#1B2A5B" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="418" cy="268" r="7" fill="#1B2A5B"/>
+</svg>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="personal-ai-core (outline)">
+  <title>personal-ai-core (outline)</title>
+  <g fill="none" stroke="currentColor" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M112 92 L208 170 Q256 158 304 170 L400 92 L420 250 Q410 330 256 430 Q102 330 92 250 Z"/>
+    <path d="M168 262 Q194 282 222 262"/>
+    <path d="M290 262 Q318 282 344 262"/>
+    <path d="M326 384 L388 446 H440"/>
+    <path d="M372 352 H436 V304"/>
+    <circle cx="458" cy="446" r="12"/>
+    <circle cx="436" cy="284" r="12"/>
+  </g>
+  <path fill="currentColor" d="M236 350 H276 L256 378 Z"/>
+</svg>
