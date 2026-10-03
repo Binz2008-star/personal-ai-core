@@ -1505,6 +1505,32 @@ WHERE THINGS STAND (2026-10-03)
             glued to a letter ("xghp_...") is not recognised -- in a refused
             reply and in an accepted answer alike. Widening it is a
             precision trade for its own PR.
+            Its reading is fixed in advance: app/bench/refusals.py, written
+            2026-10-03 while the first run carrying the text was still on the
+            rig, before any refused text was read. Protocol errors fall in the
+            first matching category (truncated, empty, prose, several_objects,
+            malformed_json, wrong_shape); a rejected answer is a FALSE
+            rejection when the task's own checks would pass it on the
+            untouched fixture (only three tasks can: git-last-commit-file,
+            tests-count-failures, toolsel-count-json). A category added after
+            reading the data is a new rule and says so.
+            Hypotheses, written 2026-10-03 ~16:50Z with Run 2 still on the rig
+            and no refused text read, each decided by the reader's counts:
+            H1  unit 1+2's English first-reply protocol errors are mostly
+                `prose`: short text, no JSON. The environment block ends with
+                an instruction ("run `git status` with `run_command` to see
+                it"), and the #189 replies were 13-19 tokens, too short for a
+                JSON tool call. Holds if most of them are `prose` and most of
+                those in git tasks contain "git status" or "run_command".
+            H2  the alternative: they are `several_objects` or `wrong_shape`
+                (the model plans several steps at once).
+            H3  truncation plays no part: under 5% of protocol errors are
+                `truncated`.
+            H4  false rejections are rare and come from toolsel-count-json
+                (a guessable number); none from the nine tasks that need a
+                change, which the reader makes impossible by construction.
+            Whichever holds, the reading is as fixed above; a hypothesis that
+            fails is reported as failed.
          c. Then the owner decides the next experiment (unit 3, a change to
             the environment text, or the default for action_required). Unit 3
             reaches at most 7 of the baseline's 111 failures and needs the
