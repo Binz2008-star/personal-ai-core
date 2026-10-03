@@ -687,6 +687,8 @@ claim written in one place with nothing that notices it going stale.
                passes too; ledger #195 #196
   #198 555344d  eval: ADR-023 unit 1 and unit 1+2 at 1861756, with refused-reply
                text (240 runs each)
+  #199 a366493  docs: read the re-run with refused-reply text (#198); hypotheses
+               decided; leads named as leads
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1153,7 +1155,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 555344d)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at a366493)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1573,7 +1575,9 @@ WHERE THINGS STAND (2026-10-03)
             rules above (READ, in WHERE THINGS STAND).
          c. Then the owner decides the next experiment. The lead's
             recommendation, from b3: a reply-protocol unit, which is the
-            protocol change ADR-023 reserves for separate review. In order of
+            protocol change ADR-023 reserves for separate review, now written
+            as ADR-024 (PROPOSED; units A parser-only, B file content outside
+            JSON, C tool-specific error feedback; D1-D4 the owner's). In order of
             how unambiguous the input is: accept a numeric "answer" as its
             text; accept a string "arguments" for shell/run_command as the
             command; then, separately, a way to write file content that does
