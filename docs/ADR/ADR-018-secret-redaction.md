@@ -1,6 +1,6 @@
 # ADR-018 — A mechanical guard for rule 3: secrets are withheld from the prompt
 
-**Status:** PROPOSED · revision 3 (author's review and an independent review, section 9) · version 1 AUTHORIZED by the owner 2026-10-01 (D1) · built and wired (#107, #108); amendment 1 built (#114)
+**Status:** ACCEPTED (owner, 2026-10-03, OD-10) · revision 3 (author's review and an independent review, section 9) · version 1 AUTHORIZED by the owner 2026-10-01 (D1) · built and wired (#107, #108); amendment 1 built (#114) · one known limitation recorded under *Status*
 
 - Contract decision this design serves: rule 3, strict reading, decided by the owner on
   2026-10-01 (`PROJECT_STATE.md`, Identity). Rule 3 covers every secret, including one in
@@ -274,4 +274,13 @@ case's check (`absent`) is the same either way.
 
 ## Status
 
-**ADR-018:** PROPOSED, not accepted. Version 1 AUTHORIZED 2026-10-01 (D1, with D2-D6 as in §7); built in #107 and #108. Amendment 1 (prose detector) authorized 2026-10-01.
+**ADR-018:** ACCEPTED by the owner, 2026-10-03 (ARCHITECTURE.md OD-10). Version 1 AUTHORIZED 2026-10-01 (D1, with D2-D6 as in §7); built in #107 and #108. Amendment 1 (prose detector) authorized 2026-10-01, built in #114.
+
+**Known limitation (found 2026-10-03, not changed).** A prefix token (`ghp_…`, `AKIA…`,
+`sk-…`) is withheld only when it stands alone: the pattern refuses a letter, digit, `_` or
+`-` directly before or after it, so that an identifier such as `sk-learn` is not taken for
+a key. The cost is that a token glued to a word (`xghp_…`) is not withheld. The agent's
+output check (`agent/verifier.py`) has the same boundary. Found while testing #193.
+Widening either is a precision trade and its own decision.
+
+*Before 2026-10-03 this section read: PROPOSED, not accepted.*
