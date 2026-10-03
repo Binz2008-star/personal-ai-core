@@ -192,3 +192,31 @@ def test_the_real_parser_recovers_what_adr_024_s_replay_predicted(tmp_path):
         for rule in rules:
             counted[rule] = counted.get(rule, 0) + 1
     assert counted == {"numeric_answer": 5, "string_arguments": 8, "python_literal": 4}
+
+
+def _agent_runs(name: str) -> list[dict]:
+    path = REPO / "evals" / "results" / "bench" / name
+    runs = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x]
+    return [r for r in runs if r.get("kind") == "run" and r["track"] == "agent"]
+
+
+def test_unit_a_touches_too_few_attempts_for_the_deciding_rule_to_see_it_alone(tmp_path):
+    """Planning (ADR-024 §5), read from #198 after its text was seen: the
+    attempts holding at least one reply unit A reads. Even if every one of
+    them had passed, agent success moves by at most 6 of 120 (5 points) under
+    unit 1, where ADR-023 amendment 1 is powered for 20 (D2)."""
+    single = single_field_tools(_bench_specs(tmp_path))
+
+    def readable(text: str) -> bool:
+        try:
+            return bool(parse_reply_lenient(text, single)[1])
+        except ValueError:
+            return False
+
+    for name, touched, failed in (("bench-20261003T161348Z.jsonl", 6, 5),
+                                  ("bench-20261003T164631Z.jsonl", 9, 7)):
+        runs = _agent_runs(name)
+        assert len(runs) == 120
+        hit = [r for r in runs if any(x["kind"] == "protocol_error" and readable(x["text"])
+                                      for x in r["refused_replies"])]
+        assert (len(hit), sum(not r["success"] for r in hit)) == (touched, failed)

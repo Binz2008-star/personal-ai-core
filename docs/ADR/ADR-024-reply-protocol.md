@@ -1,20 +1,21 @@
 # ADR-024 — The agent's reply protocol: accept what is unambiguous, take file content out of JSON
 
-**Status:** PROPOSED (2026-10-03) · **unit A authorized by the owner 2026-10-03** ("ابدأ A")
-· units B and C not authorized · each unit is measured before it is adopted
+**Status:** PROPOSED (2026-10-03) · **unit A authorized by the owner 2026-10-03** ("ابدأ A"),
+built off by default (#202) · units B and C not authorized · each unit is measured before
+it is adopted
 
 | Stage | State |
 |---|---|
 | Proposed | yes: this document, written by the lead after #198 |
 | Evidence | the refused-reply text of #198, read in #199; the replay in §3 is pinned by `tests/unit/test_adr024_replay.py` |
 | Authorized | **unit A** (D1), by the owner, 2026-10-03, in the lead session: "ابدأ A" ("start A"), with the lead's order (D4: A first). D2 and D3 are open |
-| Implemented | **no** (unit A is built in its own pull request) |
+| Implemented | **unit A**, off by default (#202): `parse_reply_lenient` in `agent/loop.py`, `build_agent(lenient_protocol=...)`, the benchmark's `--lenient-protocol`. B and C: no |
 
 - Serves: ADR-023 (plan, execute, verify), whose §8.2 and §7 reserve any change to what
   the model sees, or to the protocol it answers in, for separate review. This is that
   review.
-- Depends on: ADR-023 amendment 1 (#191, PROPOSED), the rule that decides a comparison.
-  Until it is approved, a measurement of these units is descriptive.
+- Depends on: ADR-023 amendment 1 (#191, ACCEPTED 2026-10-03), the rule that decides a
+  comparison. A measurement of these units is read by it.
 
 ## 1. The problem, as measured
 
@@ -73,6 +74,12 @@ a string (`"...".strip()`), which no rule can read without guessing.
   measurement can count them and a reader can audit every one.
 - `ast.literal_eval` runs on the reply's object span only. That span is bounded by the
   generation limit, about 4,000 characters.
+- As built (#202): the strict parser runs first and wins. A repaired reply must still
+  pass it, and when no repair applies the strict error is returned word for word. P1
+  takes a finite number only (not `true`, `NaN` or `Infinity`). P2's tools are derived
+  from the tool schemas, not listed: every tool with exactly one required field, of
+  type string. That is eight tools, all but `write_file` and `list_directory`.
+  Through the code, the 98 recorded texts give the replay's figures: 5, 8 and 4.
 
 **Unit B: file content outside JSON.**
 - `write_file` may omit `content` and give it instead as one fenced block after the JSON
@@ -97,7 +104,23 @@ a string (`"...".strip()`), which no rule can read without guessing.
   categories of #195.
 - Guard: every lenient parse in unit A is listed and read. A parse that ran something the
   reply did not plainly mean is a defect, whatever the score says.
-- Read under ADR-023 amendment 1 (#191) once it is approved. Until then, descriptively.
+- Read under ADR-023 amendment 1 (#191, accepted 2026-10-03).
+
+**What a measurement of unit A alone can show** (written with the unit, before any run of
+it; pinned by `tests/unit/test_adr024_unit_a.py`):
+
+- In #198's unit 1 run, a reply unit A reads occurs in 6 of 120 agent attempts, 5 of
+  which failed. In unit 1 + 2, it occurs in 9 attempts, 7 of which failed.
+- So even if every touched attempt had passed, agent success moves by at most 6 of 120,
+  about 5 points. The deciding rule is powered for 20 (D2).
+- A 10-run rig measurement of unit A alone (about two hours) can check R0 and R2: it
+  broke nothing. It is not expected to show an improvement. R1 would also need a target
+  class declared for unit A; the amendment declares one only for ADR-023's units.
+- **The lead's recommendation:** do not spend a rig measurement on unit A alone. Unit A's
+  correctness is established offline: every rule is tested, and the 98 recorded texts
+  are replayed through the code. Every lenient read is listed in the record of any run
+  that turns it on, for audit. Spend the rig on unit B (D2), the unit aimed at 37 of 98,
+  measured with unit A on in both sides.
 
 ## 6. Decisions the owner is asked for
 

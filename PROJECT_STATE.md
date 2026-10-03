@@ -1538,7 +1538,7 @@ WHERE THINGS STAND (2026-10-03)
             `refused_replies` (text clipped at 4000 characters). Scoring is
             unchanged. Not yet run: the next rig measurement carries it. It
             is what explains b, and what makes false rejections countable,
-            which ADR-023 amendment 1 (PROPOSED, #191) requires before any
+            which ADR-023 amendment 1 (#191, since accepted) requires before any
             default changes (R3, D4). Reviewed boundary: the field is named
             only in agent/loop.py and app/bench/runner.py (a test enforces
             it), so no path to memory, feedback, events or the CLI; a secret
@@ -1585,12 +1585,14 @@ WHERE THINGS STAND (2026-10-03)
             protocol change ADR-023 reserves for separate review, now written
             as ADR-024 (PROPOSED; units A parser-only, B file content outside
             JSON, C tool-specific error feedback). Unit A authorized by the
-            owner 2026-10-03 ("ابدأ A"); B and C open. In order of
-            how unambiguous the input is: accept a numeric "answer" as its
-            text; accept a string "arguments" for shell/run_command as the
-            command; then, separately, a way to write file content that does
-            not have to survive JSON escaping. Each measured under the
-            deciding rule once #191 is approved. The other options stand:
+            owner 2026-10-03 ("ابدأ A") and built off by default (#202:
+            `--lenient-protocol` on the benchmark, `lenient_parses` on the
+            outcome and the record); B and C open. Measuring A alone is not
+            recommended: in #198 it touches 6 of 120 attempts under unit 1
+            (at most 5 points of success), where the accepted rule is powered
+            for 20 (ADR-024 §5, pinned). The lead's recommendation: the
+            owner's D2 (unit B, aimed at 37 of 98), measured with A on in
+            both sides. The other options stand:
             unit 3 (reaches at most 7 of the baseline's 111 failures), a
             change to the environment text, the default for action_required.
   - Rules learned today: update this header in any PR that finds it 2 or more
