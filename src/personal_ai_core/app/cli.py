@@ -615,7 +615,9 @@ def main(
     grounded = args.documents is not None
     files: list[Path] = []
     unread: list[Path] = []
-    if grounded:
+    # Tested directly, not through `grounded`: pyright 1.1.411 does not carry
+    # the narrowing through the alias (1.1.408, the CI pin, does).
+    if args.documents is not None:
         scan = _document_files(args.documents)
         files, unread = scan.files, scan.unread
         if scan.missing:
