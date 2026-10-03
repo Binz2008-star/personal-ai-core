@@ -1,6 +1,6 @@
 # ADR-023 — Planning, execution/test and verification in the agent loop
 
-**Status:** ACCEPTED (2026-10-02) — unit 1 (§8.2) built and merged (#174, `d2b6cac`); unit 2 (§2.1) built, off by default (#178); both measured (#189, 2026-10-03), read descriptively: the deciding rule is proposed in Amendment 1
+**Status:** ACCEPTED (2026-10-02) — unit 1 (§8.2) built and merged (#174, `d2b6cac`); unit 2 (§2.1) built, off by default (#178); both measured (#189, 2026-10-03), read descriptively; the deciding rule, Amendment 1, ACCEPTED by the owner 2026-10-03, governs every comparison after #189
 
 | Stage | State |
 |---|---|
@@ -9,7 +9,7 @@
 | Accepted | **yes**, by the owner, 2026-10-02, with the first unit (§8) |
 | Authorized | **acceptance, the specification of unit 1, unit 1's implementation** (#174) **and the benchmark change that lets it be measured** (§8.3, #176), each merged on the owner's instruction, 2026-10-02. **Unit 2** (§2.1, #178) was built and merged under the owner's standing instruction of 2026-10-02 to the lead to decide and handle merges, **off by default and not exposed in `pac --agent`**. Unit 3 and every later control each need their own approval (§4, §8) |
 | Implemented | **the contract (#172), unit 1, action enforcement (#174, `d2b6cac`)**, enforced for `action_required=true`, **and unit 2, environment context (#178)**, which runs only with the benchmark flag `--environment-context` or `build_agent(environment_context=True)`. No other control in §2 exists in the code |
-| Verified | tests and CI (§8.4), and **measured on the rig** at `4f63f73` (#189, 2026-10-03): unit 1, then unit 1 + unit 2, 240 attempts each. Read **descriptively** only, because the deciding rule §5 requires was not written first; Amendment 1 (PROPOSED) supplies it for the next comparison. The reading is in PROJECT_STATE.md |
+| Verified | tests and CI (§8.4), and **measured on the rig** at `4f63f73` (#189, 2026-10-03): unit 1, then unit 1 + unit 2, 240 attempts each. Read **descriptively** only, because the deciding rule §5 requires was not written first; Amendment 1 (ACCEPTED 2026-10-03) supplies it for every comparison after it. The reading is in PROJECT_STATE.md |
 
 - Serves the owner's order after the capability baseline: Planning, then Execution/Test,
   then Verification, built against measured gaps.
@@ -567,10 +567,10 @@ Nothing here changes the design above.
   result" is therefore not met by a measurement. This was raised in review before the
   owner merged #174.
 
-## Amendment 1 (PROPOSED, 2026-10-03): the rule that decides "better"
+## Amendment 1 (ACCEPTED, 2026-10-03): the rule that decides "better"
 
-**Status: PROPOSED by the lead. Not in force until the owner approves it.** It governs the
-next comparison. It is never applied to #189: that measurement was read without a rule,
+**Status: ACCEPTED by the owner, 2026-10-03, with D1-D4 as recommended (see *Decided*
+at the end of this amendment).** It governs every comparison after it. It is never applied to #189: that measurement was read without a rule,
 because §5's requirement was missed, and its reading is recorded as descriptive in
 PROJECT_STATE.md.
 
@@ -656,3 +656,23 @@ variance stated." This amendment does that.
 
 Once approved, the rule becomes a mode of `bench.compare` that prints the verdict. That is
 a separate unit; until then the rule is applied by hand, with the arithmetic above.
+
+### Decided (2026-10-03)
+
+The owner, in the lead session, in these words: "موافق على 191" ("I approve 191"),
+answering the lead's ask to approve this amendment as recommended.
+
+- **D1: (b).** Pooled by track and language, 10 runs per side: 480 attempts per side, a
+  unit regresses when its failures rise by 16 or more (family-wise 8.73%).
+- **D2: 20 points**, the effect the table computes (87.3% power for 50% -> 70%).
+- **D3:** R1's one-sided exact sign test at 5%, as written.
+- **D4:** R3's condition, as written: no default changes until false rejections can be
+  counted.
+
+**What changed between proposal and approval, recorded so the rule is read as it now
+stands.** R3 said false rejections could not be counted, because a rejection was recorded
+as a count only. Since #193 every refused reply's text is recorded, and since #195
+`app/bench/refusals.py` judges each rejected answer by its task's own checks on the
+untouched fixture. In #198 that count was 4 of 132 rejected answers (#199). D4's
+condition can therefore be met by reporting that count with each comparison; the
+condition itself is unchanged.
