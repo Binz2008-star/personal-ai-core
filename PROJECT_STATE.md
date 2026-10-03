@@ -1201,14 +1201,25 @@ WHERE THINGS STAND (2026-10-03)
       text, so this says where and how often, not what the model wrote.
       English protocol errors (a reply that is not one JSON object) rose with
       each unit: 14 -> 27 -> 46 (in 10 -> 17 -> 31 of 60 attempts); Arabic
-      9 -> 15 -> 20. In English budget stops, unit 2 traded refused tool calls
-      (39 -> 19) for answer rejections (5 -> 21) and protocol errors
-      (20 -> 34); Arabic's rejections did not rise (22 -> 22). Sharpest case,
-      git-commit-release in English: with unit 1, every attempt wrote VERSION
-      and 2 of 5 passed; with unit 1 + 2, 4 of 5 ran no tool at all, each
-      spending its budget on 1 rejection and 2 protocol errors. So the English
-      regression is mostly the reply protocol breaking, not the environment
-      text being wrong. Why it breaks cannot be read from these files.
+      9 -> 15 -> 20. In English budget stops, from unit 1 to unit 1 + 2,
+      refused tool calls fell (39 -> 19) while answer rejections (5 -> 21) and
+      protocol errors (20 -> 34) rose; Arabic's rejections did not (22 -> 22).
+      That is where the failures fell in two runs, not what caused them.
+      Sharpest case, git-commit-release in English: with unit 1, every attempt
+      wrote VERSION and 2 of 5 passed; with unit 1 + 2, 4 of 5 ran no tool at
+      all, each spending its budget on 1 rejection and 2 protocol errors.
+      Which call failed can be read without the text: the next call's prompt
+      grows by the reply plus what the loop sent back, and the action-required
+      message leaves 37-38 tokens, a protocol-error message 24-31 (a reading
+      that never disagrees with the recorded counts in 360 runs). Read so:
+      English first replies that broke the protocol went 3 -> 8 -> 15 (Arabic
+      6 -> 5 -> 5); in git-commit-release every unit 1 + 2 first reply (13 or
+      19 tokens, to a prompt 181 tokens longer) broke it, where every unit 1
+      first reply (27-28 tokens) was a write_file call. English also moved
+      from shell (65 -> 26) to run_command (8 -> 20), which is what the
+      environment text asks for. So the English loss sits mostly at the
+      first reply, after the environment text; why those replies broke the
+      protocol cannot be read from these files.
   - Merged (#182): `pac --documents DIR` used to read only the `.md` and
     `.txt` files in DIR and drop the rest without a word. It now prints one
     line before the `documents:` summary naming the kinds passed over and how
