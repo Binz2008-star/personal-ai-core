@@ -159,6 +159,52 @@ def test_three_action_rejections_stop_without_a_fourth_model_call(ws):
     assert payloads[-1]["action_rejections"] == 3
 
 
+def test_the_outcome_keeps_the_text_of_each_refused_reply(ws):
+    """Handoff, Next 6b2: what the model wrote when the loop refused it, in
+    order, with the call it answered -- on the outcome, not in any event."""
+    events = InMemoryEventRepository()
+    script = Script(
+        "I will commit the release now.",
+        '{"answer": "Committed."}',
+        '{"tool": "list_directory"}',
+        '{"answer": "done"}',
+    )
+    outcome = loop(ws, script, events=events).run(
+        AgentTaskContract(task_text="change the workspace", action_required=True),
+        session_id="s1",
+    )
+    assert outcome.finished and outcome.protocol_errors == 1 and outcome.action_rejections == 1
+    assert [(r.call, r.kind, r.text, r.error) for r in outcome.refused_replies] == [
+        (1, "protocol_error", "I will commit the release now.", "the reply contains no JSON object"),
+        (2, "action_required", '{"answer": "Committed."}', None),
+    ]
+    payloads = repr([dict(e.payload) for e in events.list_for_session("s1")])
+    assert "commit the release" not in payloads and "Committed." not in payloads
+
+
+def test_a_run_with_nothing_refused_keeps_nothing(ws):
+    script = Script('{"tool": "list_directory"}', '{"answer": "done"}')
+    outcome = loop(ws, script).run("list it", session_id="s1")
+    assert outcome.refused_replies == ()
+
+
+def test_the_last_refused_reply_is_kept_when_the_budget_stops_the_run(ws):
+    script = Script("one", "two", "three")
+    outcome = loop(ws, script).run("anything", session_id="s1")
+    assert not outcome.finished
+    assert [(r.call, r.text) for r in outcome.refused_replies] == [(1, "one"), (2, "two"), (3, "three")]
+
+
+def test_a_refused_reply_that_looks_secret_is_withheld_like_an_answer(ws):
+    leaked = "token: ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+    script = Script(leaked, '{"answer": "done"}')
+    outcome = loop(ws, script).run("anything", session_id="s1")
+    assert outcome.finished
+    (refused,) = outcome.refused_replies
+    assert refused.text.startswith("[reply withheld: it contained something secret-shaped")
+    assert "ghp_" not in refused.text
+
+
 def test_a_denied_tool_does_not_count_as_action_for_enforcement(ws):
     script = Script(
         '{"tool": "run_command", "arguments": {"command": "git status"}}',

@@ -83,6 +83,26 @@ class Step:
 
 
 @dataclass(frozen=True, slots=True)
+class RefusedReply:
+    """A reply the loop refused and charged to the budget, with its text.
+
+    `kind` is "protocol_error" (not one JSON object; `error` says why) or
+    "action_required" (an answer before any tool had run, under a contract
+    that requires action). `call` is the model call it answered, from 1.
+
+    Kept for the caller -- the benchmark records it, so a refusal can be read
+    and a false one counted (ADR-023 amendment 1) -- and never put in an
+    event: a reply can quote the workspace (the repository's rule, no raw
+    text in a payload).
+    """
+
+    call: int
+    kind: str
+    text: str
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AgentOutcome:
     """How a run ended. `answer` is None when it did not finish."""
 
@@ -94,6 +114,8 @@ class AgentOutcome:
     action_rejections: int = 0
     # What the environment context recorded for this run (ADR-023 §2.1); None when off.
     environment: Mapping[str, Any] | None = None
+    # Each reply the loop refused, in order (see RefusedReply).
+    refused_replies: tuple[RefusedReply, ...] = field(default=())
 
     @property
     def finished(self) -> bool:
@@ -231,8 +253,11 @@ class AgentLoop:
         protocol_errors = 0
         action_rejections = 0
         tool_executed = False
+        refused: list[RefusedReply] = []
+        call = 0
 
         while budget.allowed():
+            call += 1
             reply = self._provider.generate(
                 model=self._model,
                 messages=messages,
@@ -244,6 +269,7 @@ class AgentLoop:
             except ValueError as exc:
                 budget.record(ok=False)
                 protocol_errors += 1
+                refused.append(self._refused(call, "protocol_error", reply.text, str(exc)))
                 if on_protocol_error is not None:
                     on_protocol_error(str(exc))
                 messages.append(self._user(session_id, f"Protocol error: {exc}. Reply with one JSON object."))
@@ -256,6 +282,7 @@ class AgentLoop:
                     and not tool_executed
                 ):
                     action_rejections += 1
+                    refused.append(self._refused(call, "action_required", reply.text))
                     budget.record(ok=False)
                     self._record_answer_rejected(
                         session_id, action_rejections, contract
@@ -270,6 +297,7 @@ class AgentLoop:
                     contract,
                     action_rejections,
                     environment,
+                    refused,
                 )
 
             record = self._executor.execute(
@@ -299,6 +327,7 @@ class AgentLoop:
             contract,
             action_rejections,
             environment,
+            refused,
         )
 
     # --- helpers ---------------------------------------------------------------
@@ -323,6 +352,15 @@ class AgentLoop:
         messages.append(self._user(session_id, task))
         return messages
 
+    def _refused(self, call: int, kind: str, text: str, error: str | None = None) -> RefusedReply:
+        # The same check an accepted answer passes (_finish): a refused reply
+        # is kept for a caller to write down, so it must not carry a secret either.
+        check = self._verifier.verify_response(text)
+        if not check.passed:
+            reasons = "; ".join(c.reason for c in check.checks if not c.passed)
+            text = f"[reply withheld: it contained something secret-shaped ({reasons})]"
+        return RefusedReply(call=call, kind=kind, text=text, error=error)
+
     @staticmethod
     def _user(session_id: str, content: str) -> Message:
         return Message(session_id=session_id, role=Role.USER, content=content)
@@ -336,6 +374,7 @@ class AgentLoop:
         contract: AgentTaskContract | None,
         action_rejections: int,
         environment: Mapping[str, Any] | None = None,
+        refused: list[RefusedReply] | None = None,
     ) -> AgentOutcome:
         check = self._verifier.verify_response(answer)
         if not check.passed:
@@ -349,6 +388,7 @@ class AgentLoop:
             protocol_errors=protocol_errors,
             action_rejections=action_rejections,
             environment=environment,
+            refused_replies=tuple(refused or ()),
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
@@ -362,6 +402,7 @@ class AgentLoop:
         contract: AgentTaskContract | None,
         action_rejections: int,
         environment: Mapping[str, Any] | None = None,
+        refused: list[RefusedReply] | None = None,
     ) -> AgentOutcome:
         outcome = AgentOutcome(
             answer=None,
@@ -371,6 +412,7 @@ class AgentLoop:
             protocol_errors=protocol_errors,
             action_rejections=action_rejections,
             environment=environment,
+            refused_replies=tuple(refused or ()),
         )
         self._record_finish(outcome, session_id, contract)
         return outcome

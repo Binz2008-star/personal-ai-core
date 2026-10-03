@@ -443,6 +443,38 @@ def test_an_action_required_task_rejects_an_answer_before_any_tool_call(tmp_path
     assert not run["success"]
 
 
+def test_a_run_records_the_text_of_every_reply_the_loop_refused(tmp_path):
+    """Handoff, Next 6b2: the reply that broke the protocol and the answer
+    rejected for not having acted, as the model wrote them. Recorded only."""
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = ["Let me look at calc.py first.", _answer("It looks fine to me."),
+                               *SOLVES["test_calc.py"]]
+    _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
+    run = next(x for x in lines if x["kind"] == "run")
+    assert run["refused_replies"] == [
+        {"call": 1, "kind": "protocol_error", "error": "the reply contains no JSON object",
+         "text": "Let me look at calc.py first."},
+        {"call": 2, "kind": "action_required", "error": None,
+         "text": _answer("It looks fine to me.")},
+    ]
+    # Scoring did not look at them: the run still solved the task.
+    assert run["success"] and run["protocol_errors"] == 1 and run["action_rejections"] == 1
+    assert "not scored" in lines[0]["refused_replies"]
+
+
+def test_a_long_refused_reply_is_clipped_and_says_so(tmp_path):
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = ["x" * 5_000, *SOLVES["test_calc.py"]]
+    _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
+    (refused,) = next(x for x in lines if x["kind"] == "run")["refused_replies"]
+    assert refused["text"] == "x" * 4_000 + "... [1000 more chars]"
+
+
+def test_a_run_with_nothing_refused_records_an_empty_list(tmp_path):
+    _, _, lines = _run(tmp_path, SOLVES, "--only", "verify-off-by-one", "--languages", "en")
+    assert next(x for x in lines if x["kind"] == "run")["refused_replies"] == []
+
+
 def test_an_action_required_task_that_acts_is_not_rejected(tmp_path):
     _, _, lines = _run(tmp_path, SOLVES, "--only", "verify-off-by-one", "--languages", "en")
     run = next(x for x in lines if x["kind"] == "run")
