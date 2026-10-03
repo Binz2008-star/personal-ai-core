@@ -31,8 +31,11 @@ claim it.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
+import math
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
@@ -103,6 +106,22 @@ class RefusedReply:
 
 
 @dataclass(frozen=True, slots=True)
+class LenientParse:
+    """A reply the strict protocol refuses and ADR-024 unit A read anyway.
+
+    `rules` names what was applied: "python_literal" (single quotes, True,
+    None: read with ast.literal_eval, which evaluates literals only),
+    "numeric_answer" (an answer given as a number, taken as its text),
+    "string_arguments" (`arguments` given as a string, for a tool with exactly
+    one required string field). Kept so every lenient read can be counted
+    and audited (ADR-024 §4).
+    """
+
+    call: int
+    rules: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class AgentOutcome:
     """How a run ended. `answer` is None when it did not finish."""
 
@@ -116,6 +135,8 @@ class AgentOutcome:
     environment: Mapping[str, Any] | None = None
     # Each reply the loop refused, in order (see RefusedReply).
     refused_replies: tuple[RefusedReply, ...] = field(default=())
+    # Each reply read under ADR-024 unit A (see LenientParse); empty when off.
+    lenient_parses: tuple[LenientParse, ...] = field(default=())
 
     @property
     def finished(self) -> bool:
@@ -168,6 +189,84 @@ def parse_reply(text: str) -> dict[str, Any]:
     raise ValueError('the object has neither "tool" nor "answer"')
 
 
+# A reply's object span longer than this is not handed to ast.literal_eval.
+# The generation limit keeps a reply to about 4,000 characters; this is a
+# bound on work, not a rule about replies.
+LITERAL_LIMIT = 20_000
+
+
+def single_field_tools(specs: Mapping[str, Any]) -> dict[str, str]:
+    """Tools with exactly one required field, of type string: tool -> field."""
+    found: dict[str, str] = {}
+    for name, spec in specs.items():
+        schema = spec.input_schema
+        required = list(schema.get("required") or [])
+        if len(required) == 1:
+            prop = (schema.get("properties") or {}).get(required[0], {})
+            if prop.get("type") == "string":
+                found[name] = required[0]
+    return found
+
+
+def _literal(span: str) -> Any:
+    if len(span) > LITERAL_LIMIT:
+        return None
+    try:
+        with warnings.catch_warnings():
+            # A backslash the model did not mean as an escape is not news.
+            warnings.simplefilter("ignore", DeprecationWarning)
+            warnings.simplefilter("ignore", SyntaxWarning)
+            return ast.literal_eval(span)
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+        return None
+
+
+def parse_reply_lenient(
+    text: str, single_field: Mapping[str, str]
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """ADR-024 unit A: the strict reading first; only if it refuses, three repairs.
+
+    A reply the strict parser accepts is returned as it would be, with no
+    rules applied. Otherwise the repairs are tried, and the result must then
+    pass the strict parser; if no repair applies, or the repaired reply still
+    fails, the STRICT error is raised, word for word, so the model is told
+    exactly what it is told today.
+    """
+    try:
+        return parse_reply(text), ()
+    except ValueError as exc:
+        strict_error = exc
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        raise strict_error
+    span = text[start : end + 1]
+    rules: list[str] = []
+    try:
+        value: Any = json.loads(span, strict=False)
+    except json.JSONDecodeError:
+        value = _literal(span)
+        if value is not None:
+            rules.append("python_literal")
+    if not isinstance(value, dict):
+        raise strict_error
+    answer = value.get("answer")
+    # A finite number only: NaN and Infinity are not an answer anyone wrote.
+    if (isinstance(answer, (int, float)) and not isinstance(answer, bool)
+            and math.isfinite(answer)):
+        value = {"answer": str(answer)}
+        rules.append("numeric_answer")
+    tool, arguments = value.get("tool"), value.get("arguments")
+    if isinstance(tool, str) and isinstance(arguments, str) and tool in single_field:
+        value = {"tool": tool, "arguments": {single_field[tool]: arguments}}
+        rules.append("string_arguments")
+    if not rules:
+        raise strict_error
+    try:
+        return parse_reply(json.dumps(value)), tuple(rules)
+    except (ValueError, TypeError):
+        raise strict_error from None
+
+
 def fence(label: str, content: str) -> str:
     token = hashlib.sha256(f"{label}\n{content}".encode("utf-8")).hexdigest()[:RESULT_TOKEN_LENGTH]
     return f"<<<result {token} {label}>>>\n{content}\n<<<end result {token}>>>"
@@ -204,6 +303,7 @@ class AgentLoop:
         events: EventRepository | None = None,
         session_exists: Callable[[str], bool] | None = None,
         environment: EnvironmentContext | None = None,
+        lenient_protocol: bool = False,
         max_actions: int = 12,
         max_failures: int = 3,
         generation_limit: int = 1024,
@@ -217,6 +317,11 @@ class AgentLoop:
         self._identity = identity
         self._events = events
         self._environment = environment
+        # ADR-024 unit A, off unless asked for: then three unambiguous shapes
+        # the strict protocol refuses are read (parse_reply_lenient).
+        self._single_field = (
+            single_field_tools(executor.specs) if lenient_protocol else None
+        )
         self._max_actions = max_actions
         self._max_failures = max_failures
         self._generation_limit = generation_limit
@@ -254,6 +359,7 @@ class AgentLoop:
         action_rejections = 0
         tool_executed = False
         refused: list[RefusedReply] = []
+        lenient: list[LenientParse] = []
         call = 0
 
         while budget.allowed():
@@ -265,7 +371,12 @@ class AgentLoop:
             )
             messages.append(Message(session_id=session_id, role=Role.ASSISTANT, content=reply.text))
             try:
-                proposal = parse_reply(reply.text)
+                if self._single_field is None:
+                    proposal = parse_reply(reply.text)
+                else:
+                    proposal, rules = parse_reply_lenient(reply.text, self._single_field)
+                    if rules:
+                        lenient.append(LenientParse(call=call, rules=rules))
             except ValueError as exc:
                 budget.record(ok=False)
                 protocol_errors += 1
@@ -298,6 +409,7 @@ class AgentLoop:
                     action_rejections,
                     environment,
                     refused,
+                    lenient,
                 )
 
             record = self._executor.execute(
@@ -328,6 +440,7 @@ class AgentLoop:
             action_rejections,
             environment,
             refused,
+            lenient,
         )
 
     # --- helpers ---------------------------------------------------------------
@@ -375,6 +488,7 @@ class AgentLoop:
         action_rejections: int,
         environment: Mapping[str, Any] | None = None,
         refused: list[RefusedReply] | None = None,
+        lenient: list[LenientParse] | None = None,
     ) -> AgentOutcome:
         check = self._verifier.verify_response(answer)
         if not check.passed:
@@ -389,6 +503,7 @@ class AgentLoop:
             action_rejections=action_rejections,
             environment=environment,
             refused_replies=tuple(refused or ()),
+            lenient_parses=tuple(lenient or ()),
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
@@ -403,6 +518,7 @@ class AgentLoop:
         action_rejections: int,
         environment: Mapping[str, Any] | None = None,
         refused: list[RefusedReply] | None = None,
+        lenient: list[LenientParse] | None = None,
     ) -> AgentOutcome:
         outcome = AgentOutcome(
             answer=None,
@@ -413,6 +529,7 @@ class AgentLoop:
             action_rejections=action_rejections,
             environment=environment,
             refused_replies=tuple(refused or ()),
+            lenient_parses=tuple(lenient or ()),
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
