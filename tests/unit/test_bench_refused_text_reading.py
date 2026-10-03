@@ -171,9 +171,10 @@ def test_after_reading_function_call_syntax_appears_only_with_unit_2_and_only_in
 
 def test_after_reading_a_numeric_answer_is_refused_and_twice_it_was_right():
     """`{"answer": 4}` breaks the protocol ("answer" must be a string)."""
-    values = [re.search(r'"answer"\s*:\s*(\d+)', r["text"]).group(1)
+    values = [match.group(1)
               for path in (UNIT1, UNIT1_AND_2) for run, r, _ in _protocol_errors(path)
-              if '"answer" must be a string' in (r["error"] or "")]
+              if '"answer" must be a string' in (r["error"] or "")
+              and (match := re.search(r'"answer"\s*:\s*(\d+)', r["text"]))]
     assert sorted(values) == ["10", "4", "4", "5", "8"]
 
 
