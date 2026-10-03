@@ -697,6 +697,8 @@ claim written in one place with nothing that notices it going stale.
                (ADR-018 amendment 2)
   #202 22b586a  feat(agent): ADR-024 unit A -- read three reply shapes the strict
                protocol refuses (off by default)
+  #203 4f0ae89  eval(bench): the verdict of ADR-023 amendment 1, applied by code
+               (compare --unit N)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1163,7 +1165,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 22b586a)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 4f0ae89)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1197,8 +1199,10 @@ WHERE THINGS STAND (2026-10-03)
     owner the same day: "ابدأ A") and #201 (GitHub and AWS tokens glued to a
     word are withheld, ADR-018 amendment 2; owner: "سدّ الثغرة") merged; main
     was bd95016; then #202 (ADR-024 unit A, off by default) merged; main is
-    22b586a. Open pull request: #203 (the verdict of ADR-023 amendment 1,
-    applied by code: `bench.compare --unit N`).
+    was 22b586a; then #203 (the verdict of ADR-023 amendment 1, applied by
+    code: `bench.compare --unit N`; units 1-3 only) merged; main is 4f0ae89.
+    Open pull request: #204 (the owner-accepted finding that ADR-024's units
+    A and B have no formal gate under the amendment).
     Open issue: #76 (the 2026-09-25 ADR-017 review checkpoint; the persistence
     it asked for is built and tested, 55 PostgreSQL tests in CI -- the owner
     closes it).
