@@ -1,6 +1,6 @@
 # ADR-023 — Planning, execution/test and verification in the agent loop
 
-**Status:** ACCEPTED (2026-10-02) — unit 1 (§8.2) built and merged (#174, `d2b6cac`); unit 2 (§2.1) built, off by default (#178); not yet measured
+**Status:** ACCEPTED (2026-10-02) — unit 1 (§8.2) built and merged (#174, `d2b6cac`); unit 2 (§2.1) built, off by default (#178); both measured (#189, 2026-10-03), read descriptively: the deciding rule is proposed in Amendment 1
 
 | Stage | State |
 |---|---|
@@ -9,7 +9,7 @@
 | Accepted | **yes**, by the owner, 2026-10-02, with the first unit (§8) |
 | Authorized | **acceptance, the specification of unit 1, unit 1's implementation** (#174) **and the benchmark change that lets it be measured** (§8.3, #176), each merged on the owner's instruction, 2026-10-02. **Unit 2** (§2.1, #178) was built and merged under the owner's standing instruction of 2026-10-02 to the lead to decide and handle merges, **off by default and not exposed in `pac --agent`**. Unit 3 and every later control each need their own approval (§4, §8) |
 | Implemented | **the contract (#172), unit 1, action enforcement (#174, `d2b6cac`)**, enforced for `action_required=true`, **and unit 2, environment context (#178)**, which runs only with the benchmark flag `--environment-context` or `build_agent(environment_context=True)`. No other control in §2 exists in the code |
-| Verified | **tests and CI only** (§8.4). **Not measured**: since #176 the benchmark passes the contract, so unit 1 engages there, and since #178 the same run can be made with and without unit 2, but the 240 runs have not been made |
+| Verified | tests and CI (§8.4), and **measured on the rig** at `4f63f73` (#189, 2026-10-03): unit 1, then unit 1 + unit 2, 240 attempts each. Read **descriptively** only, because the deciding rule §5 requires was not written first; Amendment 1 (PROPOSED) supplies it for the next comparison. The reading is in PROJECT_STATE.md |
 
 - Serves the owner's order after the capability baseline: Planning, then Execution/Test,
   then Verification, built against measured gaps.
@@ -566,3 +566,93 @@ Nothing here changes the design above.
   is no flag. §4's row "adopt a control in `pac --agent`: the owner, on the measured
   result" is therefore not met by a measurement. This was raised in review before the
   owner merged #174.
+
+## Amendment 1 (PROPOSED, 2026-10-03): the rule that decides "better"
+
+**Status: PROPOSED by the lead. Not in force until the owner approves it.** It governs the
+next comparison. It is never applied to #189: that measurement was read without a rule,
+because §5's requirement was missed, and its reading is recorded as descriptive in
+PROJECT_STATE.md.
+
+### Why a rule, and where its numbers come from
+
+§5 requires that "before any comparison, the rule that decides 'better' is fixed and
+written down, following ADR-020 amendment 1, and applied to the 5-run samples with their
+variance stated." This amendment does that.
+
+- **Targets:** ADR-020 amendment 1's, set by the owner on 2026-10-01: a family-wise false
+  rejection of about 10% (an unchanged system is rejected at most that often), and a
+  failure rate moving from 10% to 70% caught at least 75% of the time.
+- **Arithmetic:** `app/gate_calibration.py`, unchanged: binomial per side, every gate unit
+  at its worst base rate (p = 0.5), units treated as independent. That is a calibration
+  assumption, not a guarantee.
+- `tests/unit/test_adr023_rule_calibration.py` re-derives every number below.
+
+### What 5 runs can and cannot decide
+
+| Gate unit | Runs per side | A unit regresses when its failures rise by | Family-wise false rejection | Power |
+|---|---|---|---|---|
+| task × language (48 cells) | 5 (today) | 5, i.e. all runs | 4.58% | 9.9% for 10% → 70% |
+| task × language (48 cells) | 17 | 9 | 6.81% | 77.9% for 10% → 70% |
+| track × language (4 groups) | 5 (today: 60 attempts per group) | 12 | 6.88% | 54.0% for 50% → 70% |
+| track × language (4 groups) | 10 (120 attempts per group) | 16 | 8.73% | 87.3% for 50% → 70% |
+
+- **Reading:** at today's 5 runs, a per-cell gate is close to blind. It catches a cell
+  going from 10% to 70% failures about one time in ten.
+- **Two ways to a gate that can see:**
+  - more runs per cell: 17 per side, which is 816 attempts per side;
+  - pooling by track and language: 10 runs per side, which is 480 attempts per side, for a
+    shift of 20 points.
+- **Rig time:** #189 ran at about 6.4 seconds per attempt. That makes about 87 minutes per
+  side for the first way and about 52 minutes per side for the second.
+
+### The proposed rule
+
+- **R0, readable.** A comparison is read only when both sides have:
+  - the same weights digest, scorer, runs and languages;
+  - `num_ctx` confirmed by /api/ps, with no `context_mismatch`;
+  - task digests that differ only by the contract or by a documented digest fix
+    (ADR-022 §10);
+  - no hang.
+
+  Otherwise the verdict is NOT READABLE.
+- **R1, target.** The control's target class is declared before the runs: unit 1 → class 1,
+  unit 2 → class 3, unit 3 → class 2.
+  - It passes when, over attempts paired by (task, language, run), attempts leaving the
+    class outnumber attempts entering it, by a one-sided exact sign test at 5%.
+  - This is one pre-declared test, so there is no family correction.
+- **R2, no regression.** The gate unit and run count are those chosen in D1 below.
+  - A unit regresses when its failures rise by at least the derived threshold.
+  - Both tracks and both languages count.
+  - Improvements never buy back a regression (ADR-020 §3.3).
+- **R3, costs: reported, not gating.**
+  - Reported: budget stops, rejections per attempt, per-cell changes, false rejections.
+  - False rejections cannot be counted today, because a rejection is recorded as a count
+    only.
+  - So no control becomes the default in `pac --agent` until they can be counted. That
+    needs the rejected answer recorded: its own small unit and approval.
+- **R4, verdict.**
+  - PASS when R0, R1 and R2 hold.
+  - NOT READABLE when R0 fails.
+  - FAIL otherwise.
+  - A PASS is evidence for adoption, not adoption (§4).
+- **R5, read once.** A comparison is read once. A FAIL is not re-run until it passes. The
+  rule changes only by amendment, before a comparison.
+
+### Decisions asked of the owner
+
+- **D1, the gate unit and run count:**
+  - (a) per cell, 17 runs per side;
+  - (b) pooled by track and language, 10 runs per side;
+  - (c) pooled, 5 runs per side, which has about 54% power.
+
+  **Lead's recommendation: (b).** It is affordable on the rig, its power is 87% for a
+  20-point shift, and per-cell changes remain reported, descriptively.
+- **D2:** if (b), the effect to catch. 20 points is what the table computes; the owner may
+  set another, and the thresholds are then re-derived.
+- **D3:** R1's one-sided sign test at 5%.
+- **D4:** R3's condition, that no default is changed until false rejections can be
+  counted.
+
+Once approved, the rule becomes a mode of `bench.compare` that prints the verdict. That is
+a separate unit; until then the rule is applied by hand, with the arithmetic above.
