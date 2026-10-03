@@ -7,6 +7,7 @@ raised word for word.
 """
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -24,7 +25,9 @@ from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import Workspace
 from personal_ai_core.agent.tools import Shell, default_tools
 from personal_ai_core.agent.web import FetchUrl, WebSearch
+from personal_ai_core.app.bench.runner import run_agent_task
 from personal_ai_core.core.domain import ModelResponse
+from personal_ai_core.conversation.factory import build_agent
 from personal_ai_core.persistence.in_memory import InMemoryEventRepository
 
 REPO = Path(__file__).resolve().parents[2]
@@ -126,9 +129,16 @@ def test_single_field_tools_are_derived_from_the_schemas_not_listed(tmp_path):
 
 
 def test_off_by_default_a_numeric_answer_is_still_a_protocol_error(ws):
-    outcome = _loop(ws, Script('{"answer": 42}', '{"answer": "42"}'), lenient=False).run(
-        "what is the answer?", session_id="s1")
+    """The default itself, not an explicit False: the loop built without the
+    argument, and the factory's and the benchmark's defaults."""
+    checkpoints = Checkpoints(ws)
+    loop = AgentLoop(provider=Script('{"answer": 42}', '{"answer": "42"}'), model="boss",
+                     executor=ToolExecutor(default_tools(ws, checkpoints), RiskPolicy()),
+                     checkpoints=checkpoints)
+    outcome = loop.run("what is the answer?", session_id="s1")
     assert outcome.protocol_errors == 1 and outcome.lenient_parses == ()
+    for function in (build_agent, run_agent_task):
+        assert inspect.signature(function).parameters["lenient_protocol"].default is False
 
 
 def test_on_a_numeric_answer_finishes_and_is_recorded(ws):
