@@ -670,6 +670,8 @@ claim written in one place with nothing that notices it going stale.
                request would fail
   #189 05a9581  eval: ADR-023 unit 1 and unit 1+2 at 4f63f73 (240 runs each)
   #190 3bbb9ad  docs: record the ADR-023 measurement (#189); handoff at 05a9581
+  #192 ccfc88a  docs: why English fell with unit 2, read without a cause;
+               which call failed, from token counts
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1135,7 +1137,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 3bbb9ad)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at ccfc88a)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1156,7 +1158,10 @@ WHERE THINGS STAND (2026-10-03)
     failures that sets the order of the controls, and its correction) merged;
     main was df05a66; then #187 (that record), #188 (the state script says "at
     the limit" where a PR would fail) and #189 (the ADR-023 measurement, below)
-    merged; main is 05a9581. Open pull requests: none. Open issue: #76 (the 2026-09-25
+    merged; main was 05a9581; then #190 (that record) and #192 (the English
+    reading, below) merged; main is ccfc88a. Open pull request: #191 (draft,
+    ADR-023 amendment 1, the deciding rule; waits on the owner's D1-D4).
+    Open issue: #76 (the 2026-09-25
     ADR-017 review checkpoint; the persistence it asked for is built and
     tested, 55 PostgreSQL tests in CI -- the owner closes it).
   - MEASURED (#189, 2026-10-03): ADR-023 unit 1, then unit 1 + unit 2, at
@@ -1445,16 +1450,33 @@ WHERE THINGS STAND (2026-10-03)
       4. Done: unit 1 measured (#189, above).
       5. Done: unit 1 + unit 2 measured (#189, above).
       6. Next, in this order, nothing built meanwhile:
-         a. Write the deciding rule for ADR-023 comparisons (section 5),
-            following ADR-020 amendment 1, as an amendment for the owner's
-            approval. It governs the next measurement, not #189.
+         a. Drafted (#191, not merged): the deciding rule for ADR-023
+            comparisons (section 5), following ADR-020 amendment 1. It waits
+            on the owner's decisions D1-D4 and governs the next measurement,
+            not #189.
          b. Done: the read-only look (above). It cannot say why English replies
             broke the protocol, because the reply text is not recorded.
-         b2. Proposed, for the owner's approval: the benchmark records the
-            text of every rejected answer and every reply that broke the
-            protocol. Scoring is unchanged. It explains b, and it makes false
-            rejections countable, which ADR-023 amendment 1 (PROPOSED, #191)
-            requires before any default changes (R3, D4).
+         b2. Approved by the owner (2026-10-03) and built: the agent loop
+            keeps each reply it refused (call, kind, text, protocol error) on
+            its outcome -- never in an event -- with the secret check an
+            answer passes; the benchmark writes it to each agent run as
+            `refused_replies` (text clipped at 4000 characters). Scoring is
+            unchanged. Not yet run: the next rig measurement carries it. It
+            is what explains b, and what makes false rejections countable,
+            which ADR-023 amendment 1 (PROPOSED, #191) requires before any
+            default changes (R3, D4). Reviewed boundary: the field is named
+            only in agent/loop.py and app/bench/runner.py (a test enforces
+            it), so no path to memory, feedback, events or the CLI; a secret
+            in a refused reply is withheld before the record, including
+            across the clip boundary; stripping the field leaves every
+            reading of a file the same. Use of the captured text: read-only
+            forensics after merge; it changes no unit, prompt or behaviour
+            by itself.
+            Finding while testing it (not acted on, owner's call): the
+            verifier's secret patterns start at a word boundary, so a token
+            glued to a letter ("xghp_...") is not recognised -- in a refused
+            reply and in an accepted answer alike. Widening it is a
+            precision trade for its own PR.
          c. Then the owner decides the next experiment (unit 3, a change to
             the environment text, or the default for action_required). Unit 3
             reaches at most 7 of the baseline's 111 failures and needs the
