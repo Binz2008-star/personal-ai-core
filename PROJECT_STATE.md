@@ -677,6 +677,8 @@ claim written in one place with nothing that notices it going stale.
                which call failed, from token counts
   #193 1861756  eval(bench): record the text of every reply the agent loop
                refused (handoff 6b2, owner-approved)
+  #194 3a124fc  docs(adr): OD-10 decided -- six PROPOSED ADRs accepted, Phase 1
+               accepted
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1176,6 +1178,17 @@ WHERE THINGS STAND (2026-10-03)
     line corrected to the acceptance it reached in #154; ADR-017 stays
     PROPOSED (its section 13 is open, including a production schema write);
     ADR-021 stays PROPOSED / DEFERRED (nothing built).
+  - RE-RUN OF #189 AT 1861756 (on the rig 2026-10-03, owner-ordered; forensic,
+    decides nothing): the same two runs, now recording refused-reply text.
+    Before it was read, an instrument check was fixed:
+    `python -m personal_ai_core.app.bench.replication EARLIER LATER`. Eight
+    cells (track x language, per pair); a cell flags at a success difference
+    of 15 or more (family-wise false alarm 6.1% at the worst base rate,
+    ADR-020's arithmetic); instrument fields and weights must match. A flag
+    means the rig differed and nothing across the pair is read until
+    explained; no flag does not prove the rig was the same (a 20% -> 40% move
+    is caught about 31% of the time). The differences are recorded as the
+    observed run-to-run spread, which ADR-023 amendment 1 (#191) can use.
     Open issue: #76 (the 2026-09-25
     ADR-017 review checkpoint; the persistence it asked for is built and
     tested, 55 PostgreSQL tests in CI -- the owner closes it).
