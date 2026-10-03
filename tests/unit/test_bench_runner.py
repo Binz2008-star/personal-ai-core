@@ -547,6 +547,27 @@ def test_only_the_loop_and_the_benchmark_touch_refused_replies():
     assert naming == {"agent/loop.py", "app/bench/runner.py", "app/bench/refusals.py"}
 
 
+def test_the_lenient_protocol_is_off_by_default_and_the_header_says_so(tmp_path):
+    """ADR-024 unit A: a file run without the flag records neither the flag
+    on nor any lenient read."""
+    _, _, lines = _run(tmp_path, SOLVES, "--only", "verify-off-by-one", "--languages", "en")
+    assert lines[0]["lenient_protocol"] is False
+    assert "lenient_parses" not in next(x for x in lines if x["kind"] == "run")
+
+
+def test_with_the_lenient_protocol_a_string_argument_runs_and_is_recorded(tmp_path):
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = ['{"tool": "read_file", "arguments": "calc.py"}',
+                               *SOLVES["test_calc.py"][1:]]
+    _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en",
+                       "--lenient-protocol")
+    run = next(x for x in lines if x["kind"] == "run")
+    assert lines[0]["lenient_protocol"] is True
+    assert run["lenient_parses"] == [{"call": 1, "rules": ["string_arguments"]}]
+    assert run["protocol_errors"] == 0 and run["steps"][0]["executed"] is True
+    assert run["success"]
+
+
 def test_an_action_required_task_that_acts_is_not_rejected(tmp_path):
     _, _, lines = _run(tmp_path, SOLVES, "--only", "verify-off-by-one", "--languages", "en")
     run = next(x for x in lines if x["kind"] == "run")
