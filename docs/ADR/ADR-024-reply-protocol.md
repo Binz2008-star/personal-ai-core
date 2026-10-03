@@ -1,14 +1,14 @@
 # ADR-024 — The agent's reply protocol: accept what is unambiguous, take file content out of JSON
 
-**Status:** PROPOSED (2026-10-03) · nothing built · every unit below needs the owner's
-authorization, and each is measured before it is adopted
+**Status:** PROPOSED (2026-10-03) · **unit A authorized by the owner 2026-10-03** ("ابدأ A")
+· units B and C not authorized · each unit is measured before it is adopted
 
 | Stage | State |
 |---|---|
 | Proposed | yes: this document, written by the lead after #198 |
 | Evidence | the refused-reply text of #198, read in #199; the replay in §3 is pinned by `tests/unit/test_adr024_replay.py` |
-| Authorized | **no** |
-| Implemented | **no** |
+| Authorized | **unit A** (D1), by the owner, 2026-10-03, in the lead session: "ابدأ A" ("start A"), with the lead's order (D4: A first). D2 and D3 are open |
+| Implemented | **no** (unit A is built in its own pull request) |
 
 - Serves: ADR-023 (plan, execute, verify), whose §8.2 and §7 reserve any change to what
   the model sees, or to the protocol it answers in, for separate review. This is that
@@ -100,6 +100,10 @@ a string (`"...".strip()`), which no rule can read without guessing.
 - Read under ADR-023 amendment 1 (#191) once it is approved. Until then, descriptively.
 
 ## 6. Decisions the owner is asked for
+
+**Decided 2026-10-03:** D1 (unit A) authorized, and D4's order with it: A first. D2 (unit
+B) and D3 (unit C) remain open. A decision on adopting unit A in `pac --agent` is not part
+of D1: it is taken on a measurement read under ADR-023 amendment 1.
 
 - **D1.** Authorize unit A (parser only, no text the model sees).
 - **D2.** Authorize unit B (one protocol sentence, and the fenced-content form).

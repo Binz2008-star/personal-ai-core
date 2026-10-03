@@ -673,6 +673,8 @@ claim written in one place with nothing that notices it going stale.
                request would fail
   #189 05a9581  eval: ADR-023 unit 1 and unit 1+2 at 4f63f73 (240 runs each)
   #190 3bbb9ad  docs: record the ADR-023 measurement (#189); handoff at 05a9581
+  #191 13caea4  docs(adr): ADR-023 amendment 1 ACCEPTED -- the rule that decides
+               "better"
   #192 ccfc88a  docs: why English fell with unit 2, read without a cause;
                which call failed, from token counts
   #193 1861756  eval(bench): record the text of every reply the agent loop
@@ -1155,7 +1157,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at a366493)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 13caea4)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1582,7 +1584,8 @@ WHERE THINGS STAND (2026-10-03)
             recommendation, from b3: a reply-protocol unit, which is the
             protocol change ADR-023 reserves for separate review, now written
             as ADR-024 (PROPOSED; units A parser-only, B file content outside
-            JSON, C tool-specific error feedback; D1-D4 the owner's). In order of
+            JSON, C tool-specific error feedback). Unit A authorized by the
+            owner 2026-10-03 ("ابدأ A"); B and C open. In order of
             how unambiguous the input is: accept a numeric "answer" as its
             text; accept a string "arguments" for shell/run_command as the
             command; then, separately, a way to write file content that does
