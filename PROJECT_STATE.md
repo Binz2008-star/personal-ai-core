@@ -669,6 +669,7 @@ claim written in one place with nothing that notices it going stale.
   #188 4f63f73  fix(tools): the state script says "at the limit" where a pull
                request would fail
   #189 05a9581  eval: ADR-023 unit 1 and unit 1+2 at 4f63f73 (240 runs each)
+  #190 3bbb9ad  docs: record the ADR-023 measurement (#189); handoff at 05a9581
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1134,7 +1135,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 05a9581)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 3bbb9ad)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1195,6 +1196,30 @@ WHERE THINGS STAND (2026-10-03)
       [action_required=true] prefix (for example as the default in pac
       --agent) is the owner's decision (section 4). Unit 2 moved its own class
       but not the total, and English fell: it stays off and is not adopted.
+      Why English fell with unit 2 (Next 6b, read-only; pinned by the same
+      test file). The records keep token counts per model call, not the reply
+      text, so this says where and how often, not what the model wrote.
+      English protocol errors (a reply that is not one JSON object) rose with
+      each unit: 14 -> 27 -> 46 (in 10 -> 17 -> 31 of 60 attempts); Arabic
+      9 -> 15 -> 20. In English budget stops, from unit 1 to unit 1 + 2,
+      refused tool calls fell (39 -> 19) while answer rejections (5 -> 21) and
+      protocol errors (20 -> 34) rose; Arabic's rejections did not (22 -> 22).
+      That is where the failures fell in two runs, not what caused them.
+      Sharpest case, git-commit-release in English: with unit 1, every attempt
+      wrote VERSION and 2 of 5 passed; with unit 1 + 2, 4 of 5 ran no tool at
+      all, each spending its budget on 1 rejection and 2 protocol errors.
+      Which call failed can be read without the text: the next call's prompt
+      grows by the reply plus what the loop sent back, and the action-required
+      message leaves 37-38 tokens, a protocol-error message 24-31 (a reading
+      that never disagrees with the recorded counts in 360 runs). Read so:
+      English first replies that broke the protocol went 3 -> 8 -> 15 (Arabic
+      6 -> 5 -> 5); in git-commit-release every unit 1 + 2 first reply (13 or
+      19 tokens, to a prompt 181 tokens longer) broke it, where every unit 1
+      first reply (27-28 tokens) was a write_file call. English also moved
+      from shell (65 -> 26) to run_command (8 -> 20), which is what the
+      environment text asks for. So the English loss sits mostly at the
+      first reply, after the environment text; why those replies broke the
+      protocol cannot be read from these files.
   - Merged (#182): `pac --documents DIR` used to read only the `.md` and
     `.txt` files in DIR and drop the rest without a word. It now prints one
     line before the `documents:` summary naming the kinds passed over and how
@@ -1423,9 +1448,13 @@ WHERE THINGS STAND (2026-10-03)
          a. Write the deciding rule for ADR-023 comparisons (section 5),
             following ADR-020 amendment 1, as an amendment for the owner's
             approval. It governs the next measurement, not #189.
-         b. Read-only, from the #189 files: why English answers were rejected
-            until the budget ended with the environment context on (2 -> 10),
-            and what the 57-58 budget stops spent their failures on.
+         b. Done: the read-only look (above). It cannot say why English replies
+            broke the protocol, because the reply text is not recorded.
+         b2. Proposed, for the owner's approval: the benchmark records the
+            text of every rejected answer and every reply that broke the
+            protocol. Scoring is unchanged. It explains b, and it makes false
+            rejections countable, which ADR-023 amendment 1 (PROPOSED, #191)
+            requires before any default changes (R3, D4).
          c. Then the owner decides the next experiment (unit 3, a change to
             the environment text, or the default for action_required). Unit 3
             reaches at most 7 of the baseline's 111 failures and needs the
