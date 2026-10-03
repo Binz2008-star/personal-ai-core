@@ -665,6 +665,10 @@ claim written in one place with nothing that notices it going stale.
                order of the controls
   #186 df05a66  test: a tested-after-edit gate reaches 7 of the 111 failures,
                not 27 (correcting #185)
+  #187 9d5e6ac  docs: record #184-#186; handoff at df05a66
+  #188 4f63f73  fix(tools): the state script says "at the limit" where a pull
+               request would fail
+  #189 05a9581  eval: ADR-023 unit 1 and unit 1+2 at 4f63f73 (240 runs each)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1130,7 +1134,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at df05a66)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 05a9581)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1149,9 +1153,48 @@ WHERE THINGS STAND (2026-10-03)
     #183 (the record of those), #162 (the brand assets, below), #184 (the
     record of those), #185 and #186 (the reading of the baseline's agent
     failures that sets the order of the controls, and its correction) merged;
-    main is df05a66. Open pull requests: none. Open issue: #76 (the 2026-09-25
+    main was df05a66; then #187 (that record), #188 (the state script says "at
+    the limit" where a PR would fail) and #189 (the ADR-023 measurement, below)
+    merged; main is 05a9581. Open pull requests: none. Open issue: #76 (the 2026-09-25
     ADR-017 review checkpoint; the persistence it asked for is built and
     tested, 55 PostgreSQL tests in CI -- the owner closes it).
+  - MEASURED (#189, 2026-10-03): ADR-023 unit 1, then unit 1 + unit 2, at
+    4f63f73, on the rig (ADAM-PC) through a Remote Control session the lead
+    started on the owner's instruction, in its own worktree. Precondition read
+    from /api/ps before each run: context_length 8192, size_vram 4.55 GB of
+    5.38 GB. The model had been unloaded; with the owner's approval one
+    /api/generate request (num_predict 1, no num_ctx) loaded it; no setting was
+    changed. Files: evals/results/bench/bench-20261003T132852Z.jsonl (unit 1)
+    and bench-20261003T135502Z.jsonl (--environment-context); both exit 0, no
+    context_mismatch. Every figure here is re-derived from those files by
+    tests/unit/test_bench_adr023_measurement.py.
+      Unit 1 against the baseline: class 1 ("answers without executing")
+      52 -> 0. Agent success 9 -> 26 of 120 (English 9 -> 15, Arabic 0 -> 11).
+      The 52 went to: success 18, class 2 23, class 3 7, rejected until the
+      budget ended 4. Cost: budget stops 33 -> 57; 54 attempts had an answer
+      rejected (58 rejections). False rejections cannot be read from the file
+      (a rejection is recorded as a count only).
+      Unit 2 on top of unit 1: class 3 ("wrong or unknown environment
+      commands") 23 -> 11, 15 of them to class 2 and 4 to success. Agent
+      success 26 -> 24: Arabic 11 -> 16, English 15 -> 8. In English, attempts
+      whose answers were rejected until the budget ended rose 2 -> 10;
+      attempts with a rejected answer 54 -> 74 overall. Knowledge tasks, which
+      unit 2 does not touch, moved by 1-2 of 5 between the two runs: that is
+      the run-to-run noise of a 5-run cell.
+      Instrument: compare warns that file-create-settings "differs and the
+      contract does not explain it". Explained: the baseline header holds the
+      pre-#170 Windows digest (ADR-022 section 10); the task file gained only
+      its action_required line.
+      NOT DECIDED, and why: ADR-023 section 5 requires the rule that decides
+      "better" to be fixed and written before a comparison is read. It was not
+      (the lead's omission), so this reading is descriptive, and a rule written
+      now applies to the next measurement, not to this one.
+      The lead's reading, for the owner: unit 1 removed the class it targets,
+      roughly tripled agent success and took Arabic off zero; no reasonable
+      rule overturns that, but its adoption beyond the per-line
+      [action_required=true] prefix (for example as the default in pac
+      --agent) is the owner's decision (section 4). Unit 2 moved its own class
+      but not the total, and English fell: it stays off and is not adopted.
   - Merged (#182): `pac --documents DIR` used to read only the `.md` and
     `.txt` files in DIR and drop the rest without a word. It now prints one
     line before the `documents:` summary naming the kinds passed over and how
@@ -1374,25 +1417,19 @@ WHERE THINGS STAND (2026-10-03)
          Not yet measurable. The owner records the approval of its wording
          (see "Merged" above).
       3. Done: the section 8.3 benchmark change (#176).
-      4. Next, the owner's, on the rig: measure. Fresh worktree of main;
-         `ai status` showing 8192 on the GPU; `python -m
-         personal_ai_core.app.bench --runs 5 --num-ctx 8192` (about 25
-         minutes; it writes a new file and never touches the baseline);
-         commit the new file unmodified as an eval PR, as #165 did. Read it
-         against the baseline by failure class, never by a target score
-         (ADR-023 section 5): `python -m personal_ai_core.app.bench.compare
-         BASELINE NEW` (#177) reproduces the ADR's 52/43/14/2 on the baseline
-         and decides nothing.
-      5. Then, the owner's, on the rig: the same run with
-         `--environment-context` (unit 1 + unit 2, the same code and one flag),
-         compared with the unit-1 file. Class 3 is the one expected to move;
-         read the Arabic rows (the English block sits in a system message, not
-         the latest user message, but that is an inference, not an observation).
-      6. Then, with both comparisons in hand, the owner decides whether unit 3
-         is built. If unit 2 moves Class 3 and the refused-shell counts above
-         fall, unit 3 is aimed at what is left; if not, the environment text is
-         what to look at first. Its protocol change (structured claims) goes to
-         separate review either way.
+      4. Done: unit 1 measured (#189, above).
+      5. Done: unit 1 + unit 2 measured (#189, above).
+      6. Next, in this order, nothing built meanwhile:
+         a. Write the deciding rule for ADR-023 comparisons (section 5),
+            following ADR-020 amendment 1, as an amendment for the owner's
+            approval. It governs the next measurement, not #189.
+         b. Read-only, from the #189 files: why English answers were rejected
+            until the budget ended with the environment context on (2 -> 10),
+            and what the 57-58 budget stops spent their failures on.
+         c. Then the owner decides the next experiment (unit 3, a change to
+            the environment text, or the default for action_required). Unit 3
+            reaches at most 7 of the baseline's 111 failures and needs the
+            protocol change reserved for separate review.
   - Rules learned today: update this header in any PR that finds it 2 or more
     merges behind -- CI now fails a PR at 3 (main went red after #163, and again
     after #176, when it slipped to 4); a scorer fix is
