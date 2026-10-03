@@ -679,6 +679,10 @@ claim written in one place with nothing that notices it going stale.
                refused (handoff 6b2, owner-approved)
   #194 3a124fc  docs(adr): OD-10 decided -- six PROPOSED ADRs accepted, Phase 1
                accepted
+  #195 2d4a2b0  eval(bench): a reader for refused replies, its rules and four
+               hypotheses fixed before the data
+  #196 9a07647  eval(bench): an instrument check between two runs of the same
+               behaviour (rule fixed before the re-run of #189 was read)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1145,7 +1149,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 1861756)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 2d4a2b0)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
