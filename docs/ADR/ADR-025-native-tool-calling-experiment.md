@@ -73,11 +73,37 @@ For each function call, return a json object with function name and arguments wi
 - The base model's own template (Qwen2.5-7B-Instruct, `tokenizer_config.json` on Hugging
   Face) has the same structure. The installed template above is the evidence that counts.
 
-**1.2 Pending from the rig, read-only, requested 2026-10-03.** Appended here when received,
-and not changed to make any experiment work:
-- `ollama --version`: _pending_. The version decides how Ollama parses `<tool_call>` output.
-- `ollama show huihui_ai/qwen2.5-abliterate:7b` (its capabilities line): _pending_.
-- `ollama show huihui_ai/qwen2.5-abliterate:7b --parameters`: _pending_.
+**1.2 The rest of the installation, read on the rig 2026-10-03.** Read-only, by the rig
+session, at the lead's request: no generation, nothing loaded or unloaded (`/api/ps`
+afterwards: `{"models":[]}`), no setting changed. Each command exited 0. A byte-exact copy
+is kept on the rig at `C:\Users\loyal\pac-hardtest-evidence\screen\ollama-show-output.txt`.
+Recorded as found, and not to be changed to make any experiment work:
+- `ollama --version`: `ollama version is 0.35.0`. The version decides how Ollama parses
+  `<tool_call>` output into `message.tool_calls`.
+- `ollama show huihui_ai/qwen2.5-abliterate:7b`:
+
+  ```text
+    Model
+      architecture        qwen2
+      parameters          7.6B
+      context length      32768
+      embedding length    3584
+      quantization        Q4_K_M
+
+    Capabilities
+      completion
+      tools
+
+    System
+      You are Qwen, created by Alibaba Cloud. You are a helpful assistant.
+  ```
+
+  Ollama itself lists `tools` among the installed model's capabilities. `context length`
+  is the model's maximum; the runtime context stays the 8192 the rig serves.
+- `ollama show huihui_ai/qwen2.5-abliterate:7b --parameters`: empty output (no parameter
+  is set in the model file).
+- `ollama show huihui_ai/qwen2.5-abliterate:7b --template`: the same template the owner
+  read (§1.1).
 
 **1.3 Our interface does not use it.**
 
