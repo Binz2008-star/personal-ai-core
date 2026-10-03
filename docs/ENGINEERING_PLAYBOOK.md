@@ -149,7 +149,7 @@ What was executed. Status here is copied from `PROJECT_STATE.md`, which is autho
 | Phase | Executed scope | Status |
 |---|---|---|
 | 0 | audit, evidence freeze, extraction matrix | completed |
-| 1 | core, runtime, conversation slice; identity added last (#39); memory foundation came from Phase 3 | components complete, **not accepted** |
+| 1 | core, runtime, conversation slice; identity added last (#39); memory foundation came from Phase 3 | accepted (2026-10-03, with ADR-011 and ADR-012) |
 | 2 | knowledge and context: retrieval, fusion, budgeting | accepted |
 | 3 | memory domain, promotion gate, write path | accepted |
 | 4 | memory-aware context: session-scoped recall, shared budget | accepted |

@@ -1,6 +1,8 @@
 # ADR-011 — Identity layer contract
 
-**Status:** PROPOSED · built in #39 · not accepted
+**Status:** ACCEPTED (owner, 2026-10-03, OD-10) · built in #39 · one decision stays deferred
+with its named trigger (question 6, an identity share larger than the window). The list below
+is the state before acceptance, kept as history; the current state is under *Status* at the end.
 
 - Design questions 1-4: **RESOLVED** (reviewed and accepted)
 - Contract questions 5-8: **DECIDED HERE**, not yet reviewed
@@ -471,12 +473,17 @@ identity implementation should be created.
 
 **Design questions 1-4:** RESOLVED
 
-**Contract questions 5-8:** DECIDED, awaiting review
+**Contract questions 5-8:** ACCEPTED 2026-10-03. Question 6's second conflict (an
+identity share larger than the window) stays deferred, with the trigger it names: the
+first non-zero `identity_reserve` arrives with that decision.
 
-**Identity contract:** PROPOSED, not accepted
+**Identity contract:** ACCEPTED by the owner, 2026-10-03 (ARCHITECTURE.md OD-10)
 
-**Identity implementation:** NOT AUTHORIZED
+**Identity implementation:** built in #39; identity is first in every prompt
 
-**Phase 1:** NOT COMPLETE
+**Phase 1:** ACCEPTED 2026-10-03 (`PROJECT_STATE.md`)
+
+*Before 2026-10-03 this section read: questions 5-8 decided, awaiting review; contract
+PROPOSED; implementation NOT AUTHORIZED; Phase 1 NOT COMPLETE.*
 
 **Phase 5:** NOT AUTHORIZED
