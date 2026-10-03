@@ -1167,9 +1167,14 @@ WHERE THINGS STAND (2026-10-03)
     main was df05a66; then #187 (that record), #188 (the state script says "at
     the limit" where a PR would fail) and #189 (the ADR-023 measurement, below)
     merged; main was 05a9581; then #190 (that record) and #192 (the English
-    reading, below) and #193 (refused-reply text, 6b2) merged; main is
-    1861756. Open pull request: #191 (draft, ADR-023 amendment 1, the
-    deciding rule; waits on the owner's D1-D4).
+    reading, below) and #193 (refused-reply text, 6b2) merged; main was
+    1861756; then #194 (the ADR status review, below), #195 (the refused-reply
+    reader), #196 (the instrument check), #197 (pyright narrowing) and #198
+    (the re-run's result files) merged. Open pull request: #191 (draft,
+    ADR-023 amendment 1, the deciding rule; waits on the owner's D1-D4).
+    Open issue: #76 (the 2026-09-25 ADR-017 review checkpoint; the persistence
+    it asked for is built and tested, 55 PostgreSQL tests in CI -- the owner
+    closes it).
   - ADR STATUS REVIEW (OD-10), decided by the owner 2026-10-03 in the lead
     session, in these words: "موافق على التوصيات" ("I accept the
     recommendations"), answering the lead's table of nine PROPOSED ADRs:
@@ -1189,9 +1194,34 @@ WHERE THINGS STAND (2026-10-03)
     explained; no flag does not prove the rig was the same (a 20% -> 40% move
     is caught about 31% of the time). The differences are recorded as the
     observed run-to-run spread, which ADR-023 amendment 1 (#191) can use.
-    Open issue: #76 (the 2026-09-25
-    ADR-017 review checkpoint; the persistence it asked for is built and
-    tested, 55 PostgreSQL tests in CI -- the owner closes it).
+  - READ (#198, files bench-20261003T161348Z / T164631Z, at 1861756; every
+    figure re-derived by tests/unit/test_bench_refused_text_reading.py):
+      The rig did not differ: no cell flagged. Agent success, #189 -> re-run:
+      unit 1 en 15 -> 14, ar 11 -> 11; unit 1+2 en 8 -> 12, ar 16 -> 15.
+      Secret scans (the rig's and the lead's, both detectors): no match.
+      Rejected answers: unit 1 64 (en 15, ar 49), unit 1+2 68 (en 28, ar 40);
+      of those the task's checks would have passed 1 and 3 -- four in all,
+      three in toolsel-count-json and one in git-last-commit-file, each a
+      guess made before any tool ran, and three of those four runs passed
+      later anyway.
+      Hypotheses (written before the text was read): H1 FAILED (English
+      first-reply protocol errors under unit 1+2 were 4/15 prose, none
+      echoing "git status"); H2 FAILED (5/15); H3 FAILED (9 of 98 protocol
+      errors truncated, 8 at the generation limit; the ninth is the brace
+      rule over-reaching); H4 HELD with one exception (the
+      git-last-commit-file case).
+      Read after seeing the text -- leads, not results: (a) Python
+      function-call syntax, `write_file(VERSION, "1.5.0")`, 9 times, all
+      English, all unit 1+2, none under unit 1: the 13-token replies of
+      #189's git-commit-release; (b) the largest single cause in both runs is
+      file content that breaks the JSON of a write_file call (20 and 17 of
+      49); (c) a numeric answer, `{"answer": 4}`, is refused because the
+      protocol wants a string -- 5 times, twice the right number; (d) a
+      command given as a string, `"arguments": "type words.py"`, 8 times.
+      So the English loss under unit 2 is not the environment text being
+      echoed. Unit 2 goes with one new failure, the function-call syntax (an
+      association in two runs, not a cause); the largest causes, in both
+      runs, sit in the reply protocol itself.
   - MEASURED (#189, 2026-10-03): ADR-023 unit 1, then unit 1 + unit 2, at
     4f63f73, on the rig (ADAM-PC) through a Remote Control session the lead
     started on the owner's instruction, in its own worktree. Precondition read
@@ -1531,10 +1561,18 @@ WHERE THINGS STAND (2026-10-03)
                 change, which the reader makes impossible by construction.
             Whichever holds, the reading is as fixed above; a hypothesis that
             fails is reported as failed.
-         c. Then the owner decides the next experiment (unit 3, a change to
-            the environment text, or the default for action_required). Unit 3
-            reaches at most 7 of the baseline's 111 failures and needs the
-            protocol change reserved for separate review.
+         b3. Done: the re-run with refused-reply text (#198), read by the
+            rules above (READ, in WHERE THINGS STAND).
+         c. Then the owner decides the next experiment. The lead's
+            recommendation, from b3: a reply-protocol unit, which is the
+            protocol change ADR-023 reserves for separate review. In order of
+            how unambiguous the input is: accept a numeric "answer" as its
+            text; accept a string "arguments" for shell/run_command as the
+            command; then, separately, a way to write file content that does
+            not have to survive JSON escaping. Each measured under the
+            deciding rule once #191 is approved. The other options stand:
+            unit 3 (reaches at most 7 of the baseline's 111 failures), a
+            change to the environment text, the default for action_required.
   - Rules learned today: update this header in any PR that finds it 2 or more
     merges behind -- CI now fails a PR at 3 (main went red after #163, and again
     after #176, when it slipped to 4); a scorer fix is
