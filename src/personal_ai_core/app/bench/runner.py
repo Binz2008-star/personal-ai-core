@@ -175,7 +175,8 @@ def _contract(task: Task, language: str) -> AgentTaskContract:
 
 
 def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
-                   workspace: Path, *, environment_context: bool = False) -> dict[str, Any]:
+                   workspace: Path, *, environment_context: bool = False,
+                   lenient_protocol: bool = False) -> dict[str, Any]:
     workspace.mkdir(parents=True)
     materialize(task, workspace)
     confirm = BenchmarkConfirm()
@@ -187,7 +188,8 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
     steps: tuple = ()
     try:
         agent = build_agent(settings, workspace=workspace, transport=log, confirm=confirm,
-                            environment_context=environment_context)
+                            environment_context=environment_context,
+                            lenient_protocol=lenient_protocol)
         outcome = agent.loop.run(_contract(task, language), session_id="bench")
         answer, steps = outcome.answer, outcome.steps
         record["stop"] = "answered" if outcome.finished else "budget"
@@ -202,6 +204,11 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
              "text": _clip(r.text, REFUSED_REPLY_CLIP_CHARS)}
             for r in outcome.refused_replies
         ]
+        # ADR-024 unit A: every reply read leniently, by call and rule, so each
+        # can be audited; recorded only when the unit is on.
+        if lenient_protocol:
+            record["lenient_parses"] = [{"call": p.call, "rules": list(p.rules)}
+                                        for p in outcome.lenient_parses]
         if outcome.environment is not None:
             record["environment"] = dict(outcome.environment)
     except ProviderError as exc:
@@ -318,6 +325,10 @@ def _parser() -> argparse.ArgumentParser:
                         help="give each agent run the environment facts the program read "
                              "(ADR-023 §2.1, unit 2). Off by default, so a run is comparable "
                              "with the baseline and with unit 1 alone")
+    parser.add_argument("--lenient-protocol", action="store_true",
+                        help="read three reply shapes the strict protocol refuses "
+                             "(ADR-024 unit A). Off by default, so a run is comparable "
+                             "with one made without it at the same commit")
     parser.add_argument("--resume", type=Path, help="continue an interrupted result file")
     parser.add_argument("--report", type=Path, help="print the summary of a result file")
     parser.add_argument("--rescore", type=Path,
@@ -396,6 +407,7 @@ def main(
         "num_ctx_sent_by_core": False,
         "profile": "none (deliberately empty)",
         "environment_context": args.environment_context,
+        "lenient_protocol": args.lenient_protocol,
         "contract": "each agent task file states action_required and the runner passes an "
                     "AgentTaskContract built from it (ADR-023 §8.3); a file without this key "
                     "ran without a contract",
@@ -417,9 +429,11 @@ def main(
     if args.resume is not None:
         previous = _read(args.resume)
         old = previous[0] if previous and previous[0].get("kind") == "header" else {}
-        for key in ("commit", "model", "tasks", "runs", "languages", "environment_context"):
-            # A file from before the flag existed ran without the context.
-            if (bool(old.get(key)) if key == "environment_context" else old.get(key)) != header[key]:
+        for key in ("commit", "model", "tasks", "runs", "languages", "environment_context",
+                    "lenient_protocol"):
+            # A file from before a flag existed ran without it.
+            flag = key in ("environment_context", "lenient_protocol")
+            if (bool(old.get(key)) if flag else old.get(key)) != header[key]:
                 print(f"refusing to resume: {key} differs from the file's header", file=out)
                 return 2
         done = {(r["task"], r["language"], r["run"]) for r in previous if r.get("kind") == "run"}
@@ -444,7 +458,8 @@ def main(
             workspace = Path(tmp) / f"{task.id}-{language}-{run}"
             if task.track == "agent":
                 record = run_agent_task(task, language, settings, log, workspace,
-                                        environment_context=args.environment_context)
+                                        environment_context=args.environment_context,
+                                        lenient_protocol=args.lenient_protocol)
             else:
                 record = run_knowledge_task(task, language, settings, log, workspace)
             calls = log.take()

@@ -731,6 +731,7 @@ def build_agent(
     session_exists: Callable[[str], bool] | None = None,
     web_fetch: Fetch | None = None,
     environment_context: bool = False,
+    lenient_protocol: bool = False,
 ) -> AgentSlice:
     """The agent of AGENT_ARCHITECTURE.md, wired to the Boss model.
 
@@ -755,6 +756,11 @@ def build_agent(
     each run starts with facts the program read from the machine and the workspace
     (system, shell, runtime, git, the supported test command, what `run_command`
     accepts), counted against a fixed budget. Off, the agent is what it was.
+
+    `lenient_protocol` (ADR-024 unit A) is OFF unless asked for: when on, three
+    reply shapes the strict protocol refuses are read -- a Python literal, a
+    numeric answer, a string `arguments` for a tool with one required field --
+    and each is recorded on the outcome. Nothing the model sees changes.
     """
     if events is not None and session_exists is None:
         raise ValueError(
@@ -795,5 +801,6 @@ def build_agent(
             if environment_context
             else None
         ),
+        lenient_protocol=lenient_protocol,
     )
     return AgentSlice(loop=loop, executor=executor, checkpoints=checkpoints, workspace=sandbox)
