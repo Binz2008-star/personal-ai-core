@@ -659,6 +659,12 @@ claim written in one place with nothing that notices it going stale.
   #182 3196641  feat(app): pac --documents says which files a directory walk
                passed over
   #183 56dfa81  docs: record #181 and #182; handoff at 3196641
+  #184 c557467  docs: record #183 and #162; handoff at ab3926f; who decides,
+               as it now is
+  #185 da433ce  test: pin what the baseline's agent failures say about the
+               order of the controls
+  #186 df05a66  test: a tested-after-edit gate reaches 7 of the 111 failures,
+               not 27 (correcting #185)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1124,7 +1130,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-02, main at ab3926f)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at df05a66)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1134,14 +1140,16 @@ holds only what git cannot know. tests/unit/test_handoff_freshness.py fails CI
 when the header above is more than 3 merges behind main: update it in the next
 PR, as with the ledger.
 
-WHERE THINGS STAND (2026-10-02)
+WHERE THINGS STAND (2026-10-03)
   - Since 6d4fe15: #167 (ADR-023 accepted), #173 (the previous handoff),
     #174 (unit 1), #176 (the section 8.3 benchmark change), #175 (the record
     of those two), #177 (the comparison tool), #179 (README: the agent line
     prefix), #178 (unit 2), #180 (PostgreSQL in CI), #181 (the lag gates)
     and #182 (`pac --documents` names the files a directory walk skipped),
-    #183 (the record of those) and #162 (the brand assets, below) merged; main
-    is ab3926f. Open pull requests: none. Open issue: #76 (the 2026-09-25
+    #183 (the record of those), #162 (the brand assets, below), #184 (the
+    record of those), #185 and #186 (the reading of the baseline's agent
+    failures that sets the order of the controls, and its correction) merged;
+    main is df05a66. Open pull requests: none. Open issue: #76 (the 2026-09-25
     ADR-017 review checkpoint; the persistence it asked for is built and
     tested, 55 PostgreSQL tests in CI -- the owner closes it).
   - Merged (#182): `pac --documents DIR` used to read only the `.md` and
