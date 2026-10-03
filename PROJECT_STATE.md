@@ -1180,8 +1180,13 @@ WHERE THINGS STAND (2026-10-03)
     reading, below) and #193 (refused-reply text, 6b2) merged; main was
     1861756; then #194 (the ADR status review, below), #195 (the refused-reply
     reader), #196 (the instrument check), #197 (pyright narrowing) and #198
-    (the re-run's result files) merged. Open pull request: #191 (draft,
-    ADR-023 amendment 1, the deciding rule; waits on the owner's D1-D4).
+    (the re-run's result files) and #199 (its reading) merged. ADR-023
+    amendment 1, the deciding rule, was ACCEPTED by the owner 2026-10-03
+    ("موافق على 191"; #191): D1 pooled by track x language at 10 runs per
+    side (a unit regresses at +16, family-wise 8.73%), D2 20 points, D3 the
+    sign test at 5%, D4 as written -- every comparison after #189 is read by
+    it. Open pull request: #200 (ADR-024, the reply protocol; unit A
+    authorized by the owner the same day: "ابدأ A").
     Open issue: #76 (the 2026-09-25 ADR-017 review checkpoint; the persistence
     it asked for is built and tested, 55 PostgreSQL tests in CI -- the owner
     closes it).
@@ -1518,10 +1523,10 @@ WHERE THINGS STAND (2026-10-03)
       4. Done: unit 1 measured (#189, above).
       5. Done: unit 1 + unit 2 measured (#189, above).
       6. Next, in this order, nothing built meanwhile:
-         a. Drafted (#191, not merged): the deciding rule for ADR-023
-            comparisons (section 5), following ADR-020 amendment 1. It waits
-            on the owner's decisions D1-D4 and governs the next measurement,
-            not #189.
+         a. Done: the deciding rule for ADR-023 comparisons (section 5),
+            ADR-023 amendment 1, ACCEPTED 2026-10-03 (#191) with D1-D4 as
+            recommended. It governs every comparison after #189; #189 and
+            #198 stay descriptive.
          b. Done: the read-only look (above). It cannot say why English replies
             broke the protocol, because the reply text is not recorded.
          b2. Approved by the owner (2026-10-03) and built: the agent loop
