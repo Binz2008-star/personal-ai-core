@@ -256,12 +256,12 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     parser.add_argument("--tasks", type=Path, default=DEFAULT_TASKS,
                         help="the task files, to check that a changed digest is only the contract")
     # Imported here: verdict.py builds on this module.
-    from .verdict import EXIT_CODES, TARGETS, decide, report
+    from .verdict import EXIT_CODES, UNITS, decide, report
 
-    parser.add_argument("--unit", choices=sorted(TARGETS),
-                        help="also print the verdict of ADR-023 amendment 1 for this unit, "
-                             "whose target class it declared (exit 0 PASS, 1 FAIL, "
-                             "3 NOT READABLE)")
+    parser.add_argument("--unit", choices=UNITS,
+                        help="also print the verdict of ADR-023 amendments 1 and 2 for this "
+                             "unit, whose target was declared before its runs (exit 0 PASS, "
+                             "1 FAIL, 3 NOT READABLE)")
     args = parser.parse_args(argv)
     out = stdout if stdout is not None else sys.stdout
     try:
