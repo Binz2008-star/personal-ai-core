@@ -276,6 +276,29 @@ def test_short_or_embedded_prefixes_are_unchanged(redactor, text):
     assert redactor.redact(text).text == text
 
 
+@pytest.mark.parametrize(
+    "glued",
+    [
+        "x" + "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2",
+        "token" + "github_pat_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3",
+        "key" + "AKIA" + "QWERTYUIOPASDFGH",
+    ],
+)
+def test_github_and_aws_tokens_glued_to_a_word_are_withheld(redactor, glued):
+    """ADR-018 amendment 2: no boundary is required before these prefixes."""
+    out = redactor.redact(f"see {glued} now")
+    assert dict(out.counts) == {KIND_PREFIX_TOKEN: 1}
+    assert "ghp_" not in out.text and "github_pat_" not in out.text and "AKIA" not in out.text
+
+
+@pytest.mark.parametrize("text", ["the task-abcdefghijklmnopqrstuvwxyz id",
+                                  "mydesk-" + "a" * 24,
+                                  "abcxoxb-" + "1" * 12])
+def test_sk_and_xox_still_need_a_boundary(redactor, text):
+    """`sk-` ends ordinary words; `xox` kept its boundary too (amendment 2)."""
+    assert redactor.redact(text).text == text
+
+
 # --- the boundary token is not a secret ------------------------------------
 
 

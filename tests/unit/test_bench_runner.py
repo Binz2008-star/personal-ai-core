@@ -503,11 +503,10 @@ def test_a_secret_in_a_refused_reply_never_reaches_the_result_file(tmp_path):
 def test_a_secret_across_the_clip_boundary_is_withheld_not_cut_in_half(tmp_path):
     """The check runs on the whole reply before it is clipped, so a secret that
     starts just before character 4000 cannot leave its first half in the file.
-    (A space before the token: the verifier's patterns start at a word
-    boundary, so a token glued to a letter is not recognised -- the same rule
-    an accepted answer is held to, recorded as a finding, not changed here.)"""
+    The token is glued to the text before it: since ADR-018 amendment 2 the
+    GitHub and AWS prefixes need no boundary in front (#193 had to use a space)."""
     scripts = dict(SOLVES)
-    scripts["test_calc.py"] = ["x" * 3_989 + " " + GITHUB_TOKEN, *SOLVES["test_calc.py"]]
+    scripts["test_calc.py"] = ["x" * 3_990 + GITHUB_TOKEN, *SOLVES["test_calc.py"]]
     _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
     raw = next(tmp_path.glob("bench-*.jsonl")).read_text(encoding="utf-8")
     assert "ghp_" not in raw and "Zx9Zx9" not in raw
