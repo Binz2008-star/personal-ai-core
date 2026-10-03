@@ -230,3 +230,14 @@ def test_unit_a_touches_too_few_attempts_for_the_deciding_rule_to_see_it_alone(t
         hit = [r for r in runs if any(x["kind"] == "protocol_error" and readable(x["text"])
                                       for x in r["refused_replies"])]
         assert (len(hit), sum(not r["success"] for r in hit)) == (touched, failed)
+
+
+def test_the_rule_adr_024_quotes_is_the_accepted_rule_word_for_word():
+    """§5.1's finding rests on R1's text: it must be the amendment's, not a paraphrase."""
+    def flat(name: str) -> str:
+        return " ".join((REPO / "docs" / "ADR" / name).read_text(encoding="utf-8").split())
+
+    r1 = ("The control's target class is declared before the runs: unit 1 → class 1, "
+          "unit 2 → class 3, unit 3 → class 2.")
+    assert r1 in flat("ADR-023-plan-execute-verify.md")
+    assert f'"{r1}"' in flat("ADR-024-reply-protocol.md")

@@ -697,6 +697,8 @@ claim written in one place with nothing that notices it going stale.
                (ADR-018 amendment 2)
   #202 22b586a  feat(agent): ADR-024 unit A -- read three reply shapes the strict
                protocol refuses (off by default)
+  #203 4f0ae89  eval(bench): the verdict of ADR-023 amendment 1, applied by code
+               (compare --unit N)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1163,7 +1165,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 22b586a)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 4f0ae89)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1197,8 +1199,10 @@ WHERE THINGS STAND (2026-10-03)
     owner the same day: "ابدأ A") and #201 (GitHub and AWS tokens glued to a
     word are withheld, ADR-018 amendment 2; owner: "سدّ الثغرة") merged; main
     was bd95016; then #202 (ADR-024 unit A, off by default) merged; main is
-    22b586a. Open pull request: #203 (the verdict of ADR-023 amendment 1,
-    applied by code: `bench.compare --unit N`).
+    was 22b586a; then #203 (the verdict of ADR-023 amendment 1, applied by
+    code: `bench.compare --unit N`; units 1-3 only) merged; main is 4f0ae89.
+    Open pull request: #204 (the owner-accepted finding that ADR-024's units
+    A and B have no formal gate under the amendment).
     Open issue: #76 (the 2026-09-25 ADR-017 review checkpoint; the persistence
     it asked for is built and tested, 55 PostgreSQL tests in CI -- the owner
     closes it).
@@ -1597,12 +1601,17 @@ WHERE THINGS STAND (2026-10-03)
             JSON, C tool-specific error feedback). Unit A authorized by the
             owner 2026-10-03 ("ابدأ A") and built off by default (#202:
             `--lenient-protocol` on the benchmark, `lenient_parses` on the
-            outcome and the record); B and C open. Measuring A alone is not
-            recommended: in #198 it touches 6 of 120 attempts under unit 1
-            (at most 5 points of success), where the accepted rule is powered
-            for 20 (ADR-024 §5, pinned). The lead's recommendation: the
-            owner's D2 (unit B, aimed at 37 of 98), measured with A on in
-            both sides. The other options stand:
+            outcome and the record); B and C open. Methodological finding,
+            accepted by the owner 2026-10-03 before any rig run (ADR-024
+            §5.1): ADR-023 amendment 1 declares R1 targets only for ADR-023's
+            units 1-3, so units A and B have no formal PASS/FAIL under it
+            without a separately authorized amendment made before their runs;
+            choosing a target now, after #198 was read, would be post-hoc.
+            Unit A: mechanically validated; end-to-end effect not formally
+            gated under the current ADR-023 rule. In #198 it touches 6 of 120
+            attempts under unit 1 (at most 5 points of success). No rig
+            measurement of A or B is planned; what to measure next is the
+            owner's. The other options stand:
             unit 3 (reaches at most 7 of the baseline's 111 failures), a
             change to the environment text, the default for action_required.
   - Rules learned today: update this header in any PR that finds it 2 or more
