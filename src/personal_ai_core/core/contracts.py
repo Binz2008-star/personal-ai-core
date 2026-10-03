@@ -18,7 +18,7 @@ from .context import (
     ContextBudget,
     HybridBudgetedContext,
 )
-from .domain import Event, Message, ModelResponse, Session, User
+from .domain import Event, Message, ModelResponse, Session, ToolDeclaration, User
 from .feedback import FeedbackRecord
 from .knowledge import (
     CandidateList,
@@ -63,6 +63,37 @@ class ModelProvider(Protocol):
         """Produce a response for `messages` using `model`.
 
         Raises `ProviderError` if the backend fails.
+        """
+        ...
+
+
+@runtime_checkable
+class ToolCallingProvider(Protocol):
+    """A provider that can declare tools to the model and return its native calls.
+
+    ADR-025 §4.1. An optional capability beside `ModelProvider`, which it does
+    not change: a provider has it by having `generate_with_tools`, detected
+    structurally (`isinstance`), never by inheritance. A caller that needs it
+    and is given a provider without it refuses, rather than falling back.
+    """
+
+    @property
+    def name(self) -> str:
+        """Provider identifier, e.g. "ollama"."""
+        ...
+
+    def generate_with_tools(
+        self,
+        *,
+        model: str,
+        messages: Sequence[Message],
+        tools: Sequence[ToolDeclaration],
+        options: Mapping[str, Any] | None = None,
+    ) -> ModelResponse:
+        """Like `generate`, with `tools` declared to the model natively.
+
+        The response's `tool_calls` holds each call exactly as the backend
+        returned it. Raises `ProviderError` if the backend fails.
         """
         ...
 
