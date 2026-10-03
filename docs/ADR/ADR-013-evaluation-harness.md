@@ -1,6 +1,6 @@
 # ADR-013 — Evaluation harness
 
-**Status:** PROPOSED · harness built (owner-authorized 2026-09-30) and run against the Boss model many times since 2026-10-01 (`evals/results/`) · not accepted
+**Status:** ACCEPTED (owner, 2026-10-03, OD-10) · harness built (owner-authorized 2026-09-30) and run against the Boss model many times since 2026-10-01 (`evals/results/`) · ADR-020 and ADR-022 build on it · whether evaluation gates anything (OD-3) stays undecided. The list below is history; see *Status* at the end.
 
 - Harness: **PROPOSED**, not accepted
 - Implementation: **AUTHORIZED 2026-09-30** by the owner. The owner decided to move from
@@ -132,9 +132,16 @@ file.
 
 ## Status
 
-**Harness:** PROPOSED — not accepted
+**Harness:** ACCEPTED by the owner, 2026-10-03 (ARCHITECTURE.md OD-10)
 
-**Implementation:** AUTHORIZED 2026-09-30; v0 built, awaiting its first run on the rig
+**Implementation:** AUTHORIZED 2026-09-30; built, and run on the rig since 2026-10-01
+(contract and refusal sets, `evals/results/`). The candidate-model gate (ADR-020) and the
+capability benchmark (ADR-022) are built on it.
+
+**Still undecided:** whether evaluation gates anything (*What this does not decide*;
+ARCHITECTURE.md OD-3). Acceptance does not add a CI gate.
+
+*Before 2026-10-03 this section read: harness PROPOSED; v0 built, awaiting its first run.*
 
 **Where it must be built:** an environment with a live model, because the first thing it
 must do is run.

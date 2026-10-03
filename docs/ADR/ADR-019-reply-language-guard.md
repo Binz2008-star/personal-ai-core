@@ -1,8 +1,8 @@
 # ADR-019 — A mechanical guard for the reply language
 
-**Status:** PROPOSED · direction approved by the owner 2026-10-01 ("موافق على الاثنين")
+**Status:** ACCEPTED (owner, 2026-10-03, OD-10) · direction approved by the owner 2026-10-01 ("موافق على الاثنين")
 · §6 decided 2026-10-01 as recommended (D1 retry, D2 as written, D3 the list, D4 on;
-the owner left the choice to the lead) · units 1 and 2 built and on by default; aligned with this text after review (#130, #132)
+the owner left the choice to the lead) · units 1 and 2 built and on by default; aligned with this text after review (#130, #132); Hebrew a foreign script (#157); `PAC_LANGUAGE_GUARD=0` turns it off
 
 - Contract text this design serves: the language rule, ADR-012 amendment 1: "Reply in
   the language of the user's latest message, and only in that language … Do not change
