@@ -1,9 +1,9 @@
 # ADR-025 — An experiment: the Boss model's native tool-call channel, against the text protocol
 
-**Status:** PROPOSED — NOT AUTHORIZED FOR IMPLEMENTATION (2026-10-03) · the owner authorized
-writing this document as a draft pull request, documentation only · no implementation, no
-rig run and no configuration change follows from it · it proposes an experiment, not the
-adoption of native tool calling · revised 2026-10-03 after the owner's review of #205 (six
+**Status:** ACCEPTED as an experiment by the owner (2026-10-03, §11) · the gate, the
+implementation and the measurement are authorized · adopting native tool calls as the
+default is **not** decided, and waits for the measurement · it proposes an experiment, not
+the adoption of native tool calling · revised 2026-10-03 after the owner's review of #205 (six
 corrections, §4 to §6 and §9), and again after its second review (the R1 predicate, the
 R0 wording, the validation boundary: §4.6, §6)
 
@@ -11,8 +11,8 @@ R0 wording, the validation boundary: §4.6, §6)
 |---|---|
 | Proposed | yes: this document, written by the lead on 2026-10-03 after a read-only audit |
 | Evidence | §1: the installed Boss template (read on the rig by the owner), the provider code, the contracts, the refused replies of #198 |
-| Authorized | **writing only**, by the owner, 2026-10-03. Merging, implementing and running are not authorized (§8). The owner's review of 2026-10-03 authorizes none of them either |
-| Implemented | no |
+| Authorized | by the owner, 2026-10-03 (§11): the gate `NO_EXECUTED_TOOL_CALL` with ADR-023 amendment 2, the implementation behind an off-by-default flag, and the measurement on the rig. Adoption as the default is not decided |
+| Implemented | no (two pull requests follow, §8 D1) |
 
 - Serves: ADR-023 (plan, execute, verify), whose §7 and §8.2 reserve any change to the
   protocol the model answers in for separate review; ADR-024 is the first such review,
@@ -488,7 +488,27 @@ the next governance step and authorized nothing else. Each step waits for the on
 | Implementation, a rig run | not authorized |
 | Merging this ADR | not yet, if merging would imply authorizing implementation |
 
-Current authorization boundary (2026-10-03, the owner's words summarized): the template
+## 11. Decided (2026-10-03)
+
+After the second review approved this design for the governance step, the lead asked for explicit approval of three points: (1) the measure `NO_EXECUTED_TOOL_CALL` as the formal gate, with ADR-023 amendment 2; (2) the implementation behind a flag that is off by default, in two pull requests; (3) the measurement on the rig, both interfaces, the same model, 10 runs per side. The owner
+answered, in these words: "موافق على النقاط جميعها" ("I approve all the points").
+
+So, as of this decision:
+- **Step 2 and D3.** `NO_EXECUTED_TOOL_CALL` (§6.1) is the formal primary gate, with its
+  classification table and the bound of 5 provider failures per arm, fixed before any
+  implementation or run. ADR-023 amendment 2 records the rule that admits it.
+- **D1.** Implement §4 to §5 in two pull requests: first the core types and the Ollama
+  adapter, with no behaviour change; then the loop with the validation boundary of §4.6,
+  the benchmark flag, and the predicate in the verdict code.
+- **D2.** The native arm's system text is the one in the loop's pull request, written to
+  §4.4: the JSON-format lines removed, every rule kept.
+- **D4.** 10 runs per side, as ADR-023 amendment 1 D1 fixes for a formal reading: both
+  tracks, both languages, the text arm and the native arm at the same commit.
+- Unchanged: §9's invariants, the validation boundary of §4.6, and no default changes
+  without the measurement.
+
+Superseded by §11. The authorization boundary as it stood before this decision
+(2026-10-03, the owner's words summarized): the template
 check, the provider audit, the OSS audit, and writing this ADR as a draft are authorized.
 Merging this ADR, implementing it, any native-tools rig run, any change of the Boss, a
 router or fallback, any memory change, and any database change are not.
