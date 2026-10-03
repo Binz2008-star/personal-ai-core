@@ -58,6 +58,21 @@ def merges(rev: str = "HEAD") -> list[tuple[int, str, str]]:
     return out
 
 
+def limit_flag(count: int, maximum: int) -> str:
+    """What a lag of `count` means for CI, given the limit on main.
+
+    main fails above `maximum`. A pull request fails one sooner, because its own
+    merge will count (tests/support/lag_limit.py). So AT the limit the record is
+    fine for main and a PR must refresh it: saying "ok" there is the one place
+    this line would mislead, and it did until this was written.
+    """
+    if count > maximum:
+        return "OVER THE LIMIT, CI fails"
+    if count == maximum:
+        return "at the limit: a PR's CI fails until it refreshes this"
+    return "ok"
+
+
 def handoff_lag(stated: str) -> int | None:
     """Merges into main since the commit the handoff says it was written at."""
     try:
@@ -87,7 +102,7 @@ def report() -> list[str]:
     text = STATE.read_text(encoding="utf-8")
     recorded = {int(n) for n, _ in LEDGER_ROW.findall(text)}
     unrecorded = sorted(n for n, _, _ in seen if n not in recorded and n >= 3)
-    flag = "OVER THE LIMIT, CI fails" if len(unrecorded) > MAX_UNRECORDED_MERGES else "ok"
+    flag = limit_flag(len(unrecorded), MAX_UNRECORDED_MERGES)
     lines.append(f"ledger: {len(unrecorded)} merge(s) not recorded "
                  f"{['#%d' % n for n in unrecorded]} (limit {MAX_UNRECORDED_MERGES} on main, "
                  f"{MAX_UNRECORDED_MERGES - 1} for a PR: {flag}); the next PR adds their rows")
@@ -101,7 +116,7 @@ def report() -> list[str]:
             lines.append(f"handoff: written at {match.group(2)}, which is not in this "
                          "history (fetch main, or the header is wrong)")
         else:
-            state = "STALE, CI fails" if lag > MAX_HANDOFF_LAG else "ok"
+            state = limit_flag(lag, MAX_HANDOFF_LAG)
             lines.append(f"handoff: written {match.group(1)} at {match.group(2)}, "
                          f"{lag} merge(s) behind (limit {MAX_HANDOFF_LAG} on main, "
                          f"{MAX_HANDOFF_LAG - 1} for a PR: {state})")
