@@ -109,3 +109,59 @@ def test_with_unit_2_english_answers_were_rejected_until_the_budget_ended():
     both = _agent(UNIT1_AND_2).values()
     assert sum(1 for r in both if r["action_rejections"]) == 74
     assert sum(r["action_rejections"] for r in both) == 82
+
+
+# --- The read-only look at English under unit 2 (handoff, Next 6b) ----------
+# The records keep token counts for each model call, not the reply text, so
+# these say where and how often English failed, not what the model wrote.
+
+
+def _per_language(path: Path, field: str) -> dict[str, tuple[int, int]]:
+    """(total, attempts with at least one) of a per-attempt count, by language."""
+    out = {}
+    for lang in ("en", "ar"):
+        runs = [r for r in _agent(path).values() if r["language"] == lang]
+        out[lang] = (sum(r.get(field) or 0 for r in runs), sum(1 for r in runs if r.get(field)))
+    return out
+
+
+def test_english_protocol_errors_rose_with_each_unit():
+    """English 14 -> 27 -> 46 protocol errors (in 10 -> 17 -> 31 attempts);
+    Arabic 9 -> 15 -> 20. A protocol error is a reply that is not one JSON object."""
+    assert _per_language(BASELINE, "protocol_errors") == {"en": (14, 10), "ar": (9, 7)}
+    assert _per_language(UNIT1, "protocol_errors") == {"en": (27, 17), "ar": (15, 12)}
+    assert _per_language(UNIT1_AND_2, "protocol_errors") == {"en": (46, 31), "ar": (20, 14)}
+
+
+def _spent(path: Path, lang: str) -> dict[str, int]:
+    """What the attempts the budget stopped spent their failures on."""
+    spent = Counter()
+    for r in _agent(path).values():
+        if r["stop"] != "budget" or r["language"] != lang:
+            continue
+        spent["rejections"] += r.get("action_rejections") or 0
+        spent["protocol"] += r.get("protocol_errors") or 0
+        spent["refused_tool"] += sum(1 for s in r["steps"] if not s.get("executed"))
+        spent["failed_step"] += sum(
+            1 for s in r["steps"] if s.get("executed") and not s.get("verified", s.get("ok"))
+        )
+    return dict(spent)
+
+
+def test_in_english_unit_2_traded_refused_tools_for_rejections_and_protocol_errors():
+    """English budget stops: refused tool calls 39 -> 19, but rejections 5 -> 21
+    and protocol errors 20 -> 34. Arabic's rejections did not rise (22 -> 22)."""
+    assert _spent(UNIT1, "en") == {"rejections": 5, "protocol": 20, "refused_tool": 39, "failed_step": 8}
+    assert _spent(UNIT1_AND_2, "en") == {"rejections": 21, "protocol": 34, "refused_tool": 19, "failed_step": 16}
+    assert _spent(UNIT1, "ar")["rejections"] == _spent(UNIT1_AND_2, "ar")["rejections"] == 22
+
+
+def test_git_commit_release_in_english_mostly_never_acted_with_unit_2():
+    """Unit 1: 2 of 5 passed, every attempt wrote VERSION. Unit 1 + 2: 4 of 5
+    ran no tool at all; each spent its budget on 1 rejection and 2 protocol errors."""
+    one = [_agent(UNIT1)[("git-commit-release", "en", i)] for i in range(1, 6)]
+    two = [_agent(UNIT1_AND_2)[("git-commit-release", "en", i)] for i in range(1, 6)]
+    assert sum(r["success"] for r in one) == 2 and all(r["steps"] for r in one)
+    never = [r for r in two if not r["steps"]]
+    assert len(never) == 4
+    assert all((r["action_rejections"], r["protocol_errors"]) == (1, 2) for r in never)
