@@ -535,15 +535,16 @@ def test_the_refused_text_does_not_change_any_score_or_reading(tmp_path):
 
 def test_only_the_loop_and_the_benchmark_touch_refused_replies():
     """No path from a refused reply to memory, feedback, events or the CLI:
-    the field is produced by the agent loop and read by the benchmark runner,
-    and nothing else in the package names it."""
+    the field is produced by the agent loop, written by the benchmark runner
+    and read by the benchmark's read-only reader (refusals.py); nothing else
+    in the package names it. A new file here is a decision, made in review."""
     src = Path(__file__).resolve().parents[2] / "src" / "personal_ai_core"
     naming = {
         str(path.relative_to(src)).replace("\\", "/")
         for path in src.rglob("*.py")
         if re.search(r"refused_replies|RefusedReply", path.read_text(encoding="utf-8"))
     }
-    assert naming == {"agent/loop.py", "app/bench/runner.py"}
+    assert naming == {"agent/loop.py", "app/bench/runner.py", "app/bench/refusals.py"}
 
 
 def test_an_action_required_task_that_acts_is_not_rejected(tmp_path):

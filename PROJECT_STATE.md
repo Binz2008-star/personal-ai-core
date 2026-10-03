@@ -1477,6 +1477,15 @@ WHERE THINGS STAND (2026-10-03)
             glued to a letter ("xghp_...") is not recognised -- in a refused
             reply and in an accepted answer alike. Widening it is a
             precision trade for its own PR.
+            Its reading is fixed in advance: app/bench/refusals.py, written
+            2026-10-03 while the first run carrying the text was still on the
+            rig, before any refused text was read. Protocol errors fall in the
+            first matching category (truncated, empty, prose, several_objects,
+            malformed_json, wrong_shape); a rejected answer is a FALSE
+            rejection when the task's own checks would pass it on the
+            untouched fixture (only three tasks can: git-last-commit-file,
+            tests-count-failures, toolsel-count-json). A category added after
+            reading the data is a new rule and says so.
          c. Then the owner decides the next experiment (unit 3, a change to
             the environment text, or the default for action_required). Unit 3
             reaches at most 7 of the baseline's 111 failures and needs the
