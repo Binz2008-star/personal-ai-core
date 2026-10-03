@@ -699,6 +699,8 @@ claim written in one place with nothing that notices it going stale.
                protocol refuses (off by default)
   #203 4f0ae89  eval(bench): the verdict of ADR-023 amendment 1, applied by code
                (compare --unit N)
+  #204 9b2c8e5  docs: ADR-024 units A and B have no formal gate under ADR-023
+               amendment 1 (owner-accepted finding)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1165,7 +1167,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 4f0ae89)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 9b2c8e5)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1201,8 +1203,26 @@ WHERE THINGS STAND (2026-10-03)
     was bd95016; then #202 (ADR-024 unit A, off by default) merged; main is
     was 22b586a; then #203 (the verdict of ADR-023 amendment 1, applied by
     code: `bench.compare --unit N`; units 1-3 only) merged; main is 4f0ae89.
-    Open pull request: #204 (the owner-accepted finding that ADR-024's units
-    A and B have no formal gate under the amendment).
+    Then #204 (the owner-accepted finding that ADR-024's units A and B have
+    no formal gate under the amendment) merged; main is 9b2c8e5. Open pull
+    request: #205 (ADR-025, the native tool-call channel experiment, and
+    ADR-023 amendment 2; the owner approved the gate, the implementation and
+    the rig measurement: "موافق على النقاط جميعها").
+  - CANDIDATE-MODEL SCREEN (2026-10-03, outside the repository): run by Codex
+    on the rig at 1861756, one pass of 10 agent tasks x 2 languages, its
+    result files under C:\Users\loyal\pt\pac-candidate-eval-1861756\ and
+    read by the lead's screening reader (rules fixed before the deepseek and
+    llama files existed; for qwen2.5-coder applied after its summary was
+    seen). Success: Boss 4/20, qwen2.5-coder:7b 5/20, llama3.1:8b 3/20;
+    deepseek-r1:8b and qwen3:8b timed out at the provider's 120 s and did not
+    finish (runtime failures, not scores). Protocol errors 6 / 20 / 17;
+    reads 8 / 36 / 48. Only qwen2.5-coder met the screening rule (not a
+    winner); no Boss change, no router. toolsel-count-json passed for all
+    three and can be met by a number alone (#199 H4).
+  - OSS AUDIT (2026-10-03, read-only): Veriloop, AgentSynth, Qwen-Agent, AtMem.
+    No dependency adopted. The finding that mattered: the installed Boss
+    template supports native tool calls (Ollama 0.35.0 lists `tools` among its
+    capabilities) and our provider never sends them -- ADR-025.
     Open issue: #76 (the 2026-09-25 ADR-017 review checkpoint; the persistence
     it asked for is built and tested, 55 PostgreSQL tests in CI -- the owner
     closes it).
