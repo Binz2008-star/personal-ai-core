@@ -691,6 +691,10 @@ claim written in one place with nothing that notices it going stale.
                text (240 runs each)
   #199 a366493  docs: read the re-run with refused-reply text (#198); hypotheses
                decided; leads named as leads
+  #200 9e3400f  docs(adr): ADR-024 -- the reply protocol; unit A authorized by
+               the owner
+  #201 bd95016  fix(secrets): GitHub and AWS tokens glued to a word are withheld
+               (ADR-018 amendment 2)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1157,7 +1161,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 13caea4)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at bd95016)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1187,8 +1191,10 @@ WHERE THINGS STAND (2026-10-03)
     ("موافق على 191"; #191): D1 pooled by track x language at 10 runs per
     side (a unit regresses at +16, family-wise 8.73%), D2 20 points, D3 the
     sign test at 5%, D4 as written -- every comparison after #189 is read by
-    it. Open pull request: #200 (ADR-024, the reply protocol; unit A
-    authorized by the owner the same day: "ابدأ A").
+    it. Then #200 (ADR-024, the reply protocol; unit A authorized by the
+    owner the same day: "ابدأ A") and #201 (GitHub and AWS tokens glued to a
+    word are withheld, ADR-018 amendment 2; owner: "سدّ الثغرة") merged; main
+    is bd95016. Open pull request: #202 (ADR-024 unit A, off by default).
     Open issue: #76 (the 2026-09-25 ADR-017 review checkpoint; the persistence
     it asked for is built and tested, 55 PostgreSQL tests in CI -- the owner
     closes it).
