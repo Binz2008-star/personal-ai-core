@@ -683,6 +683,10 @@ claim written in one place with nothing that notices it going stale.
                hypotheses fixed before the data
   #196 9a07647  eval(bench): an instrument check between two runs of the same
                behaviour (rule fixed before the re-run of #189 was read)
+  #197 9592dc5  fix(cli): narrow args.documents directly, so a newer pyright
+               passes too; ledger #195 #196
+  #198 555344d  eval: ADR-023 unit 1 and unit 1+2 at 1861756, with refused-reply
+               text (240 runs each)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1149,7 +1153,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 2d4a2b0)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 555344d)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
