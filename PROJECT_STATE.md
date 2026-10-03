@@ -78,8 +78,8 @@ SINCE dff472c (2026-10-01), LIVE IN pac
 - ADR-020, the candidate-model gate: design merged (5d2b2a3), D1-D4 approved;
   not built yet, pac unchanged by it.
 
-Evaluation (ADR-013 harness; the harness is PROPOSED, it has been run many
-times):
+Evaluation (ADR-013 harness; ACCEPTED 2026-10-03, run many times since
+2026-10-01):
 - contract_v1, 22 cases. Best runs: 22/22 with the guard (Ollama, af574a2)
   and 22/22 on llama.cpp with the no-foreign-script grammar (5ac65b2), each a
   single run. Results are in evals/results/.
@@ -115,7 +115,10 @@ Phase 0 — HISTORICAL / COMPLETED
   Note: Historical foundation; no separate acceptance gate.
         Evidence: docs/COMPONENT_EXTRACTION_MATRIX.md
 
-Phase 1 — COMPONENTS COMPLETE / NOT ACCEPTED
+Phase 1 — ACCEPTED (owner, 2026-10-03, with ADR-011 and ADR-012; ARCHITECTURE.md OD-10)
+  Before acceptance this line read COMPONENTS COMPLETE / NOT ACCEPTED, and the text
+  below is that record, kept as history: every step of the gate up to owner
+  acceptance had been done; acceptance was the step left, and it is now taken.
   Scope: Core foundation vertical slice —
          User → Session → Message → ModelProvider → Response → Event
   Status: all five playbook components are now built. Identity was the last,
@@ -669,6 +672,21 @@ claim written in one place with nothing that notices it going stale.
   #188 4f63f73  fix(tools): the state script says "at the limit" where a pull
                request would fail
   #189 05a9581  eval: ADR-023 unit 1 and unit 1+2 at 4f63f73 (240 runs each)
+  #190 3bbb9ad  docs: record the ADR-023 measurement (#189); handoff at 05a9581
+  #192 ccfc88a  docs: why English fell with unit 2, read without a cause;
+               which call failed, from token counts
+  #193 1861756  eval(bench): record the text of every reply the agent loop
+               refused (handoff 6b2, owner-approved)
+  #194 3a124fc  docs(adr): OD-10 decided -- six PROPOSED ADRs accepted, Phase 1
+               accepted
+  #195 2d4a2b0  eval(bench): a reader for refused replies, its rules and four
+               hypotheses fixed before the data
+  #196 9a07647  eval(bench): an instrument check between two runs of the same
+               behaviour (rule fixed before the re-run of #189 was read)
+  #197 9592dc5  fix(cli): narrow args.documents directly, so a newer pyright
+               passes too; ledger #195 #196
+  #198 555344d  eval: ADR-023 unit 1 and unit 1+2 at 1861756, with refused-reply
+               text (240 runs each)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -696,7 +714,8 @@ Agent deterministic control layer: ACCEPTED (scoped) -- ADR-004 Amendment A1,
   Model-driven behaviour: NOT evaluated, NOT accepted.
   Runtime context behaviour: NOT measured, NOT accepted.
   AUTHORIZED FOR FURTHER EXPANSION: NO, for every Agent component.
-ADR-017 (events -> feedback -> learning): PROPOSED, not accepted.
+ADR-017 (events -> feedback -> learning): PROPOSED, not accepted (kept so at
+  the 2026-10-03 OD-10 review: its section 13 still holds open owner decisions).
   Persistence slice (feedback records, SQLite repository, additive unique
   index, read-only audit): IMPLEMENTED, authorized 2026-09-29, verified on
   SQLite only. B1 (PR #79) records feedback from pac.
@@ -704,7 +723,7 @@ ADR-017 (events -> feedback -> learning): PROPOSED, not accepted.
   open item 4). Observation (Unit 2): IMPLEMENTED as a pure function,
   owner-authorized 2026-09-30; its only consumer is `pac --observations`,
   a read-only display (D4). Nothing persisted; no turn is affected.
-Evaluation (ADR-013): PROPOSED, not accepted. Harness v0: BUILT,
+Evaluation (ADR-013): ACCEPTED 2026-10-03 (OD-10). Harness v0: BUILT,
   owner-authorized 2026-09-30 (PR #91); read-only context baseline tool
   (PR #92). Run on the rig 2026-10-01 at dff472c, 17 cases each, results in
   evals/results/ committed unmodified:
@@ -901,8 +920,8 @@ A phase becomes accepted only after:
 Design → Authorization → Implementation → Tests → Invariant review → Git verification → Owner acceptance
 
 Phase 0: HISTORICAL / COMPLETED (evidence freeze ec04071; no separate gate)
-Phase 1: COMPONENTS COMPLETE / NOT ACCEPTED — identity built (PR #39); ADR-011 and
-         ADR-012 PROPOSED. See the PHASE STATUS SUMMARY above and
+Phase 1: ACCEPTED 2026-10-03 — identity built (PR #39); ADR-011 and ADR-012
+         ACCEPTED 2026-10-03. See the PHASE STATUS SUMMARY above and
          PHASE_1_RECONCILIATION.md.
 Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
@@ -1134,7 +1153,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 05a9581)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 555344d)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1155,9 +1174,62 @@ WHERE THINGS STAND (2026-10-03)
     failures that sets the order of the controls, and its correction) merged;
     main was df05a66; then #187 (that record), #188 (the state script says "at
     the limit" where a PR would fail) and #189 (the ADR-023 measurement, below)
-    merged; main is 05a9581. Open pull requests: none. Open issue: #76 (the 2026-09-25
-    ADR-017 review checkpoint; the persistence it asked for is built and
-    tested, 55 PostgreSQL tests in CI -- the owner closes it).
+    merged; main was 05a9581; then #190 (that record) and #192 (the English
+    reading, below) and #193 (refused-reply text, 6b2) merged; main was
+    1861756; then #194 (the ADR status review, below), #195 (the refused-reply
+    reader), #196 (the instrument check), #197 (pyright narrowing) and #198
+    (the re-run's result files) merged. Open pull request: #191 (draft,
+    ADR-023 amendment 1, the deciding rule; waits on the owner's D1-D4).
+    Open issue: #76 (the 2026-09-25 ADR-017 review checkpoint; the persistence
+    it asked for is built and tested, 55 PostgreSQL tests in CI -- the owner
+    closes it).
+  - ADR STATUS REVIEW (OD-10), decided by the owner 2026-10-03 in the lead
+    session, in these words: "موافق على التوصيات" ("I accept the
+    recommendations"), answering the lead's table of nine PROPOSED ADRs:
+    ADR-011, 012 (with Phase 1), 013, 018 and 019 ACCEPTED; ADR-010 accepted
+    as built, superseded by ADR-016 for the server backend; ADR-020's status
+    line corrected to the acceptance it reached in #154; ADR-017 stays
+    PROPOSED (its section 13 is open, including a production schema write);
+    ADR-021 stays PROPOSED / DEFERRED (nothing built).
+  - RE-RUN OF #189 AT 1861756 (on the rig 2026-10-03, owner-ordered; forensic,
+    decides nothing): the same two runs, now recording refused-reply text.
+    Before it was read, an instrument check was fixed:
+    `python -m personal_ai_core.app.bench.replication EARLIER LATER`. Eight
+    cells (track x language, per pair); a cell flags at a success difference
+    of 15 or more (family-wise false alarm 6.1% at the worst base rate,
+    ADR-020's arithmetic); instrument fields and weights must match. A flag
+    means the rig differed and nothing across the pair is read until
+    explained; no flag does not prove the rig was the same (a 20% -> 40% move
+    is caught about 31% of the time). The differences are recorded as the
+    observed run-to-run spread, which ADR-023 amendment 1 (#191) can use.
+  - READ (#198, files bench-20261003T161348Z / T164631Z, at 1861756; every
+    figure re-derived by tests/unit/test_bench_refused_text_reading.py):
+      The rig did not differ: no cell flagged. Agent success, #189 -> re-run:
+      unit 1 en 15 -> 14, ar 11 -> 11; unit 1+2 en 8 -> 12, ar 16 -> 15.
+      Secret scans (the rig's and the lead's, both detectors): no match.
+      Rejected answers: unit 1 64 (en 15, ar 49), unit 1+2 68 (en 28, ar 40);
+      of those the task's checks would have passed 1 and 3 -- four in all,
+      three in toolsel-count-json and one in git-last-commit-file, each a
+      guess made before any tool ran, and three of those four runs passed
+      later anyway.
+      Hypotheses (written before the text was read): H1 FAILED (English
+      first-reply protocol errors under unit 1+2 were 4/15 prose, none
+      echoing "git status"); H2 FAILED (5/15); H3 FAILED (9 of 98 protocol
+      errors truncated, 8 at the generation limit; the ninth is the brace
+      rule over-reaching); H4 HELD with one exception (the
+      git-last-commit-file case).
+      Read after seeing the text -- leads, not results: (a) Python
+      function-call syntax, `write_file(VERSION, "1.5.0")`, 9 times, all
+      English, all unit 1+2, none under unit 1: the 13-token replies of
+      #189's git-commit-release; (b) the largest single cause in both runs is
+      file content that breaks the JSON of a write_file call (20 and 17 of
+      49); (c) a numeric answer, `{"answer": 4}`, is refused because the
+      protocol wants a string -- 5 times, twice the right number; (d) a
+      command given as a string, `"arguments": "type words.py"`, 8 times.
+      So the English loss under unit 2 is not the environment text being
+      echoed. Unit 2 goes with one new failure, the function-call syntax (an
+      association in two runs, not a cause); the largest causes, in both
+      runs, sit in the reply protocol itself.
   - MEASURED (#189, 2026-10-03): ADR-023 unit 1, then unit 1 + unit 2, at
     4f63f73, on the rig (ADAM-PC) through a Remote Control session the lead
     started on the owner's instruction, in its own worktree. Precondition read
@@ -1195,6 +1267,30 @@ WHERE THINGS STAND (2026-10-03)
       [action_required=true] prefix (for example as the default in pac
       --agent) is the owner's decision (section 4). Unit 2 moved its own class
       but not the total, and English fell: it stays off and is not adopted.
+      Why English fell with unit 2 (Next 6b, read-only; pinned by the same
+      test file). The records keep token counts per model call, not the reply
+      text, so this says where and how often, not what the model wrote.
+      English protocol errors (a reply that is not one JSON object) rose with
+      each unit: 14 -> 27 -> 46 (in 10 -> 17 -> 31 of 60 attempts); Arabic
+      9 -> 15 -> 20. In English budget stops, from unit 1 to unit 1 + 2,
+      refused tool calls fell (39 -> 19) while answer rejections (5 -> 21) and
+      protocol errors (20 -> 34) rose; Arabic's rejections did not (22 -> 22).
+      That is where the failures fell in two runs, not what caused them.
+      Sharpest case, git-commit-release in English: with unit 1, every attempt
+      wrote VERSION and 2 of 5 passed; with unit 1 + 2, 4 of 5 ran no tool at
+      all, each spending its budget on 1 rejection and 2 protocol errors.
+      Which call failed can be read without the text: the next call's prompt
+      grows by the reply plus what the loop sent back, and the action-required
+      message leaves 37-38 tokens, a protocol-error message 24-31 (a reading
+      that never disagrees with the recorded counts in 360 runs). Read so:
+      English first replies that broke the protocol went 3 -> 8 -> 15 (Arabic
+      6 -> 5 -> 5); in git-commit-release every unit 1 + 2 first reply (13 or
+      19 tokens, to a prompt 181 tokens longer) broke it, where every unit 1
+      first reply (27-28 tokens) was a write_file call. English also moved
+      from shell (65 -> 26) to run_command (8 -> 20), which is what the
+      environment text asks for. So the English loss sits mostly at the
+      first reply, after the environment text; why those replies broke the
+      protocol cannot be read from these files.
   - Merged (#182): `pac --documents DIR` used to read only the `.md` and
     `.txt` files in DIR and drop the rest without a word. It now prints one
     line before the `documents:` summary naming the kinds passed over and how
@@ -1420,16 +1516,71 @@ WHERE THINGS STAND (2026-10-03)
       4. Done: unit 1 measured (#189, above).
       5. Done: unit 1 + unit 2 measured (#189, above).
       6. Next, in this order, nothing built meanwhile:
-         a. Write the deciding rule for ADR-023 comparisons (section 5),
-            following ADR-020 amendment 1, as an amendment for the owner's
-            approval. It governs the next measurement, not #189.
-         b. Read-only, from the #189 files: why English answers were rejected
-            until the budget ended with the environment context on (2 -> 10),
-            and what the 57-58 budget stops spent their failures on.
-         c. Then the owner decides the next experiment (unit 3, a change to
-            the environment text, or the default for action_required). Unit 3
-            reaches at most 7 of the baseline's 111 failures and needs the
-            protocol change reserved for separate review.
+         a. Drafted (#191, not merged): the deciding rule for ADR-023
+            comparisons (section 5), following ADR-020 amendment 1. It waits
+            on the owner's decisions D1-D4 and governs the next measurement,
+            not #189.
+         b. Done: the read-only look (above). It cannot say why English replies
+            broke the protocol, because the reply text is not recorded.
+         b2. Approved by the owner (2026-10-03) and built: the agent loop
+            keeps each reply it refused (call, kind, text, protocol error) on
+            its outcome -- never in an event -- with the secret check an
+            answer passes; the benchmark writes it to each agent run as
+            `refused_replies` (text clipped at 4000 characters). Scoring is
+            unchanged. Not yet run: the next rig measurement carries it. It
+            is what explains b, and what makes false rejections countable,
+            which ADR-023 amendment 1 (PROPOSED, #191) requires before any
+            default changes (R3, D4). Reviewed boundary: the field is named
+            only in agent/loop.py and app/bench/runner.py (a test enforces
+            it), so no path to memory, feedback, events or the CLI; a secret
+            in a refused reply is withheld before the record, including
+            across the clip boundary; stripping the field leaves every
+            reading of a file the same. Use of the captured text: read-only
+            forensics after merge; it changes no unit, prompt or behaviour
+            by itself.
+            Finding while testing it (not acted on, owner's call): the
+            verifier's secret patterns start at a word boundary, so a token
+            glued to a letter ("xghp_...") is not recognised -- in a refused
+            reply and in an accepted answer alike. Widening it is a
+            precision trade for its own PR.
+            Its reading is fixed in advance: app/bench/refusals.py, written
+            2026-10-03 while the first run carrying the text was still on the
+            rig, before any refused text was read. Protocol errors fall in the
+            first matching category (truncated, empty, prose, several_objects,
+            malformed_json, wrong_shape); a rejected answer is a FALSE
+            rejection when the task's own checks would pass it on the
+            untouched fixture (only three tasks can: git-last-commit-file,
+            tests-count-failures, toolsel-count-json). A category added after
+            reading the data is a new rule and says so.
+            Hypotheses, written 2026-10-03 ~16:50Z with Run 2 still on the rig
+            and no refused text read, each decided by the reader's counts:
+            H1  unit 1+2's English first-reply protocol errors are mostly
+                `prose`: short text, no JSON. The environment block ends with
+                an instruction ("run `git status` with `run_command` to see
+                it"), and the #189 replies were 13-19 tokens, too short for a
+                JSON tool call. Holds if most of them are `prose` and most of
+                those in git tasks contain "git status" or "run_command".
+            H2  the alternative: they are `several_objects` or `wrong_shape`
+                (the model plans several steps at once).
+            H3  truncation plays no part: under 5% of protocol errors are
+                `truncated`.
+            H4  false rejections are rare and come from toolsel-count-json
+                (a guessable number); none from the nine tasks that need a
+                change, which the reader makes impossible by construction.
+            Whichever holds, the reading is as fixed above; a hypothesis that
+            fails is reported as failed.
+         b3. Done: the re-run with refused-reply text (#198), read by the
+            rules above (READ, in WHERE THINGS STAND).
+         c. Then the owner decides the next experiment. The lead's
+            recommendation, from b3: a reply-protocol unit, which is the
+            protocol change ADR-023 reserves for separate review. In order of
+            how unambiguous the input is: accept a numeric "answer" as its
+            text; accept a string "arguments" for shell/run_command as the
+            command; then, separately, a way to write file content that does
+            not have to survive JSON escaping. Each measured under the
+            deciding rule once #191 is approved. The other options stand:
+            unit 3 (reaches at most 7 of the baseline's 111 failures), a
+            change to the environment text, the default for action_required.
   - Rules learned today: update this header in any PR that finds it 2 or more
     merges behind -- CI now fails a PR at 3 (main went red after #163, and again
     after #176, when it slipped to 4); a scorer fix is
@@ -1577,12 +1728,14 @@ The ADRs in docs/ADR/ are the decision record. That directory is authoritative;
 this file does not enumerate them, because an enumeration here is a second source of
 truth that goes stale the moment one is added.
 
-Not every ADR is accepted. PROPOSED, not accepted:
-- ADR-010 (persistence) — recommends without selecting; nothing is selected.
-- ADR-011 (identity layer contract) — fixes the shape of the contract;
-  authorises no implementation.
+Not every ADR is accepted. PROPOSED, not accepted (as of the OD-10 review,
+2026-10-03, which accepted ADR-010 as built, ADR-011, 012, 013, 018 and 019, and
+corrected ADR-020's status line to the acceptance it reached in #154):
+- ADR-017 (events -> feedback -> learning) — its section 13 holds open owner
+  decisions, among them how an existing PostgreSQL database acquires the
+  feedback index, which is a production schema write.
 - ADR-021 (grammar during decoding) — PROPOSED / DEFERRED until after the
-  capability baseline; Phases A-C only when revisited.
+  capability baseline; Phases A-C only when revisited. Nothing is built.
 - ADR-023 (planning, execution/test, verification) — ACCEPTED 2026-10-02 with
   its first unit specified (section 8); no other control is authorized.
 

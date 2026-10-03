@@ -443,6 +443,110 @@ def test_an_action_required_task_rejects_an_answer_before_any_tool_call(tmp_path
     assert not run["success"]
 
 
+def test_a_run_records_the_text_of_every_reply_the_loop_refused(tmp_path):
+    """Handoff, Next 6b2: the reply that broke the protocol and the answer
+    rejected for not having acted, as the model wrote them. Recorded only."""
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = ["Let me look at calc.py first.", _answer("It looks fine to me."),
+                               *SOLVES["test_calc.py"]]
+    _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
+    run = next(x for x in lines if x["kind"] == "run")
+    assert run["refused_replies"] == [
+        {"call": 1, "kind": "protocol_error", "error": "the reply contains no JSON object",
+         "text": "Let me look at calc.py first."},
+        {"call": 2, "kind": "action_required", "error": None,
+         "text": _answer("It looks fine to me.")},
+    ]
+    # Scoring did not look at them: the run still solved the task.
+    assert run["success"] and run["protocol_errors"] == 1 and run["action_rejections"] == 1
+    assert "not scored" in lines[0]["refused_replies"]
+
+
+def test_a_long_refused_reply_is_clipped_and_says_so(tmp_path):
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = ["x" * 5_000, *SOLVES["test_calc.py"]]
+    _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
+    (refused,) = next(x for x in lines if x["kind"] == "run")["refused_replies"]
+    assert refused["text"] == "x" * 4_000 + "... [1000 more chars]"
+
+
+def test_a_run_with_nothing_refused_records_an_empty_list(tmp_path):
+    _, _, lines = _run(tmp_path, SOLVES, "--only", "verify-off-by-one", "--languages", "en")
+    assert next(x for x in lines if x["kind"] == "run")["refused_replies"] == []
+
+
+# Shapes the verifier knows (agent/verifier.py), built here so this file does
+# not itself hold a secret-shaped literal.
+GITHUB_TOKEN = "ghp_" + "Zx9" * 12
+AWS_KEY = "AKIA" + "QWERTYUIOPASDFGH"
+
+
+def test_a_secret_in_a_refused_reply_never_reaches_the_result_file(tmp_path):
+    """The contract of 6b2, at the record: a secret the model wrote in a reply
+    the loop refused -- a protocol error or a rejected answer -- is withheld
+    before the runner sees it, so the file holds no trace of it anywhere."""
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = [f"use {GITHUB_TOKEN} to push",
+                               _answer(f"the key is {AWS_KEY}"),
+                               *SOLVES["test_calc.py"]]
+    _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
+    raw = next(tmp_path.glob("bench-*.jsonl")).read_text(encoding="utf-8")
+    assert GITHUB_TOKEN not in raw and AWS_KEY not in raw
+    assert "ghp_" not in raw and "AKIA" not in raw
+    refused = next(x for x in lines if x["kind"] == "run")["refused_replies"]
+    assert [(r["call"], r["kind"]) for r in refused] == [(1, "protocol_error"),
+                                                         (2, "action_required")]
+    assert all(r["text"].startswith("[reply withheld: it contained something secret-shaped")
+               for r in refused)
+
+
+def test_a_secret_across_the_clip_boundary_is_withheld_not_cut_in_half(tmp_path):
+    """The check runs on the whole reply before it is clipped, so a secret that
+    starts just before character 4000 cannot leave its first half in the file.
+    (A space before the token: the verifier's patterns start at a word
+    boundary, so a token glued to a letter is not recognised -- the same rule
+    an accepted answer is held to, recorded as a finding, not changed here.)"""
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = ["x" * 3_989 + " " + GITHUB_TOKEN, *SOLVES["test_calc.py"]]
+    _, _, lines = _run(tmp_path, scripts, "--only", "verify-off-by-one", "--languages", "en")
+    raw = next(tmp_path.glob("bench-*.jsonl")).read_text(encoding="utf-8")
+    assert "ghp_" not in raw and "Zx9Zx9" not in raw
+    (refused,) = next(x for x in lines if x["kind"] == "run")["refused_replies"]
+    assert refused["text"].startswith("[reply withheld")
+
+
+def test_the_refused_text_does_not_change_any_score_or_reading(tmp_path):
+    """Strip the new field and every reading of the file is the same: the
+    report, each run's class, its signals and its verdict."""
+    from personal_ai_core.app.bench.compare import classify
+
+    scripts = dict(SOLVES)
+    scripts["test_calc.py"] = ["not json", _answer("done already"), *SOLVES["test_calc.py"]]
+    _, _, lines = _run(tmp_path, scripts)
+    stripped = [{k: v for k, v in x.items() if k != "refused_replies"} for x in lines]
+    assert any(x.get("refused_replies") for x in lines)
+    assert report(lines) == report(stripped)
+    runs = [x for x in lines if x["kind"] == "run" and x["track"] == "agent"]
+    bare = [x for x in stripped if x["kind"] == "run" and x["track"] == "agent"]
+    assert [classify(r) for r in runs] == [classify(r) for r in bare]
+    assert [(r["success"], r["signals"], r["checks"]) for r in runs] == [
+        (r["success"], r["signals"], r["checks"]) for r in bare]
+
+
+def test_only_the_loop_and_the_benchmark_touch_refused_replies():
+    """No path from a refused reply to memory, feedback, events or the CLI:
+    the field is produced by the agent loop, written by the benchmark runner
+    and read by the benchmark's read-only reader (refusals.py); nothing else
+    in the package names it. A new file here is a decision, made in review."""
+    src = Path(__file__).resolve().parents[2] / "src" / "personal_ai_core"
+    naming = {
+        str(path.relative_to(src)).replace("\\", "/")
+        for path in src.rglob("*.py")
+        if re.search(r"refused_replies|RefusedReply", path.read_text(encoding="utf-8"))
+    }
+    assert naming == {"agent/loop.py", "app/bench/runner.py", "app/bench/refusals.py"}
+
+
 def test_an_action_required_task_that_acts_is_not_rejected(tmp_path):
     _, _, lines = _run(tmp_path, SOLVES, "--only", "verify-off-by-one", "--languages", "en")
     run = next(x for x in lines if x["kind"] == "run")

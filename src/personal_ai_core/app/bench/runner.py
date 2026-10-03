@@ -64,6 +64,9 @@ DEFAULT_TASKS = Path("evals/bench")
 DEFAULT_OUT = Path("evals/results/bench")
 CLIP_CHARS = 2_000
 OUTPUT_CLIP_CHARS = 2_000
+# A refused reply is kept whole up to here: the loop asks for at most 1024
+# tokens, which is about this many characters of English.
+REFUSED_REPLY_CLIP_CHARS = 4_000
 # Not part of a workspace's final state: caches the checks or tests leave.
 # Environment variables that change how the tasks' own commands behave, recorded
 # in the header by name and value (paths, never secrets). PYTEST_DEBUG_TEMPROOT:
@@ -191,6 +194,14 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
         record["stopped_reason"] = outcome.stopped_reason
         record["protocol_errors"] = outcome.protocol_errors
         record["action_rejections"] = outcome.action_rejections
+        # What the model wrote each time the loop refused a reply (handoff, Next
+        # 6b2): the text that explains a protocol error or a rejected answer.
+        # Recorded only; nothing below reads it, so scoring is unchanged.
+        record["refused_replies"] = [
+            {"call": r.call, "kind": r.kind, "error": r.error,
+             "text": _clip(r.text, REFUSED_REPLY_CLIP_CHARS)}
+            for r in outcome.refused_replies
+        ]
         if outcome.environment is not None:
             record["environment"] = dict(outcome.environment)
     except ProviderError as exc:
@@ -388,6 +399,8 @@ def main(
         "contract": "each agent task file states action_required and the runner passes an "
                     "AgentTaskContract built from it (ADR-023 §8.3); a file without this key "
                     "ran without a contract",
+        "refused_replies": "each agent run lists the replies the loop refused, with their "
+                           f"text (clipped at {REFUSED_REPLY_CLIP_CHARS} characters); not scored",
         "judge_model": "none (ADR-013)",
         "scorer": SCORER,
         "language_guard": settings.language_guard,
