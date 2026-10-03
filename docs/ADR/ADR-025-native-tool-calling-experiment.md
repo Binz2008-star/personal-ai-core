@@ -4,7 +4,8 @@
 writing this document as a draft pull request, documentation only · no implementation, no
 rig run and no configuration change follows from it · it proposes an experiment, not the
 adoption of native tool calling · revised 2026-10-03 after the owner's review of #205 (six
-corrections, §4 to §6 and §9)
+corrections, §4 to §6 and §9), and again after its second review (the R1 predicate, the
+R0 wording, the validation boundary: §4.6, §6)
 
 | Stage | State |
 |---|---|
@@ -246,6 +247,35 @@ The experiment is **not** the full native conversation protocol. It is a **hybri
 - The full native conversation (`Role` gains `tool`, `Message` carries tool calls) changes
   two more core types. It is a separate, later experiment, and is not proposed here.
 
+### 4.6 The validation boundary
+
+A native call reaches a tool only through the boundary that a text-protocol call crosses
+today. Nothing is skipped and nothing new can execute:
+
+```text
+provider ──> NativeToolCall ──> explicit validation ──> ToolRequest ──> policy ──> executor ──> verifier
+           (raw, uncoerced)       (the loop, §5)        (existing)     (existing)  (existing)  (existing)
+```
+
+- **The provider** reports what the backend returned, in `NativeToolCall`. It neither
+  coerces `arguments` nor drops a call.
+- **The loop validates explicitly**, before any `ToolRequest` exists: exactly one call;
+  `name` a non-empty string; `arguments` a JSON object (a mapping), with no coercion, so a
+  JSON *string* is refused, not parsed; and no `<tool_call>` text left in the content
+  without a parsed call. Anything else is a protocol error (§5), charged to the budget as
+  today.
+- **Only a validated call becomes a `ToolRequest`**, built the same way a text-protocol
+  proposal is. From there the path is the existing one: `executor.execute` applies the
+  policy (`allow`, `deny`, `ask`), validates the arguments against the tool's schema
+  (`validate_arguments`), handles confirmation, and runs the tool; the verifier checks the
+  result. An unknown tool name passes the loop's check (it is a string) and is refused by
+  the executor, exactly as today.
+- **The loop never runs a tool, never builds an `AuditRecord`, and never calls the
+  executor any other way.** A native call cannot bypass `ToolRequest`, the policy or the
+  schema check.
+- Text that accompanies a valid call is not an answer. It is kept in the history before
+  the call's text (§4.5), as the model wrote it.
+
 ## 5. Safety and semantic constraints
 
 - **The F-1 fence is unchanged.** `<tool_response>` is formatting, not a security
@@ -271,10 +301,13 @@ The experiment is **not** the full native conversation protocol. It is a **hybri
 
 - **Two arms, recorded as separate experiments:** the text protocol, and the native
   interface (`--native-tools`, in the header).
-- **Held identical in both arms:** the Boss model and its weights digest, the task
-  corpus, the languages, context 8192, the generation limit and every sampling setting,
-  the tools, executor, policy, verifier, recovery, budgets, scoring, and the environment
-  context setting.
+- **What differs, and what is held identical.** `native_tools` is the only experimental
+  condition flag that differs. The native arm necessarily changes the model-facing tool
+  declaration and call channel (§4.1, §4.3) and the corresponding system-text protocol
+  instructions (§4.4). All other conditions are held identical: the model and its weights
+  digest, the task corpus, the languages, the context (8192), the generation and sampling
+  settings, the tools, executor, policy, verifier, recovery, budgets, scorer, and the
+  environment-context setting.
 - **Raw protocol-error counts are not compared across arms.** The final answer changes
   from `{"answer": ...}` to plain text, so the native arm has fewer ways to commit the old
   error by construction. A difference in that count says nothing about the interface's
@@ -284,27 +317,72 @@ The experiment is **not** the full native conversation protocol. It is a **hybri
 ### 6.1 The primary measure, proposed for pre-registration
 
 Proposed by the lead, to be fixed by the owner before any implementation or run is
-authorized (§8, D3). It has the same form as ADR-023 amendment 1, so the existing verdict
-code (`bench.compare --unit`, #203) can apply it, after one small change that is part of
-D1: today that code accepts a single class as a target, and this target is a union.
+authorized (§8, D3). It has the form of ADR-023 amendment 1: a pre-declared target tested
+by R1, success guarded by R2.
 
-- **Target (R1 form): the attempts in which no tool call executed.** That is the union of
-  ADR-023 §1.2's groups with no executed call: class 1 (answers without executing),
-  class 3 (wrong or unknown environment commands), "rejected until the budget ended" and
-  "protocol only" (`compare.classify`: `answered_without_executing`, `refused_commands`,
-  `rejected_to_budget`, `protocol_only`).
-  - It passes when, over agent attempts paired by (task, language, run), attempts leaving
-    the set outnumber attempts entering it, by a one-sided exact sign test at 5%.
-  - Why this set: it is behavioral (did the model act at all), it is made of classes the
-    accepted rule already defines, and it does not depend on how protocol errors are
-    counted. An attempt whose failure merely moves between these groups (for example a
-    protocol error that becomes an early answer) neither leaves nor enters it.
-  - For scale, not as a prediction: in #198's unit 1 run, 37 of 120 agent attempts were
-    in this set.
-- **Guard (R2, unchanged):** no track × language group's failures rise by 16 or more, at
-  10 runs per side. Agent success is therefore guarded, not the target.
-- **R0, R3, R4 and R5 unchanged.** R0 additionally requires that `native_tools` be the
-  only header difference between the arms.
+**The target is a named behavioral predicate, not a union of classifier labels:**
+
+```text
+NO_EXECUTED_TOOL_CALL(attempt)  :=  executed_tool_calls(attempt) == 0
+executed_tool_calls(attempt)    :=  the number of entries in the attempt's run record
+                                    `steps` whose `executed` is `true`
+```
+
+- **Its source** is the immutable JSONL run record the benchmark writes (`kind: "run"`,
+  `track: "agent"`), field `steps[*].executed`, which the benchmark copies from the
+  executor's `AuditRecord.executed`. Nothing is judged by hand and nothing is inferred
+  from a label.
+- **What `executed: true` means** (`agent/executor.py`, `_decide_and_run`): the tool
+  exists, the policy did not deny, the arguments passed `validate_arguments` against the
+  tool's schema, any confirmation was given, and the tool's `run` was called. The tool's
+  own result does not matter: a tool that ran and reported an error counts as executed.
+  An unknown tool, a policy denial, invalid arguments or a refused confirmation leave
+  `executed: false`. A protocol error or a rejected answer creates no step at all.
+- **It is computed identically in both arms**, because in the native arm a call reaches
+  the executor only as a `ToolRequest` (§4.6) and produces the same `steps` entries.
+
+**Every attempt is either classifiable or handled explicitly. None is classified as "no
+execution" by default:**
+
+| Record | Classifiable | Treatment |
+|---|---|---|
+| An agent run with `stop` "answered" or "budget", `steps` present, every `executed` a boolean | yes | the predicate, from `steps` |
+| `stop` "error": a provider or runtime failure | no | excluded from R1. Its (task, language, run) pair is dropped from the sign test on both sides, and every dropped pair is listed and counted |
+| An expected (task, language, run) with no record, a file without its end record, a record without `steps`, or a non-boolean `executed` | no | the comparison is NOT READABLE (R0), as for any incomplete or malformed file |
+
+Proposed with it, for the owner's decision (D3): if either arm has more than 5 provider or
+runtime failures (about 2% of 240 agent attempts), the comparison is NOT READABLE,
+because dropping pairs at that scale could bias the paired test.
+
+**The ADR-023 classes stay diagnostic.** By construction of `compare.classify`, they
+relate to the predicate as follows. The relation is reported, never used as the gate, so
+a later change to the classifier cannot change the gate:
+
+| ADR-023 class (`compare.classify`) | `NO_EXECUTED_TOOL_CALL` |
+|---|---|
+| `answered_without_executing`, `refused_commands`, `rejected_to_budget`, `protocol_only` | true, by construction |
+| `executed_unverified` | false, by construction |
+| `success` | read from `steps`: either value is possible (a task whose checks pass without a tool) |
+| `provider_error` | not classifiable (above) |
+
+Checked on #198's two files: no provider failures, every `executed` a boolean, and the
+table holds; every success there executed at least one call.
+
+**R1 with the predicate:**
+- **leaving** = the predicate true in the baseline arm and false in the native arm;
+- **entering** = the reverse;
+- R1 passes when leaving outnumbers entering by a one-sided exact sign test at 5%, over
+  classifiable pairs.
+
+For scale, not as a prediction: in #198's unit 1 run, 37 of 120 agent attempts had no
+executed tool call, and none had a provider failure.
+
+**The rest of the rule:**
+- **R2, unchanged:** no track × language group's failures rise by 16 or more, at 10 runs
+  per side. Agent success is guarded, not the target.
+- **R0:** as in ADR-023 amendment 1, with the conditions of §6 (only the `native_tools`
+  flag differs as an experimental condition) and the table above.
+- **R3, R4 and R5 unchanged.**
 - **Both arms:** ADR-023 unit 1 on (the task contract), unit 2 off, ADR-024 unit A off.
 
 ### 6.2 If no formal gate is authorized: the descriptive report, fixed now
@@ -338,7 +416,9 @@ So the proposal is an **extension, not a loosening**. It is a possible ADR-023 a
 written only if the owner authorizes it (§8, D3), and not written here:
 1. A unit outside ADR-023 may have an R1 target, declared in its own ADR and approved by
    the owner before any of its runs.
-2. A target may be a union of ADR-023 §1.2 groups.
+2. A target may be a named predicate over the run record (such as
+   `NO_EXECUTED_TOOL_CALL`, §6.1), defined with its classification of every record,
+   including provider failures and incomplete records.
 3. A unit whose effect can be replayed offline over data already read cannot declare a
    target afterwards. ADR-024 unit A therefore stays as recorded: mechanically validated,
    end-to-end effect not formally gated.
@@ -359,7 +439,10 @@ written only if the owner authorizes it (§8, D3), and not written here:
 - **D1.** Authorize the implementation of §4 and §5, in two pull requests: first the
   core changes (`ToolCallingProvider`, `ToolDeclaration`, `NativeToolCall`,
   `ModelResponse.tool_calls`; §4.1, §4.2, reviewed as core contract changes) and the
-  Ollama adapter, with no behaviour change; then the loop and benchmark flag.
+  Ollama adapter, with no behaviour change; then the loop, with the validation boundary
+  of §4.6, and the benchmark flag. If D3 authorizes a formal gate, the verdict code
+  (`bench.compare --unit`, #203), which today accepts a single class as a target, also
+  learns the predicate of §6.1 and its classification table.
 - **D2.** Approve the native arm's system text (§4.4).
 - **D3.** Either authorize ADR-023 amendment 2 (§6.3) and fix the primary measure (§6.1)
   before any run, or decide that the experiment is read descriptively (§6.2).
