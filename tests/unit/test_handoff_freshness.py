@@ -113,3 +113,29 @@ def test_the_state_script_runs_and_never_fails():
                             env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert result.returncode == 0
     assert "handoff:" in result.stdout and "ledger:" in result.stdout
+
+
+def _state_script():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "session_state", REPO / "tools" / "session_state.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_state_script_does_not_say_ok_where_a_pull_request_would_fail():
+    """At exactly the limit main passes and a pull request fails (its own merge
+    will count). The line a session reads must say so; it said "ok"."""
+    flag = _state_script().limit_flag
+    assert flag(0, 3) == "ok" and flag(2, 3) == "ok"
+    assert flag(3, 3) != "ok" and "PR" in flag(3, 3) and "OVER" not in flag(3, 3)
+    assert flag(4, 3).startswith("OVER THE LIMIT")
+
+
+def test_the_state_script_uses_that_flag_for_both_counts():
+    source = (REPO / "tools" / "session_state.py").read_text(encoding="utf-8")
+    assert "limit_flag(len(unrecorded), MAX_UNRECORDED_MERGES)" in source
+    assert "limit_flag(lag, MAX_HANDOFF_LAG)" in source
