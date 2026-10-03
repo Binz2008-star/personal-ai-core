@@ -1,6 +1,6 @@
 # ADR-023 — Planning, execution/test and verification in the agent loop
 
-**Status:** ACCEPTED (2026-10-02) — unit 1 (§8.2) built and merged (#174, `d2b6cac`); unit 2 (§2.1) built, off by default (#178); both measured (#189, 2026-10-03), read descriptively; the deciding rule, Amendment 1, ACCEPTED by the owner 2026-10-03, governs every comparison after #189
+**Status:** ACCEPTED (2026-10-02) — unit 1 (§8.2) built and merged (#174, `d2b6cac`); unit 2 (§2.1) built, off by default (#178); both measured (#189, 2026-10-03), read descriptively; the deciding rule, Amendment 1, ACCEPTED by the owner 2026-10-03, governs every comparison after #189; Amendment 2, ACCEPTED by the owner 2026-10-03, admits a target declared by a unit outside this ADR before its runs
 
 | Stage | State |
 |---|---|
@@ -676,3 +676,25 @@ as a count only. Since #193 every refused reply's text is recorded, and since #1
 untouched fixture. In #198 that count was 4 of 132 rejected answers (#199). D4's
 condition can therefore be met by reporting that count with each comparison; the
 condition itself is unchanged.
+
+## Amendment 2 (ACCEPTED, 2026-10-03): a target declared by a unit outside this ADR
+
+**Status:** ACCEPTED by the owner, 2026-10-03, in the lead session: the lead asked for explicit approval of three points: (1) the measure `NO_EXECUTED_TOOL_CALL` as the formal gate, with ADR-023 amendment 2; (2) the implementation behind a flag that is off by default, in two pull requests; (3) the measurement on the rig, both interfaces, the same model, 10 runs per side. The owner
+answered: "موافق على النقاط جميعها" ("I approve all the points"). Recorded in ADR-025 §11.
+
+**Why.** ADR-024 §5.1, accepted by the owner, found that Amendment 1 declares R1 targets
+only for this ADR's units 1-3, so no unit outside it can ever be gated, whatever its data.
+The safeguards are not the cause, so this amendment extends the rule and loosens nothing.
+
+**The rule.**
+- A unit outside this ADR may have an R1 target, declared in its own ADR and approved by
+  the owner before any of its runs.
+- A target may be a named predicate over the run record, defined together with the
+  classification of every record: provider or runtime failures, and incomplete or
+  malformed records. This ADR's classes stay diagnostic.
+- Not retroactive: a unit whose effect can be replayed offline over data already read
+  cannot declare a target afterwards. ADR-024 unit A therefore stays as recorded:
+  mechanically validated, end-to-end effect not formally gated.
+- R0, R2, R3, R4 and R5, and Amendment 1, are unchanged.
+
+**First use.** ADR-025 §6.1: `NO_EXECUTED_TOOL_CALL`, declared before any native-tools run.
