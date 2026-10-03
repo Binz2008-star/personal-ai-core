@@ -673,6 +673,8 @@ claim written in one place with nothing that notices it going stale.
                request would fail
   #189 05a9581  eval: ADR-023 unit 1 and unit 1+2 at 4f63f73 (240 runs each)
   #190 3bbb9ad  docs: record the ADR-023 measurement (#189); handoff at 05a9581
+  #191 13caea4  docs(adr): ADR-023 amendment 1 ACCEPTED -- the rule that decides
+               "better"
   #192 ccfc88a  docs: why English fell with unit 2, read without a cause;
                which call failed, from token counts
   #193 1861756  eval(bench): record the text of every reply the agent loop
@@ -687,6 +689,8 @@ claim written in one place with nothing that notices it going stale.
                passes too; ledger #195 #196
   #198 555344d  eval: ADR-023 unit 1 and unit 1+2 at 1861756, with refused-reply
                text (240 runs each)
+  #199 a366493  docs: read the re-run with refused-reply text (#198); hypotheses
+               decided; leads named as leads
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1153,7 +1157,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 555344d)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 13caea4)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1178,8 +1182,13 @@ WHERE THINGS STAND (2026-10-03)
     reading, below) and #193 (refused-reply text, 6b2) merged; main was
     1861756; then #194 (the ADR status review, below), #195 (the refused-reply
     reader), #196 (the instrument check), #197 (pyright narrowing) and #198
-    (the re-run's result files) merged. Open pull request: #191 (draft,
-    ADR-023 amendment 1, the deciding rule; waits on the owner's D1-D4).
+    (the re-run's result files) and #199 (its reading) merged. ADR-023
+    amendment 1, the deciding rule, was ACCEPTED by the owner 2026-10-03
+    ("موافق على 191"; #191): D1 pooled by track x language at 10 runs per
+    side (a unit regresses at +16, family-wise 8.73%), D2 20 points, D3 the
+    sign test at 5%, D4 as written -- every comparison after #189 is read by
+    it. Open pull request: #200 (ADR-024, the reply protocol; unit A
+    authorized by the owner the same day: "ابدأ A").
     Open issue: #76 (the 2026-09-25 ADR-017 review checkpoint; the persistence
     it asked for is built and tested, 55 PostgreSQL tests in CI -- the owner
     closes it).
@@ -1516,10 +1525,10 @@ WHERE THINGS STAND (2026-10-03)
       4. Done: unit 1 measured (#189, above).
       5. Done: unit 1 + unit 2 measured (#189, above).
       6. Next, in this order, nothing built meanwhile:
-         a. Drafted (#191, not merged): the deciding rule for ADR-023
-            comparisons (section 5), following ADR-020 amendment 1. It waits
-            on the owner's decisions D1-D4 and governs the next measurement,
-            not #189.
+         a. Done: the deciding rule for ADR-023 comparisons (section 5),
+            ADR-023 amendment 1, ACCEPTED 2026-10-03 (#191) with D1-D4 as
+            recommended. It governs every comparison after #189; #189 and
+            #198 stay descriptive.
          b. Done: the read-only look (above). It cannot say why English replies
             broke the protocol, because the reply text is not recorded.
          b2. Approved by the owner (2026-10-03) and built: the agent loop
@@ -1573,7 +1582,10 @@ WHERE THINGS STAND (2026-10-03)
             rules above (READ, in WHERE THINGS STAND).
          c. Then the owner decides the next experiment. The lead's
             recommendation, from b3: a reply-protocol unit, which is the
-            protocol change ADR-023 reserves for separate review. In order of
+            protocol change ADR-023 reserves for separate review, now written
+            as ADR-024 (PROPOSED; units A parser-only, B file content outside
+            JSON, C tool-specific error feedback). Unit A authorized by the
+            owner 2026-10-03 ("ابدأ A"); B and C open. In order of
             how unambiguous the input is: accept a numeric "answer" as its
             text; accept a string "arguments" for shell/run_command as the
             command; then, separately, a way to write file content that does
