@@ -231,16 +231,20 @@ def _redact_url_userinfo(text: str) -> tuple[str, int]:
 # Published fixed prefixes, each with a minimum body length so that a word
 # like `sk-learn` or a short identifier is not taken for a key. The whole
 # token is the value.
+#
+# ADR-018 amendment 2 (2026-10-03): the GitHub and AWS prefixes are found
+# even glued to the text before them ("xghp_..."). `sk-` and `xox` keep the
+# boundary: `sk-` ends ordinary words ("task-...", "desk-..."), and a scan
+# of every tracked file found no glued GitHub or AWS shape but the tests'.
 
 _PREFIX_TOKEN = re.compile(
     r"""
-    (?<![A-Za-z0-9_-])
     (?:
-        sk-[A-Za-z0-9_-]{20,}            # OpenAI / Anthropic style
-      | gh[pousr]_[A-Za-z0-9]{20,}       # GitHub classic tokens
-      | github_pat_[A-Za-z0-9_]{22,}     # GitHub fine-grained tokens
-      | AKIA[0-9A-Z]{16}                 # AWS access key id
-      | xox[abposr]-[A-Za-z0-9-]{10,}    # Slack
+        (?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}          # OpenAI / Anthropic style
+      | gh[pousr]_[A-Za-z0-9]{20,}                       # GitHub classic tokens
+      | github_pat_[A-Za-z0-9_]{22,}                     # GitHub fine-grained tokens
+      | AKIA[0-9A-Z]{16}                                 # AWS access key id
+      | (?<![A-Za-z0-9_-])xox[abposr]-[A-Za-z0-9-]{10,}  # Slack
     )
     (?![A-Za-z0-9_-])
     """,

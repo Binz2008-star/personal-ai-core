@@ -156,6 +156,15 @@ def test_each_secret_shape_is_recognised(text, kind):
     assert kind in find_secrets(text)
 
 
+@pytest.mark.parametrize("text, kind", [
+    ("x" + "ghp_" + "c" * 36, "GitHub token"),
+    ("key" + "AKIA" + "B" * 16, "AWS access key"),
+])
+def test_github_and_aws_shapes_glued_to_a_word_are_recognised(text, kind):
+    """ADR-018 amendment 2: the same rule as the redactor."""
+    assert kind in find_secrets(text)
+
+
 @pytest.mark.parametrize(
     "text",
     [

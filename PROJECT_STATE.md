@@ -1547,11 +1547,11 @@ WHERE THINGS STAND (2026-10-03)
             reading of a file the same. Use of the captured text: read-only
             forensics after merge; it changes no unit, prompt or behaviour
             by itself.
-            Finding while testing it (not acted on, owner's call): the
-            verifier's secret patterns start at a word boundary, so a token
-            glued to a letter ("xghp_...") is not recognised -- in a refused
-            reply and in an accepted answer alike. Widening it is a
-            precision trade for its own PR.
+            Finding while testing it: the secret patterns started at a word
+            boundary, so a token glued to a letter ("xghp_...") was not
+            recognised. Closed for the GitHub and AWS prefixes by ADR-018
+            amendment 2 (owner, 2026-10-03: "سدّ الثغرة"), in the redactor and
+            the agent's output check; `sk-` and `xox` keep the boundary.
             Its reading is fixed in advance: app/bench/refusals.py, written
             2026-10-03 while the first run carrying the text was still on the
             rig, before any refused text was read. Protocol errors fall in the

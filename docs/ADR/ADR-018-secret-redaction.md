@@ -276,11 +276,33 @@ case's check (`absent`) is the same either way.
 
 **ADR-018:** ACCEPTED by the owner, 2026-10-03 (ARCHITECTURE.md OD-10). Version 1 AUTHORIZED 2026-10-01 (D1, with D2-D6 as in §7); built in #107 and #108. Amendment 1 (prose detector) authorized 2026-10-01, built in #114.
 
-**Known limitation (found 2026-10-03, not changed).** A prefix token (`ghp_…`, `AKIA…`,
-`sk-…`) is withheld only when it stands alone: the pattern refuses a letter, digit, `_` or
-`-` directly before or after it, so that an identifier such as `sk-learn` is not taken for
-a key. The cost is that a token glued to a word (`xghp_…`) is not withheld. The agent's
-output check (`agent/verifier.py`) has the same boundary. Found while testing #193.
-Widening either is a precision trade and its own decision.
+**Known limitation (found 2026-10-03), closed for GitHub and AWS by amendment 2.** A
+prefix token was withheld only when it stood alone: the pattern refused a letter, digit,
+`_` or `-` directly before or after it, so that an identifier such as `sk-learn` is not
+taken for a key, and a token glued to a word (`xghp_…`) was not withheld. The agent's
+output check (`agent/verifier.py`) had the same boundary. Found while testing #193.
+
+## Amendment 2 (2026-10-03) — GitHub and AWS tokens glued to a word
+
+**Owner decision:** approved 2026-10-03, in the lead session: "سدّ الثغرة" ("close the
+gap"), answering the lead's proposal to close it for the GitHub and AWS prefixes only.
+
+**The measurement it rests on.** Every tracked file in the repository (602 files, about
+10.7 million characters) was scanned with the boundary before each prefix removed. Removing
+it everywhere added exactly two matches, both deliberate near misses in this ADR's tests:
+`the task-abcdefghijklmnopqrstuvwxyz id` (`sk-` inside an ordinary identifier) and
+`AKIAIOSFODNN7EXAMPLEEXTRA` (a key followed by more characters). Removing it for the
+GitHub and AWS prefixes only added none.
+
+**The change.**
+- `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_` and `AKIA` need no boundary before
+  them, in the redactor (`context/redaction.py`) and in the agent's output check
+  (`agent/verifier.py`).
+- `sk-` and `xox` keep it: `sk-` ends ordinary words, and `xox` was not part of the decision.
+- The boundary after every token is unchanged, so `AKIAIOSFODNN7EXAMPLEEXTRA` is still
+  not taken for a key.
+
+**Verified.** Tests for glued tokens in both modules. Restoring the previous rule fails
+five of them. Every near miss already in the tests still passes.
 
 *Before 2026-10-03 this section read: PROPOSED, not accepted.*
