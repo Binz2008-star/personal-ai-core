@@ -352,7 +352,8 @@ execution" by default:**
 
 Proposed with it, for the owner's decision (D3): if either arm has more than 5 provider or
 runtime failures (about 2% of 240 agent attempts), the comparison is NOT READABLE,
-because dropping pairs at that scale could bias the paired test.
+because dropping pairs at that scale could bias the paired test. Once fixed, this bound
+is a pre-registered readability rule: it is never adjusted after any result is seen.
 
 **The ADR-023 classes stay diagnostic.** By construction of `compare.classify`, they
 relate to the predicate as follows. The relation is reported, never used as the gate, so
@@ -375,7 +376,9 @@ table holds; every success there executed at least one call.
   classifiable pairs.
 
 For scale, not as a prediction: in #198's unit 1 run, 37 of 120 agent attempts had no
-executed tool call, and none had a provider failure.
+executed tool call, and none had a provider failure. This is a descriptive baseline read
+before any native run. It is not a gate result, and the rule is never applied to #198
+retroactively.
 
 **The rest of the rule:**
 - **R2, unchanged:** no track × language group's failures rise by 16 or more, at 10 runs
@@ -458,6 +461,32 @@ None of these changes in this ADR, its implementation or its experiment:
 - No database change.
 - `ModelProvider` and its `generate` are unchanged. The core types that do change are
   named in §4.1 and §4.2.
+
+## 10. The governance sequence
+
+Recorded after the second review (2026-10-03), which approved this draft's methodology for
+the next governance step and authorized nothing else. Each step waits for the one before:
+
+1. This ADR defines the proposed experiment and its predicate (done, as a draft).
+2. A governance decision: is `NO_EXECUTED_TOOL_CALL` an admissible primary gate?
+3. If it is, ADR-023 amendment 2 formally records the rule, before any native run.
+   ADR-023 amendment 1 is not changed by this ADR, and amendment 2 is not written
+   merely because this ADR proposes it.
+4. D4, the run count, under the accepted rule.
+5. The implementation is authorized (D1, D2).
+6. Only the approved native capability is implemented.
+7. The experiment runs.
+8. The pre-registered verdict is applied mechanically.
+
+| Decision | State after the second review |
+|---|---|
+| D1, the implementation shape | ready for an authorization decision |
+| D2, the system text | ready for an authorization decision |
+| D3, amendment 2 and the formal measure | required before any formal gate |
+| D4, the run count | deferred until D3 |
+| A change to ADR-023 | not yet |
+| Implementation, a rig run | not authorized |
+| Merging this ADR | not yet, if merging would imply authorizing implementation |
 
 Current authorization boundary (2026-10-03, the owner's words summarized): the template
 check, the provider audit, the OSS audit, and writing this ADR as a draft are authorized.
