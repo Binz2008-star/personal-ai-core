@@ -657,21 +657,6 @@ variance stated." This amendment does that.
 Once approved, the rule becomes a mode of `bench.compare` that prints the verdict. That is
 a separate unit; until then the rule is applied by hand, with the arithmetic above.
 
-**Built (#203):** `python -m personal_ai_core.app.bench.compare BASELINE CANDIDATE --unit N`
-prints the descriptive report and then the verdict (`app/bench/verdict.py`; exit 0 PASS, 1
-FAIL, 3 NOT READABLE). It holds the numbers above and `tests/unit/test_bench_verdict.py`
-re-derives them. Three readings of the text, stated so they can be checked:
-- "No hang" is read as a complete file: an end record, and every task × language × run
-  exactly once. A hung run is stopped and never continued by hand, so it leaves neither.
-- R0 also requires the run count D1 fixed: 10 per side, 120 attempts per group. The
-  5-run files on disk get no verdict.
-- One narrowing: a digest change that only a documented fix explains (ADR-022 §10) is not
-  verified by the code. It reads NOT READABLE and is left to be read by hand. The code is
-  never looser than the rule.
-
-A unit with no declared target class, ADR-024's included, gets no verdict until one is
-declared before its runs.
-
 ### Decided (2026-10-03)
 
 The owner, in the lead session, in these words: "موافق على 191" ("I approve 191"),

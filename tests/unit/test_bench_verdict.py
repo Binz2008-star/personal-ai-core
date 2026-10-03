@@ -247,7 +247,8 @@ def test_without_unit_the_command_decides_nothing(tmp_path):
 
 
 def test_a_unit_without_a_declared_target_has_no_verdict(tmp_path):
-    """ADR-024's units declare none yet: a target chosen after the data is not R1."""
+    """ADR-024's units have none: a target chosen after the data is not R1, and only a
+    separately authorized amendment, before the runs, could declare one."""
     base, cand = _write(tmp_path, "a.jsonl", _lines()), _write(tmp_path, "b.jsonl", _lines())
     with pytest.raises(SystemExit):
         main([str(base), str(cand), "--unit", "A"], stdout=io.StringIO())

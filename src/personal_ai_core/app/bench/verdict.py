@@ -23,8 +23,10 @@ R1 target. The class each control targets, declared before its runs: unit 1
    class 1, unit 2 class 3, unit 3 class 2. Over agent attempts paired by
    (task, language, run), attempts leaving the class must outnumber attempts
    entering it by a one-sided exact sign test at 5% (D3): P(X >= leaving) <=
-   0.05, X binomial over the attempts that moved, p = 1/2. A control without a
-   declared class has no R1, and so no verdict, until one is declared.
+   0.05, X binomial over the attempts that moved, p = 1/2. A control the
+   amendment declares no class for -- ADR-024's units A and B among them, as
+   the owner accepted on 2026-10-03 -- has no R1 and so no verdict. Only a
+   separately authorized amendment, made before its runs, could give it one.
 R2 no regression. For each of the four groups track x language (D1 (b)), a
    rise in failures of 16 or more is a regression (family-wise 8.73% at the
    worst base rate, 87.3% power for 50% -> 70%, D2). Both tracks and both
@@ -60,7 +62,7 @@ FAMILY_TARGET = 0.10            # ADR-020 amendment 1, which the amendment follo
 SIGN_TEST_ALPHA = 0.05          # D3
 GROUPS = (("agent", "en"), ("agent", "ar"), ("knowledge", "en"), ("knowledge", "ar"))
 # R1: the class each control targets, declared in the amendment before any of
-# its runs. ADR-024's units have none yet.
+# its runs. ADR-024's units have none (owner-accepted finding, 2026-10-03).
 TARGETS = {"1": "answered_without_executing", "2": "refused_commands",
            "3": "executed_unverified"}
 
