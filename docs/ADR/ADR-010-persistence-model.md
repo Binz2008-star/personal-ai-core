@@ -1,6 +1,9 @@
 # ADR-010 — Persistence model
 
-**Status:** PROPOSED — design only. Not accepted. No implementation authorized.
+**Status:** ACCEPTED AS BUILT (owner, 2026-10-03, OD-10) · its recommendation D+B is the
+default durable slice (SQLite, #42, wired #44) · for the production server backend it is
+superseded by ADR-016 (Option C, accepted 2026-09-25). See *Status (2026-10-03)* at the end.
+*History: proposed as design only, not accepted, no implementation authorized.*
 *Reconciliation note (WP-G1): the recommended option D+B was since built — SQLite
 (#42, wired #44). Building it did not accept this ADR, which remains PROPOSED.*
 
@@ -293,3 +296,17 @@ Its scope is durable persistence. It does not gate, sequence or authorize Phase 
 Phase 5 remains NOT AUTHORIZED / DESIGN NOT STARTED independently of it. Implementation
 of any option requires separate owner authorization, and the `Event.payload`
 prerequisite has to be resolved before durable backend work begins.
+
+## Status (2026-10-03)
+
+Accepted as built, by the owner, closing ARCHITECTURE.md OD-10 for this ADR.
+
+- **What is accepted:** the recommendation D+B as it was built: a durable store for what
+  cannot be rebuilt (SQLite, #42; wired as `build_persistent_service`, #44), knowledge
+  left in memory and rebuilt by re-ingestion. SQLite is the default.
+- **What supersedes it:** ADR-016 (accepted 2026-09-25) chose Option C, PostgreSQL/Neon,
+  for the production server backend (`build_server_service`). Where the two differ,
+  ADR-016 governs the server slice and this ADR the default one.
+- **Unchanged:** the "Decision: None" section above is history. The `Event.payload`
+  prerequisite it names was met by #41.
+

@@ -78,8 +78,8 @@ SINCE dff472c (2026-10-01), LIVE IN pac
 - ADR-020, the candidate-model gate: design merged (5d2b2a3), D1-D4 approved;
   not built yet, pac unchanged by it.
 
-Evaluation (ADR-013 harness; the harness is PROPOSED, it has been run many
-times):
+Evaluation (ADR-013 harness; ACCEPTED 2026-10-03, run many times since
+2026-10-01):
 - contract_v1, 22 cases. Best runs: 22/22 with the guard (Ollama, af574a2)
   and 22/22 on llama.cpp with the no-foreign-script grammar (5ac65b2), each a
   single run. Results are in evals/results/.
@@ -115,7 +115,10 @@ Phase 0 — HISTORICAL / COMPLETED
   Note: Historical foundation; no separate acceptance gate.
         Evidence: docs/COMPONENT_EXTRACTION_MATRIX.md
 
-Phase 1 — COMPONENTS COMPLETE / NOT ACCEPTED
+Phase 1 — ACCEPTED (owner, 2026-10-03, with ADR-011 and ADR-012; ARCHITECTURE.md OD-10)
+  Before acceptance this line read COMPONENTS COMPLETE / NOT ACCEPTED, and the text
+  below is that record, kept as history: every step of the gate up to owner
+  acceptance had been done; acceptance was the step left, and it is now taken.
   Scope: Core foundation vertical slice —
          User → Session → Message → ModelProvider → Response → Event
   Status: all five playbook components are now built. Identity was the last,
@@ -672,6 +675,10 @@ claim written in one place with nothing that notices it going stale.
   #190 3bbb9ad  docs: record the ADR-023 measurement (#189); handoff at 05a9581
   #192 ccfc88a  docs: why English fell with unit 2, read without a cause;
                which call failed, from token counts
+  #193 1861756  eval(bench): record the text of every reply the agent loop
+               refused (handoff 6b2, owner-approved)
+  #194 3a124fc  docs(adr): OD-10 decided -- six PROPOSED ADRs accepted, Phase 1
+               accepted
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -699,7 +706,8 @@ Agent deterministic control layer: ACCEPTED (scoped) -- ADR-004 Amendment A1,
   Model-driven behaviour: NOT evaluated, NOT accepted.
   Runtime context behaviour: NOT measured, NOT accepted.
   AUTHORIZED FOR FURTHER EXPANSION: NO, for every Agent component.
-ADR-017 (events -> feedback -> learning): PROPOSED, not accepted.
+ADR-017 (events -> feedback -> learning): PROPOSED, not accepted (kept so at
+  the 2026-10-03 OD-10 review: its section 13 still holds open owner decisions).
   Persistence slice (feedback records, SQLite repository, additive unique
   index, read-only audit): IMPLEMENTED, authorized 2026-09-29, verified on
   SQLite only. B1 (PR #79) records feedback from pac.
@@ -707,7 +715,7 @@ ADR-017 (events -> feedback -> learning): PROPOSED, not accepted.
   open item 4). Observation (Unit 2): IMPLEMENTED as a pure function,
   owner-authorized 2026-09-30; its only consumer is `pac --observations`,
   a read-only display (D4). Nothing persisted; no turn is affected.
-Evaluation (ADR-013): PROPOSED, not accepted. Harness v0: BUILT,
+Evaluation (ADR-013): ACCEPTED 2026-10-03 (OD-10). Harness v0: BUILT,
   owner-authorized 2026-09-30 (PR #91); read-only context baseline tool
   (PR #92). Run on the rig 2026-10-01 at dff472c, 17 cases each, results in
   evals/results/ committed unmodified:
@@ -904,8 +912,8 @@ A phase becomes accepted only after:
 Design → Authorization → Implementation → Tests → Invariant review → Git verification → Owner acceptance
 
 Phase 0: HISTORICAL / COMPLETED (evidence freeze ec04071; no separate gate)
-Phase 1: COMPONENTS COMPLETE / NOT ACCEPTED — identity built (PR #39); ADR-011 and
-         ADR-012 PROPOSED. See the PHASE STATUS SUMMARY above and
+Phase 1: ACCEPTED 2026-10-03 — identity built (PR #39); ADR-011 and ADR-012
+         ACCEPTED 2026-10-03. See the PHASE STATUS SUMMARY above and
          PHASE_1_RECONCILIATION.md.
 Phase 2: ACCEPTED (0a8d7986c4d6a0281f8e8d7f0f2c1c2a8d3fe511)
 Phase 3: ACCEPTED / MERGED (f090100e933d1a6ff18d6e546b384b2e727b2889)
@@ -1137,7 +1145,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at ccfc88a)
+NEXT SESSION HANDOFF (updated 2026-10-03, main at 1861756)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1159,8 +1167,28 @@ WHERE THINGS STAND (2026-10-03)
     main was df05a66; then #187 (that record), #188 (the state script says "at
     the limit" where a PR would fail) and #189 (the ADR-023 measurement, below)
     merged; main was 05a9581; then #190 (that record) and #192 (the English
-    reading, below) merged; main is ccfc88a. Open pull request: #191 (draft,
-    ADR-023 amendment 1, the deciding rule; waits on the owner's D1-D4).
+    reading, below) and #193 (refused-reply text, 6b2) merged; main is
+    1861756. Open pull request: #191 (draft, ADR-023 amendment 1, the
+    deciding rule; waits on the owner's D1-D4).
+  - ADR STATUS REVIEW (OD-10), decided by the owner 2026-10-03 in the lead
+    session, in these words: "موافق على التوصيات" ("I accept the
+    recommendations"), answering the lead's table of nine PROPOSED ADRs:
+    ADR-011, 012 (with Phase 1), 013, 018 and 019 ACCEPTED; ADR-010 accepted
+    as built, superseded by ADR-016 for the server backend; ADR-020's status
+    line corrected to the acceptance it reached in #154; ADR-017 stays
+    PROPOSED (its section 13 is open, including a production schema write);
+    ADR-021 stays PROPOSED / DEFERRED (nothing built).
+  - RE-RUN OF #189 AT 1861756 (on the rig 2026-10-03, owner-ordered; forensic,
+    decides nothing): the same two runs, now recording refused-reply text.
+    Before it was read, an instrument check was fixed:
+    `python -m personal_ai_core.app.bench.replication EARLIER LATER`. Eight
+    cells (track x language, per pair); a cell flags at a success difference
+    of 15 or more (family-wise false alarm 6.1% at the worst base rate,
+    ADR-020's arithmetic); instrument fields and weights must match. A flag
+    means the rig differed and nothing across the pair is read until
+    explained; no flag does not prove the rig was the same (a 20% -> 40% move
+    is caught about 31% of the time). The differences are recorded as the
+    observed run-to-run spread, which ADR-023 amendment 1 (#191) can use.
     Open issue: #76 (the 2026-09-25
     ADR-017 review checkpoint; the persistence it asked for is built and
     tested, 55 PostgreSQL tests in CI -- the owner closes it).
@@ -1654,12 +1682,14 @@ The ADRs in docs/ADR/ are the decision record. That directory is authoritative;
 this file does not enumerate them, because an enumeration here is a second source of
 truth that goes stale the moment one is added.
 
-Not every ADR is accepted. PROPOSED, not accepted:
-- ADR-010 (persistence) — recommends without selecting; nothing is selected.
-- ADR-011 (identity layer contract) — fixes the shape of the contract;
-  authorises no implementation.
+Not every ADR is accepted. PROPOSED, not accepted (as of the OD-10 review,
+2026-10-03, which accepted ADR-010 as built, ADR-011, 012, 013, 018 and 019, and
+corrected ADR-020's status line to the acceptance it reached in #154):
+- ADR-017 (events -> feedback -> learning) — its section 13 holds open owner
+  decisions, among them how an existing PostgreSQL database acquires the
+  feedback index, which is a production schema write.
 - ADR-021 (grammar during decoding) — PROPOSED / DEFERRED until after the
-  capability baseline; Phases A-C only when revisited.
+  capability baseline; Phases A-C only when revisited. Nothing is built.
 - ADR-023 (planning, execution/test, verification) — ACCEPTED 2026-10-02 with
   its first unit specified (section 8); no other control is authorized.
 

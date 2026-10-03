@@ -1,6 +1,7 @@
 # ADR-012 — Identity text
 
-**Status:** PROPOSED · built in #39 · not accepted
+**Status:** ACCEPTED (owner, 2026-10-03, OD-10) · the text as amended (amendment 1,
+2026-10-01) · built in #39. The list below is history; see *Status* at the end.
 
 - Identity implementation: built in #39 (see `PROJECT_STATE.md`, Phase 1). Building it
   does not accept this ADR, which remains PROPOSED.
@@ -209,10 +210,17 @@ preamble is a separate text, and is a separate change.
 
 ## Status
 
-**Identity text:** PROPOSED — not accepted
+**Identity text:** ACCEPTED by the owner, 2026-10-03 (ARCHITECTURE.md OD-10), with
+amendment 1's language rule in place of the original *Language and register*
 
-**Identity contract (ADR-011):** PROPOSED — not accepted
+**Identity contract (ADR-011):** ACCEPTED 2026-10-03
 
-**Identity implementation:** built in #39; this ADR remains PROPOSED, not accepted
+**Identity implementation:** built in #39
 
-**Phase 1:** NOT COMPLETE
+**Phase 1:** ACCEPTED 2026-10-03
+
+**Still open, unchanged by acceptance:** whether rules 3 and 5 also deserve a code-level
+guard (*What this ADR does not decide*). Rule 3 has one since: ADR-018.
+
+*Before 2026-10-03 this section read: text and contract PROPOSED, not accepted; Phase 1
+NOT COMPLETE.*

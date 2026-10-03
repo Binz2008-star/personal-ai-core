@@ -1,9 +1,12 @@
 # ADR-020 — Evaluating a candidate model
 
-**Status:** PROPOSED · writing authorized by the owner 2026-10-01 ("موافق على ADR-020") ·
+**Status:** ACCEPTED (2026-10-02, by the rule the owner set in amendment 1: the acceptance
+self-comparison #154 PASSED, and still passes rescored under contract-checks-v3) · this line
+corrected 2026-10-03 (OD-10); it read PROPOSED, "acceptance self-comparison pending", after
+the acceptance had happened · history: writing authorized by the owner 2026-10-01 ("موافق على ADR-020") ·
 §8 decided 2026-10-01 ("موافق على الأربعة": D1 authorized, D2 and D3 as written, D4 required) ·
 units 1-3 built · D2 and D3 replaced by amendment 1 (2026-10-01) after unit 4 · acceptance
-self-comparison pending
+self-comparison PASSED (#154)
 
 - Settles: `ARCHITECTURE.md` OD-8, "how a candidate model is named and admitted".
 - Serves:

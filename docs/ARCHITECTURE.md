@@ -264,7 +264,7 @@ Marked conflicts with ADRs:
 |---|---|
 | ADR-003 | "distinct storage" and "written only by the promotion gate": events share one table, and the pipeline writes |
 | ADR-002 | "name appears only in `ModelRegistry`": it is in `core/config.py` |
-| ADR-010–013, 017–019 | status PROPOSED while the code is in use (OD-10) |
+| ADR-017 | status PROPOSED while its persistence slice, Unit 2 and `pac --observations` are in use (its §13 lists what stays open) |
 
 ## 12. Open decisions
 
@@ -279,4 +279,4 @@ Marked conflicts with ADRs:
 | OD-7 | Whether assistant or agent text may be a memory candidate source |
 | OD-8 | How a candidate model is named and admitted. Decided: ADR-020 (D1-D4 approved 2026-10-01) |
 | OD-9 | Whether ungated configuration overrides are acceptable |
-| OD-10 | Accept the built-but-proposed ADRs, or let this document supersede them |
+| OD-10 | Accept the built-but-proposed ADRs, or let this document supersede them. Decided by the owner 2026-10-03 ("موافق على التوصيات"): ADR-011, 012, 013, 018 and 019 accepted; ADR-010 accepted as built, superseded by ADR-016 for the server backend; ADR-020's status line corrected to the acceptance it reached in #154; ADR-017 stays PROPOSED (§13); ADR-021 stays PROPOSED / DEFERRED (nothing built) |
