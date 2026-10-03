@@ -1,6 +1,10 @@
 """Comparing two benchmark result files (ADR-023 §5): what moved, never a verdict.
 
     python -m personal_ai_core.app.bench.compare BASELINE CANDIDATE [--tasks evals/bench]
+    python -m personal_ai_core.app.bench.compare BASELINE CANDIDATE --unit 1
+
+With `--unit`, the descriptive report is followed by the verdict of ADR-023
+amendment 1 for that unit (verdict.py); this module itself still decides nothing.
 
 Descriptive on purpose. ADR-023 §5 sets no target score and requires the rule that
 decides "better" to be written down before a comparison is read. This prints the
@@ -234,8 +238,8 @@ def compare(base: Side, cand: Side, tasks: Mapping[str, Task] | None = None) -> 
         _transitions(base, cand), [""],
         _falls(base, cand), [""],
         ["Not computed here",
-         "  false rejections: a rejected answer is recorded as a count only, so whether its",
-         "    task would have passed cannot be read from the file.",
+         "  false rejections: counted by `--unit` (the verdict) and by refusals.py, from the",
+         "    refused-reply text a file records since #193.",
          "  evidence-backed completion and verification rate: no control builds them yet (§2.3).",
          "",
          "This prints what changed. It does not say whether the change is an improvement:",
@@ -251,6 +255,13 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--tasks", type=Path, default=DEFAULT_TASKS,
                         help="the task files, to check that a changed digest is only the contract")
+    # Imported here: verdict.py builds on this module.
+    from .verdict import EXIT_CODES, TARGETS, decide, report
+
+    parser.add_argument("--unit", choices=sorted(TARGETS),
+                        help="also print the verdict of ADR-023 amendment 1 for this unit, "
+                             "whose target class it declared (exit 0 PASS, 1 FAIL, "
+                             "3 NOT READABLE)")
     args = parser.parse_args(argv)
     out = stdout if stdout is not None else sys.stdout
     try:
@@ -264,7 +275,11 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     except (OSError, TaskError, ValueError):
         tasks = None
     print(compare(base, cand, tasks), file=out)
-    return 0
+    if args.unit is None:
+        return 0
+    verdict = decide(base, cand, args.unit, tasks)
+    print("\n" + report(verdict), file=out)
+    return EXIT_CODES[verdict.outcome]
 
 
 if __name__ == "__main__":
