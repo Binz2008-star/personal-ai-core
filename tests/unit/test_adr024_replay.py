@@ -78,7 +78,8 @@ def _recover(text: str) -> tuple[str, dict] | None:
         try:
             with warnings.catch_warnings():
                 # A backslash the reply did not mean as an escape is not news.
-                warnings.simplefilter("ignore", (DeprecationWarning, SyntaxWarning))
+                warnings.simplefilter("ignore", DeprecationWarning)
+                warnings.simplefilter("ignore", SyntaxWarning)
                 value = ast.literal_eval(span)
         except (ValueError, SyntaxError):
             return None
