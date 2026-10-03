@@ -1295,15 +1295,23 @@ WHERE THINGS STAND (2026-10-02)
     debugger); 5 were `git commit` with a single-quoted message, which the
     policy refuses on Windows; the other 18 were pipes and `||`, `dir`/`type`/
     `cat`/`find` forms, `git push`, `pip install`, `nano`, an inline
-    `python -c`. Class 2 is not one problem: of its 43, 17 stopped on the budget
-    (10 of those neither edited a file nor ran one successful tool call) and 26
-    answered; 27 carry `not_tested_after_edit`, which is the most a "tested
-    after the last edit" gate could touch. What it means for the ORDER of the
-    controls: the failure budget often runs out on environment mismatch before
-    verification comes up, so unit 2 should be measured before unit 3 is
-    designed further, and unit 3's reach is bounded by those 27. It also needs
-    the protocol change the owner reserved for separate review (position 2
-    below). That is why unit 3 is not started.
+    `python -c`. Class 2 is not one problem: of its 43, 17 stopped on the
+    budget (10 of those neither edited a file nor ran one successful tool call)
+    and 26 answered. The `not_tested_after_edit` signal is on 27 of the 43, but
+    27 is NOT the reach of a "tested after the last edit" gate: the signal also
+    fires when a run only ran a shell command (a test run counts as editing to
+    the signal) and for tasks whose workspace has no test command. Counted
+    properly (the same test file): 91 of the 111 failures never edited anything
+    -- units 1 and 2's ground; 20 edited, and a test-after-edit gate can act on
+    7 of them: 5 that answered untested in a workspace with a test command, and
+    2 that answered over a failing test (which needs a rule about outcomes).
+    The other 9 edited in a task with no test command; what they lack is
+    evidence of the file or the commit, which is the structured claim (section
+    2.3) -- the protocol change the owner reserved for separate review
+    (position 2 below). What it means for the ORDER of the controls: units 1 and
+    2 address by far the larger share, and unit 3 is small on this task set (at
+    most 7 of 111 for a loop-only gate). That is why unit 3 is not started, and
+    why it stays behind the measurement.
   - ADR-023 (planning -> execution/test -> verification): ACCEPTED
     2026-10-02 (#167); built so far: the contract (#172) and the unit 1
     gate (#174), not yet measured. It records the owner's six design
