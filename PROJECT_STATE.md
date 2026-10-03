@@ -1464,7 +1464,19 @@ WHERE THINGS STAND (2026-10-03)
             unchanged. Not yet run: the next rig measurement carries it. It
             is what explains b, and what makes false rejections countable,
             which ADR-023 amendment 1 (PROPOSED, #191) requires before any
-            default changes (R3, D4).
+            default changes (R3, D4). Reviewed boundary: the field is named
+            only in agent/loop.py and app/bench/runner.py (a test enforces
+            it), so no path to memory, feedback, events or the CLI; a secret
+            in a refused reply is withheld before the record, including
+            across the clip boundary; stripping the field leaves every
+            reading of a file the same. Use of the captured text: read-only
+            forensics after merge; it changes no unit, prompt or behaviour
+            by itself.
+            Finding while testing it (not acted on, owner's call): the
+            verifier's secret patterns start at a word boundary, so a token
+            glued to a letter ("xghp_...") is not recognised -- in a refused
+            reply and in an accepted answer alike. Widening it is a
+            precision trade for its own PR.
          c. Then the owner decides the next experiment (unit 3, a change to
             the environment text, or the default for action_required). Unit 3
             reaches at most 7 of the baseline's 111 failures and needs the

@@ -182,6 +182,24 @@ def test_the_outcome_keeps_the_text_of_each_refused_reply(ws):
     assert "commit the release" not in payloads and "Committed." not in payloads
 
 
+def test_keeping_refused_replies_did_not_change_what_events_carry(ws):
+    """Event semantics unchanged: the same event types, and the finish event's
+    payload has exactly the keys it had before refused replies were kept."""
+    events = InMemoryEventRepository()
+    script = Script("not json", '{"answer": "early"}', '{"tool": "list_directory"}',
+                    '{"answer": "done"}')
+    loop(ws, script, events=events).run(
+        AgentTaskContract(task_text="change the workspace", action_required=True),
+        session_id="s1",
+    )
+    recorded = events.list_for_session("s1")
+    assert [e.type for e in recorded] == [
+        EventType.AGENT_ANSWER_REJECTED, EventType.AGENT_STEP, EventType.AGENT_FINISHED]
+    assert set(recorded[-1].payload) == {
+        "finished", "steps", "protocol_errors", "stopped_reason", "touched_files",
+        "action_rejections", "action_required"}
+
+
 def test_a_run_with_nothing_refused_keeps_nothing(ws):
     script = Script('{"tool": "list_directory"}', '{"answer": "done"}')
     outcome = loop(ws, script).run("list it", session_id="s1")
