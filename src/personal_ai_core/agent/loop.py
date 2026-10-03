@@ -34,6 +34,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
@@ -249,7 +250,9 @@ def parse_reply_lenient(
     if not isinstance(value, dict):
         raise strict_error
     answer = value.get("answer")
-    if isinstance(answer, (int, float)) and not isinstance(answer, bool):
+    # A finite number only: NaN and Infinity are not an answer anyone wrote.
+    if (isinstance(answer, (int, float)) and not isinstance(answer, bool)
+            and math.isfinite(answer)):
         value = {"answer": str(answer)}
         rules.append("numeric_answer")
     tool, arguments = value.get("tool"), value.get("arguments")

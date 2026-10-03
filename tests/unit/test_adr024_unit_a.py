@@ -90,6 +90,9 @@ def test_a_reply_the_strict_parser_accepts_is_returned_untouched_and_unnamed():
 
 @pytest.mark.parametrize("reply", [
     '{"answer": true}',                                       # a bool is not a number here
+    '{"answer": NaN}',                                        # not a finite number
+    '{"answer": -Infinity}',
+    "{'answer': b'4'}",                                       # bytes: no JSON text
     '{"tool": "write_file", "arguments": "VERSION"}',         # two required fields: ambiguous
     'write_file(VERSION, "1.5.0")',                           # function-call syntax: not read
     '{"tool": "write_file", "arguments": {"path": "a", "content": "{"x": 1}"}}',  # broken content
