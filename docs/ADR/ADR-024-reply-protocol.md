@@ -2,7 +2,8 @@
 
 **Status:** PROPOSED (2026-10-03) · **unit A authorized by the owner 2026-10-03** ("ابدأ A"),
 built off by default (#202) · units B and C not authorized · each unit is measured before
-it is adopted
+it is adopted · units A and B have **no formal gate** under ADR-023 amendment 1 (§5.1, a
+finding the owner accepted 2026-10-03)
 
 | Stage | State |
 |---|---|
@@ -10,12 +11,14 @@ it is adopted
 | Evidence | the refused-reply text of #198, read in #199; the replay in §3 is pinned by `tests/unit/test_adr024_replay.py` |
 | Authorized | **unit A** (D1), by the owner, 2026-10-03, in the lead session: "ابدأ A" ("start A"), with the lead's order (D4: A first). D2 and D3 are open |
 | Implemented | **unit A**, off by default (#202): `parse_reply_lenient` in `agent/loop.py`, `build_agent(lenient_protocol=...)`, the benchmark's `--lenient-protocol`. B and C: no |
+| Verified | **unit A: mechanically validated; end-to-end effect not formally gated under the current ADR-023 rule** (§5.1). Every rule is tested, and the 98 recorded texts of #198 are replayed through the code |
 
 - Serves: ADR-023 (plan, execute, verify), whose §8.2 and §7 reserve any change to what
   the model sees, or to the protocol it answers in, for separate review. This is that
   review.
-- Depends on: ADR-023 amendment 1 (#191, ACCEPTED 2026-10-03), the rule that decides a
-  comparison. A measurement of these units is read by it.
+- Relation to ADR-023 amendment 1 (#191, ACCEPTED 2026-10-03), the rule that decides a
+  comparison: it declares R1 targets only for ADR-023's units, so it gives these units no
+  formal verdict (§5.1).
 
 ## 1. The problem, as measured
 
@@ -104,7 +107,40 @@ a string (`"...".strip()`), which no rule can read without guessing.
   categories of #195.
 - Guard: every lenient parse in unit A is listed and read. A parse that ran something the
   reply did not plainly mean is a defect, whatever the score says.
-- Read under ADR-023 amendment 1 (#191, accepted 2026-10-03).
+- Not read under ADR-023 amendment 1 as a formal verdict: see §5.1.
+
+### 5.1 Methodological finding: no formal gate for units A and B
+
+Accepted by the owner on 2026-10-03, in the lead session: "أقبل النتيجة المنهجية كما
+عُرضت" ("I accept the methodological finding as presented"). The finding was asked for
+before any rig measurement, and none was run.
+
+- **The rule.** ADR-023 amendment 1's R1 reads: "The control's target class is declared
+  before the runs: unit 1 → class 1, unit 2 → class 3, unit 3 → class 2." It declares
+  targets for ADR-023's three units only.
+- **Unit A is not formally measurable under it.**
+  - No target class is specified for unit A by the accepted rule.
+  - The classes the rule draws on are the attempt-level groups of ADR-023 §1.2. None is
+    unit A's target: unit A acts on single replies inside attempts that end in any class.
+  - The closest by name, "Protocol only", is defined in §1.2 but declared as no unit's
+    target.
+  - Choosing a target now, after #198 was read, would be post-hoc target selection. The
+    lead had proposed "an attempt with at least one protocol error" after computing #198's
+    counts; that proposal is withdrawn.
+- **So unit A cannot receive a formal PASS or FAIL** under ADR-023 without a separately
+  authorized amendment, made before its runs.
+  - Without R1, R4 cannot give PASS.
+  - Read literally, "FAIL otherwise" would fail every readable comparison regardless of
+    the data, which is not a verdict.
+  - R2 can still be computed, but only descriptively.
+- **Unit A's record: mechanically validated; end-to-end effect not formally gated under
+  the current ADR-023 rule.**
+- **Unit B has no pre-declarable target class under the existing rule either.** It acts
+  on `write_file` calls whose content breaks the JSON, inside attempts whose outcome class
+  it does not determine. Any target for it would also need a separately authorized
+  amendment, made before its runs. It also needs D2, because it adds text the model sees.
+- **In code:** `bench.compare --unit` (`app/bench/verdict.py`) accepts only units 1, 2
+  and 3, and refuses `--unit A`.
 
 **What a measurement of unit A alone can show** (written with the unit, before any run of
 it; pinned by `tests/unit/test_adr024_unit_a.py`):
@@ -113,20 +149,21 @@ it; pinned by `tests/unit/test_adr024_unit_a.py`):
   which failed. In unit 1 + 2, it occurs in 9 attempts, 7 of which failed.
 - So even if every touched attempt had passed, agent success moves by at most 6 of 120,
   about 5 points. The deciding rule is powered for 20 (D2).
-- A 10-run rig measurement of unit A alone (about two hours) can check R0 and R2: it
-  broke nothing. It is not expected to show an improvement. R1 would also need a target
-  class declared for unit A; the amendment declares one only for ADR-023's units.
-- **The lead's recommendation:** do not spend a rig measurement on unit A alone. Unit A's
-  correctness is established offline: every rule is tested, and the 98 recorded texts
-  are replayed through the code. Every lenient read is listed in the record of any run
-  that turns it on, for audit. Spend the rig on unit B (D2), the unit aimed at 37 of 98,
-  measured with unit A on in both sides.
+- A 10-run rig measurement of unit A alone (about two hours) could describe R0 and R2
+  (that it broke nothing), but could give no formal verdict (§5.1). It is not expected to
+  show an improvement.
+- Unit A's correctness is established offline: every rule is tested, and the 98 recorded
+  texts are replayed through the code. Every lenient read is listed in the record of any
+  run that turns it on, for audit.
+- The lead's earlier recommendation, to spend the rig on unit B measured with unit A on in
+  both sides, assumed B could be gated. Under §5.1 it cannot be without an amendment, so
+  that recommendation no longer stands as written. What to measure next is the owner's.
 
 ## 6. Decisions the owner is asked for
 
 **Decided 2026-10-03:** D1 (unit A) authorized, and D4's order with it: A first. D2 (unit
 B) and D3 (unit C) remain open. A decision on adopting unit A in `pac --agent` is not part
-of D1: it is taken on a measurement read under ADR-023 amendment 1.
+of D1, and no formal verdict under ADR-023 amendment 1 can support it (§5.1).
 
 - **D1.** Authorize unit A (parser only, no text the model sees).
 - **D2.** Authorize unit B (one protocol sentence, and the fenced-content form).

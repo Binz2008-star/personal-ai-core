@@ -1593,12 +1593,17 @@ WHERE THINGS STAND (2026-10-03)
             JSON, C tool-specific error feedback). Unit A authorized by the
             owner 2026-10-03 ("ابدأ A") and built off by default (#202:
             `--lenient-protocol` on the benchmark, `lenient_parses` on the
-            outcome and the record); B and C open. Measuring A alone is not
-            recommended: in #198 it touches 6 of 120 attempts under unit 1
-            (at most 5 points of success), where the accepted rule is powered
-            for 20 (ADR-024 §5, pinned). The lead's recommendation: the
-            owner's D2 (unit B, aimed at 37 of 98), measured with A on in
-            both sides. The other options stand:
+            outcome and the record); B and C open. Methodological finding,
+            accepted by the owner 2026-10-03 before any rig run (ADR-024
+            §5.1): ADR-023 amendment 1 declares R1 targets only for ADR-023's
+            units 1-3, so units A and B have no formal PASS/FAIL under it
+            without a separately authorized amendment made before their runs;
+            choosing a target now, after #198 was read, would be post-hoc.
+            Unit A: mechanically validated; end-to-end effect not formally
+            gated under the current ADR-023 rule. In #198 it touches 6 of 120
+            attempts under unit 1 (at most 5 points of success). No rig
+            measurement of A or B is planned; what to measure next is the
+            owner's. The other options stand:
             unit 3 (reaches at most 7 of the baseline's 111 failures), a
             change to the environment text, the default for action_required.
   - Rules learned today: update this header in any PR that finds it 2 or more
