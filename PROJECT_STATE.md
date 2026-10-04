@@ -705,6 +705,10 @@ claim written in one place with nothing that notices it going stale.
                tool-call channel) and ADR-023 amendment 2
   #206 9d1653b  feat(core): an optional native tool-call capability and its
                Ollama adapter (ADR-025, PR 1 of 2; no behaviour change)
+  #207 2d9b569  feat(agent): the native tool-call channel behind --native-tools,
+               and its verdict (ADR-025, PR 2 of 2; off by default)
+  #208 5d5a416  eval: ADR-025 text arm and native arm at 2d9b569 (480 runs
+               each); PASS, not adopted
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1171,7 +1175,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-04, main at 9d1653b)
+NEXT SESSION HANDOFF (updated 2026-10-04, main at 5d5a416)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1181,7 +1185,44 @@ holds only what git cannot know. tests/unit/test_handoff_freshness.py fails CI
 when the header above is more than 3 merges behind main: update it in the next
 PR, as with the ledger.
 
-WHERE THINGS STAND (2026-10-03)
+WHERE THINGS STAND (2026-10-04)
+  - MEASURED (#208, ADR-025 §12): the native tool-call channel against the text
+    protocol, on the rig at 2d9b569, 10 runs per side, 0 provider errors.
+    Verdict by the rule fixed before the runs: PASS (R1: 53 attempts left
+    NO_EXECUTED_TOOL_CALL, 30 entered it, p = 0.0076; R2: no group regressed).
+    The owner, 2026-10-04: "ADR-025: مُقاس — PASS وفق الهدف المحدد مسبقاً
+    (NO_EXECUTED_TOOL_CALL) — غير معتمد". Native tool calls stay opt-in
+    (--native-tools); native_tools=False stays the default; merging #208
+    recorded the evidence and is not adoption. Agent success 46 -> 54 of 240
+    is not a gated result. Read after the verdict, and kept as "observed
+    evidence / likely mechanism, not yet a proven causal fix" (the owner's
+    words): 82 native replies were lost between the model and the loop (the
+    model generated 14-1024 tokens, Ollama returned neither text nor a call;
+    71 attempts, 59 failed), and 25 calls written as `name {json}` were
+    refused as answers (9 attempts, all failed, 8 of them git-commit-release
+    en, which fell 5/10 -> 0/10). Every figure:
+    tests/unit/test_adr025_measurement_reading.py.
+  - NEXT (owner, 2026-10-04): (1) a DRAFT ADR-025 amendment only, for the two
+    defects above -- which defect, why a repair is not a retroactive
+    improvement of #208, how it is measured, what stays fixed, --native-tools
+    opt-in throughout; neither acceptance nor implementation is authorized.
+    (2) ADR-023 unit 3, verification before completion, ranks above any
+    default change. (3) Security fixes only when independently authorized
+    under the P0/P1 gate. Not authorized: native by default, any Boss change,
+    any widened permission.
+  - OUTSIDE THE REPOSITORY (2026-10-04, the rig): OpenCode left two local
+    commits on the main checkout's `main` (8ce4390 an edit_file tool and
+    environment_context=True for `pac --agent`; f4c6e7c a fetch_url redirect
+    refusal) and uncommitted "Wave 1" hardening (RunCommand protected
+    arguments, a fixed shell environment, a win32 shadow check, atomic
+    writes and rollback). The owner approved ("استلم الشغل") backing it up to
+    `wip/opencode-20261004` and returning the local main to origin/main; a
+    rig session stopped before any write because OpenCode and Codex were
+    still running. None of it is reviewed or merged; the environment_context
+    default is an owner decision under ADR-023, and edit_file changes the
+    benchmark's tool set. The same checkout holds files named for keys and
+    tokens (*.ps1, env.txt) written by an agent: the owner was told to check
+    them, move them out of the repository folder and rotate any real key.
   - Since 6d4fe15: #167 (ADR-023 accepted), #173 (the previous handoff),
     #174 (unit 1), #176 (the section 8.3 benchmark change), #175 (the record
     of those two), #177 (the comparison tool), #179 (README: the agent line
@@ -1212,10 +1253,10 @@ WHERE THINGS STAND (2026-10-03)
     (ADR-025 accepted as an experiment, and ADR-023 amendment 2; the owner
     approved the gate, the implementation and the rig measurement: "موافق على
     النقاط جميعها") and #206 (the native tool-call capability and its Ollama
-    adapter, no behaviour change) merged; main is 9d1653b. Open pull request:
-    the loop, `--native-tools` and the verdict predicate (ADR-025 PR 2 of 2).
-    Next: the rig measurement, text arm then native arm at one commit, 10 runs
-    each, read by `bench.compare --unit native-tools`.
+    adapter, no behaviour change) merged; main was 9d1653b. Then #207 (the
+    loop, `--native-tools` and the verdict predicate, ADR-025 PR 2 of 2)
+    merged; main was 2d9b569. Then #208 (the measurement, above) merged; main
+    is 5d5a416.
   - CANDIDATE-MODEL SCREEN (2026-10-03, outside the repository): run by Codex
     on the rig at 1861756, one pass of 10 agent tasks x 2 languages, its
     result files under C:\Users\loyal\pt\pac-candidate-eval-1861756\ and
