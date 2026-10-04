@@ -733,6 +733,7 @@ def build_agent(
     environment_context: bool = False,
     lenient_protocol: bool = False,
     native_tools: bool = False,
+    verify_completion: bool = False,
 ) -> AgentSlice:
     """The agent of AGENT_ARCHITECTURE.md, wired to the Boss model.
 
@@ -768,6 +769,11 @@ def build_agent(
     read from the response; each call still becomes an ordinary `ToolRequest`
     through the policy and the executor. The system text loses its JSON-format
     lines. It cannot be combined with `lenient_protocol`.
+
+    `verify_completion` (ADR-023 unit 3, §2.3 `tests_passed`) is OFF unless asked
+    for: when on, under a contract that requires action and names a test command,
+    the model is told the command, and an answer is accepted only once that exact
+    command has passed after the last change; a refused answer costs one failure.
     """
     if events is not None and session_exists is None:
         raise ValueError(
@@ -810,5 +816,6 @@ def build_agent(
         ),
         lenient_protocol=lenient_protocol,
         native_tools=native_tools,
+        verify_completion=verify_completion,
     )
     return AgentSlice(loop=loop, executor=executor, checkpoints=checkpoints, workspace=sandbox)

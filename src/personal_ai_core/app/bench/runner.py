@@ -27,6 +27,7 @@ import hashlib
 import io
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -174,18 +175,36 @@ def _signals(record: Mapping[str, Any], evidence: RunEvidence) -> list[str]:
     return signals
 
 
+def agent_test_command(task: Task) -> str | None:
+    """The task's supported test command, as the agent runs it (ADR-023 §2.3).
+
+    Taken from the task's own `command_passes` check, so the task files and
+    their digests are unchanged: `python -m pytest ARGS` becomes `pytest ARGS`,
+    the form `run_command` accepts (`python` is not an allowed executable,
+    `pytest` is). None for a task with no such check."""
+    for check in task.checks:
+        argv = list(check.get("argv") or ()) if check.get("type") == "command_passes" else []
+        if argv[:3] == ["python", "-m", "pytest"]:
+            return shlex.join(["pytest", *argv[3:]])
+        if argv[:1] == ["pytest"]:
+            return shlex.join(argv)
+    return None
+
+
 def _contract(task: Task, language: str) -> AgentTaskContract:
     """The contract the task file states (ADR-023 §8.3), in the run's language."""
     if task.action_required is None:
         raise ValueError(f"{task.id}: an agent task states action_required")
     return AgentTaskContract(task_text=task.instruction[language],
-                             action_required=task.action_required)
+                             action_required=task.action_required,
+                             test_command=agent_test_command(task))
 
 
 def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
                    workspace: Path, *, environment_context: bool = False,
                    lenient_protocol: bool = False,
-                   native_tools: bool = False) -> dict[str, Any]:
+                   native_tools: bool = False,
+                   verify_completion: bool = False) -> dict[str, Any]:
     workspace.mkdir(parents=True)
     materialize(task, workspace)
     confirm = BenchmarkConfirm()
@@ -199,7 +218,8 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
         agent = build_agent(settings, workspace=workspace, transport=log, confirm=confirm,
                             environment_context=environment_context,
                             lenient_protocol=lenient_protocol,
-                            native_tools=native_tools)
+                            native_tools=native_tools,
+                            verify_completion=verify_completion)
         outcome = agent.loop.run(_contract(task, language), session_id="bench")
         answer, steps = outcome.answer, outcome.steps
         record["stop"] = "answered" if outcome.finished else "budget"
@@ -219,6 +239,10 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
         if lenient_protocol:
             record["lenient_parses"] = [{"call": p.call, "rules": list(p.rules)}
                                         for p in outcome.lenient_parses]
+        # ADR-023 unit 3: answers refused for want of a passing test run;
+        # recorded only when the check is on.
+        if verify_completion:
+            record["verification_rejections"] = outcome.verification_rejections
         if outcome.environment is not None:
             record["environment"] = dict(outcome.environment)
     except ProviderError as exc:
@@ -343,6 +367,11 @@ def _parser() -> argparse.ArgumentParser:
                         help="declare the tools through the model's native tool interface "
                              "(ADR-025). Off by default, so a run is comparable with one "
                              "made without it at the same commit")
+    parser.add_argument("--verify-completion", action="store_true",
+                        help="accept an agent answer only after the task's test command "
+                             "has passed since the last change (ADR-023 unit 3, §2.3). Off "
+                             "by default, so a run is comparable with one made without it "
+                             "at the same commit")
     parser.add_argument("--resume", type=Path, help="continue an interrupted result file")
     parser.add_argument("--report", type=Path, help="print the summary of a result file")
     parser.add_argument("--rescore", type=Path,
@@ -429,6 +458,9 @@ def main(
         "environment_context": args.environment_context,
         "lenient_protocol": args.lenient_protocol,
         "native_tools": args.native_tools,
+        "verify_completion": args.verify_completion,
+        "test_command": "each agent task's command_passes check, run as pytest (agent_test_command); "
+                        "the loop reads it only under verify_completion",
         "contract": "each agent task file states action_required and the runner passes an "
                     "AgentTaskContract built from it (ADR-023 §8.3); a file without this key "
                     "ran without a contract",
@@ -450,10 +482,10 @@ def main(
     if args.resume is not None:
         previous = _read(args.resume)
         old = previous[0] if previous and previous[0].get("kind") == "header" else {}
-        for key in ("commit", "model", "tasks", "runs", "languages", "environment_context",
-                    "lenient_protocol", "native_tools"):
+        flags = ("environment_context", "lenient_protocol", "native_tools", "verify_completion")
+        for key in ("commit", "model", "tasks", "runs", "languages", *flags):
             # A file from before a flag existed ran without it.
-            flag = key in ("environment_context", "lenient_protocol", "native_tools")
+            flag = key in flags
             if (bool(old.get(key)) if flag else old.get(key)) != header[key]:
                 print(f"refusing to resume: {key} differs from the file's header", file=out)
                 return 2
@@ -481,7 +513,8 @@ def main(
                 record = run_agent_task(task, language, settings, log, workspace,
                                         environment_context=args.environment_context,
                                         lenient_protocol=args.lenient_protocol,
-                                        native_tools=args.native_tools)
+                                        native_tools=args.native_tools,
+                                        verify_completion=args.verify_completion)
             else:
                 record = run_knowledge_task(task, language, settings, log, workspace)
             calls = log.take()
