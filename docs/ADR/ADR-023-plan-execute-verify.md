@@ -567,6 +567,35 @@ Nothing here changes the design above.
   result" is therefore not met by a measurement. This was raised in review before the
   owner merged #174.
 
+### 8.5 Unit 3 as built: verification, `tests_passed` (2026-10-04)
+
+**Authority.** The owner ranked unit 3 above any other change on 2026-10-04, then
+asked for implementation ("i require real work implementation") and granted the lead
+"full engineering ownership of personal-ai-core". Measurement and adoption in
+`pac --agent` still follow §4.
+
+**Behaviour, with `verify_completion` on, under a contract with `action_required=true`
+and a `test_command`:**
+- The model is told the command before the task.
+- An answer is accepted only if the last executed run of exactly that command (token by
+  token, through `run_command` or `shell`) came after the last change and passed. A
+  change is an executed `write_file`, `delete_file` or `shell` call that is not the test
+  run: the benchmark's `tested_after_last_edit` definition, which a test holds equal.
+- Otherwise the answer is refused (`verification_required`), the model is told what is
+  missing and the command, and the refusal costs one failure (§2.4).
+- Unit 1 still answers first: an answer before any action is `action_required`.
+
+**How §7 item 2 is settled for this unit.** The contract names the evidence; the model
+states no claims, so the reply protocol is unchanged. Model-stated claims, and the other
+evidence kinds (`file_created`, `committed`, ...), are not built.
+
+**In the benchmark.** The contract's test command is each task's own `command_passes`
+check run as `pytest ...` (run_command does not allow `python`), so five tasks carry one
+and no task file or digest changes. `--verify-completion` is recorded in the header; the
+verdict reads `--unit 3` only with that flag off then on and every other flag equal.
+
+**Not measured.** Off by default, not exposed in `pac --agent`.
+
 ## Amendment 1 (ACCEPTED, 2026-10-03): the rule that decides "better"
 
 **Status: ACCEPTED by the owner, 2026-10-03, with D1-D4 as recommended (see *Decided*

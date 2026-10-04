@@ -146,9 +146,44 @@ def test_a_rise_of_sixteen_failures_in_any_group_fails_and_fifteen_does_not(rise
 def test_an_attempt_moving_from_class_1_to_class_2_has_left_class_1():
     verdict = decide(_side(_lines()), _side(_lines(_moved(10, "class2"))), "1", {})
     assert (verdict.leaving, verdict.entering, verdict.outcome) == (10, 0, "PASS")
-    # The same files, read for unit 3 (target class 2): ten entered it.
-    verdict = decide(_side(_lines()), _side(_lines(_moved(10, "class2"))), "3", {})
+    # The same files, read for unit 3 (target class 2): ten entered it. Unit 3
+    # is a flag, so its candidate is the run made with it on.
+    cand = _lines(_moved(10, "class2"))
+    cand[0]["verify_completion"] = True
+    verdict = decide(_side(_lines()), _side(cand), "3", {})
     assert (verdict.leaving, verdict.entering, verdict.outcome) == (0, 10, "FAIL")
+
+
+def test_unit_3_is_read_only_with_verify_completion_off_then_on_and_nothing_else_changed():
+    def pair(base_flags: dict[str, bool], cand_flags: dict[str, bool]) -> list[str]:
+        base, cand = _lines(), _lines(_moved(10, "success"))
+        base[0].update(base_flags)
+        cand[0].update(cand_flags)
+        return decide(_side(base), _side(cand), "3", {}).unreadable
+
+    assert pair({}, {"verify_completion": True}) == []
+    assert pair({}, {}) == ["verify_completion must be off in the baseline and on in the candidate"]
+    assert pair({"verify_completion": True}, {"verify_completion": True}) == [
+        "verify_completion must be off in the baseline and on in the candidate"]
+    for flag in ("environment_context", "lenient_protocol", "native_tools"):
+        assert pair({}, {"verify_completion": True, flag: True}) == [f"{flag} differs"]
+    # Both arms native, for example, is one condition held equal: readable.
+    assert pair({"native_tools": True}, {"verify_completion": True, "native_tools": True}) == []
+    # Units 1 and 2 are not flag-gated by this rule.
+    base, cand = _lines(), _lines(_moved(10, "success"))
+    assert decide(_side(base), _side(cand), "1", {}).unreadable == []
+
+
+def test_the_unverified_completion_cost_is_reported_only_for_a_run_with_the_check():
+    base, cand = _lines(), _lines(_moved(10, "success"))
+    labels = [label for label, _, _ in decide(_side(base), _side(cand), "1", {}).costs]
+    assert "answers rejected for an unverified completion" not in labels
+    cand[0]["verify_completion"] = True
+    for line in cand[1:-1]:
+        line["verification_rejections"] = 1
+    costs = {label: (a, b) for label, a, b in decide(_side(base), _side(cand), "3", {}).costs}
+    assert costs["answers rejected for an unverified completion"] == (
+        "0 (0.00 per attempt)", "240 (1.00 per attempt)")
 
 
 # --- R0: what makes a comparison unreadable ----------------------------------------

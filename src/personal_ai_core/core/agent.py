@@ -99,6 +99,10 @@ class AgentTaskContract:
 
     task_text: str
     action_required: bool
+    # The supported test command (ADR-023 §2.3, §6 decision 3), as the model
+    # would send it to run_command. None: the caller names none. Read only by
+    # the completion check (ADR-023 unit 3), which is off unless asked for.
+    test_command: str | None = None
 
     def __post_init__(self) -> None:
         task_text = self.task_text.strip()
@@ -107,6 +111,13 @@ class AgentTaskContract:
         if not isinstance(self.action_required, bool):
             raise TypeError("action_required must be a boolean")
         object.__setattr__(self, "task_text", task_text)
+        if self.test_command is not None:
+            if not isinstance(self.test_command, str):
+                raise TypeError("test_command must be a string")
+            test_command = self.test_command.strip()
+            if not test_command:
+                raise ValueError("test_command must not be empty")
+            object.__setattr__(self, "test_command", test_command)
 
 
 @dataclass(frozen=True, slots=True)

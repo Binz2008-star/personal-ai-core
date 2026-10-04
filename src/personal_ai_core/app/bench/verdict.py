@@ -134,6 +134,18 @@ def _native_unreadable(base: Side, cand: Side) -> list[str]:
     return problems
 
 
+def _verify_unreadable(base: Side, cand: Side) -> list[str]:
+    """R0's flag conditions for unit 3 (ADR-023 §2.3): `verify_completion` is
+    the only experimental flag that differs, off then on."""
+    problems = []
+    if bool(base.header.get("verify_completion")) or not bool(cand.header.get("verify_completion")):
+        problems.append("verify_completion must be off in the baseline and on in the candidate")
+    for flag in ("environment_context", "lenient_protocol", "native_tools"):
+        if bool(base.header.get(flag)) != bool(cand.header.get(flag)):
+            problems.append(f"{flag} differs")
+    return problems
+
+
 def _key(run: Mapping[str, Any]) -> tuple[str, str, int]:
     return run["task"], run["language"], run["run"]
 
@@ -247,14 +259,21 @@ def _costs(base: Side, cand: Side, tasks: Mapping[str, Task] | None) -> list[tup
          per_attempt(cand, "protocol_errors")),
         ("false rejections (of rejected answers)",
          _false_rejections(base, tasks), _false_rejections(cand, tasks)),
-    ]
+    ] + ([
+        ("answers rejected for an unverified completion",
+         per_attempt(base, "verification_rejections"),
+         per_attempt(cand, "verification_rejections")),
+    ] if base.header.get("verify_completion") or cand.header.get("verify_completion") else [])
 
 
 def decide(base: Side, cand: Side, unit: str, tasks: Mapping[str, Task] | None) -> Verdict:
     if unit in PREDICATE_TARGETS:
         return _decide_predicate(base, cand, unit, tasks)
     target = TARGETS[unit]
-    verdict = Verdict(unit=unit, target=target, unreadable=unreadable(base, cand, tasks))
+    problems = unreadable(base, cand, tasks)
+    if unit == "3":
+        problems += _verify_unreadable(base, cand)
+    verdict = Verdict(unit=unit, target=target, unreadable=problems)
     if verdict.unreadable:
         return verdict
     a = {_key(r): classify(r) for r in base.agent}

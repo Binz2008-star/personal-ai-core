@@ -35,6 +35,7 @@ import ast
 import hashlib
 import json
 import math
+import shlex
 import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
@@ -66,6 +67,24 @@ ACTION_REQUIRED_MESSAGE = (
     "Action required: this task requires you to act with a tool before answering, "
     "and no tool call has run yet. Reply with one tool call."
 )
+# ADR-023 unit 3 (§2.3, tests_passed): shown only when the completion check is
+# on and the contract names a test command. New text the model sees, so it is
+# reviewed as a protocol change, for correctness and not for the score (§3).
+COMPLETION_CHECK_NOTICE = (
+    "Completion check: this task's tests run with run_command: {command}\n"
+    "When you have finished changing files, run exactly that command. Your answer "
+    "is accepted only after it passes, run after your last change."
+)
+VERIFICATION_REQUIRED_MESSAGE = (
+    "Verification required: the tests have not passed since your last change. "
+    "Run them with run_command: {command}\n"
+    "If they fail, fix the code and run them again. Then give your answer."
+)
+# What changes the workspace, as the benchmark's tested_after_last_edit check
+# counts it (app/bench/checks.py; a test holds the two equal). A shell command
+# may write files, so it counts unless it is the test run itself.
+EDITING_TOOLS = frozenset({"write_file", "delete_file", "shell"})
+TEST_RUNNERS = frozenset({"run_command", "shell"})
 
 PROTOCOL = """You are working as an agent in the user's workspace, with tools.
 
@@ -128,9 +147,11 @@ class Step:
 class RefusedReply:
     """A reply the loop refused and charged to the budget, with its text.
 
-    `kind` is "protocol_error" (not one JSON object; `error` says why) or
+    `kind` is "protocol_error" (not one JSON object; `error` says why),
     "action_required" (an answer before any tool had run, under a contract
-    that requires action). `call` is the model call it answered, from 1.
+    that requires action) or "verification_required" (an answer before the
+    contract's test command had passed after the last change; ADR-023 unit 3).
+    `call` is the model call it answered, from 1.
 
     Kept for the caller -- the benchmark records it, so a refusal can be read
     and a false one counted (ADR-023 amendment 1) -- and never put in an
@@ -176,6 +197,8 @@ class AgentOutcome:
     refused_replies: tuple[RefusedReply, ...] = field(default=())
     # Each reply read under ADR-024 unit A (see LenientParse); empty when off.
     lenient_parses: tuple[LenientParse, ...] = field(default=())
+    # Answers refused by the completion check (ADR-023 unit 3); 0 when off.
+    verification_rejections: int = 0
 
     @property
     def finished(self) -> bool:
@@ -383,6 +406,40 @@ def native_history_text(response: ModelResponse) -> str:
     return "\n".join(parts)
 
 
+def _tokens(command: str) -> list[str] | None:
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return None
+
+
+def _runs_test_command(step: Step, test_command: Sequence[str]) -> bool:
+    record = step.record
+    command = record.request.arguments.get("command")
+    return (record.executed and record.request.tool in TEST_RUNNERS
+            and isinstance(command, str) and _tokens(command) == list(test_command))
+
+
+def tests_passed_since_last_change(steps: Sequence[Step], test_command: str) -> bool:
+    """ADR-023 §2.3, `tests_passed`: an executed run of the contract's test
+    command, after the last change to the workspace, that exited 0 and was
+    verified. Only the last such run counts: a later failure is not undone by
+    an earlier pass. The command matches exactly, token by token (§6 decision
+    3: the model does not substitute its own test command)."""
+    expected = _tokens(test_command)
+    if not expected:
+        return False
+    executed = [s for s in steps if s.record.executed]
+    last_change = max((i for i, s in enumerate(executed)
+                       if s.record.request.tool in EDITING_TOOLS
+                       and not _runs_test_command(s, expected)), default=-1)
+    runs = [s for s in executed[last_change + 1:] if _runs_test_command(s, expected)]
+    if not runs:
+        return False
+    result = runs[-1].record.result
+    return result is not None and result.ok and runs[-1].verified
+
+
 def fence(label: str, content: str) -> str:
     token = hashlib.sha256(f"{label}\n{content}".encode("utf-8")).hexdigest()[:RESULT_TOKEN_LENGTH]
     return f"<<<result {token} {label}>>>\n{content}\n<<<end result {token}>>>"
@@ -421,6 +478,7 @@ class AgentLoop:
         environment: EnvironmentContext | None = None,
         lenient_protocol: bool = False,
         native_tools: bool = False,
+        verify_completion: bool = False,
         max_actions: int = 12,
         max_failures: int = 3,
         generation_limit: int = 1024,
@@ -457,6 +515,10 @@ class AgentLoop:
             self._native = provider
         self._declarations = tool_declarations(executor.specs) if native_tools else ()
         self._tool_names = tuple(executor.specs)
+        # ADR-023 unit 3, off unless asked for: under a contract that requires
+        # action and names a test command, an answer is accepted only once that
+        # command has passed after the last change (§2.3, tests_passed).
+        self._verify_completion = verify_completion
         self._max_actions = max_actions
         self._max_failures = max_failures
         self._generation_limit = generation_limit
@@ -488,10 +550,18 @@ class AgentLoop:
         budget = ActionBudget(max_actions=self._max_actions, max_failures=self._max_failures)
         composed = self._environment.compose() if self._environment is not None else None
         environment = dict(composed.record) if composed is not None else None
-        messages = self._opening(task_text, session_id, composed.text if composed else None)
+        check_command = (
+            contract.test_command
+            if self._verify_completion and contract is not None
+            and contract.action_required and contract.test_command
+            else None
+        )
+        messages = self._opening(task_text, session_id, composed.text if composed else None,
+                                 check_command)
         steps: list[Step] = []
         protocol_errors = 0
         action_rejections = 0
+        verification_rejections = 0
         tool_executed = False
         refused: list[RefusedReply] = []
         lenient: list[LenientParse] = []
@@ -545,6 +615,21 @@ class AgentLoop:
                     )
                     messages.append(self._user(session_id, ACTION_REQUIRED_MESSAGE))
                     continue
+                if (
+                    check_command is not None
+                    and contract is not None
+                    and not tests_passed_since_last_change(steps, check_command)
+                ):
+                    verification_rejections += 1
+                    refused.append(self._refused(call, "verification_required", shown))
+                    budget.record(ok=False)
+                    self._record_answer_rejected(
+                        session_id, verification_rejections, contract,
+                        reason="verification_required",
+                    )
+                    messages.append(self._user(
+                        session_id, VERIFICATION_REQUIRED_MESSAGE.format(command=check_command)))
+                    continue
                 return self._finish(
                     proposal["answer"],
                     steps,
@@ -555,6 +640,7 @@ class AgentLoop:
                     environment,
                     refused,
                     lenient,
+                    verification_rejections,
                 )
 
             record = self._executor.execute(
@@ -586,12 +672,14 @@ class AgentLoop:
             environment,
             refused,
             lenient,
+            verification_rejections,
         )
 
     # --- helpers ---------------------------------------------------------------
 
     def _opening(
-        self, task: str, session_id: str, environment: str | None = None
+        self, task: str, session_id: str, environment: str | None = None,
+        check_command: str | None = None,
     ) -> list[Message]:
         messages: list[Message] = []
         if self._identity is not None:
@@ -608,6 +696,9 @@ class AgentLoop:
             messages.append(
                 Message(session_id=session_id, role=Role.SYSTEM, content=environment)
             )
+        if check_command is not None:
+            messages.append(Message(session_id=session_id, role=Role.SYSTEM,
+                                    content=COMPLETION_CHECK_NOTICE.format(command=check_command)))
         messages.append(self._user(session_id, task))
         return messages
 
@@ -635,6 +726,7 @@ class AgentLoop:
         environment: Mapping[str, Any] | None = None,
         refused: list[RefusedReply] | None = None,
         lenient: list[LenientParse] | None = None,
+        verification_rejections: int = 0,
     ) -> AgentOutcome:
         check = self._verifier.verify_response(answer)
         if not check.passed:
@@ -650,6 +742,7 @@ class AgentLoop:
             environment=environment,
             refused_replies=tuple(refused or ()),
             lenient_parses=tuple(lenient or ()),
+            verification_rejections=verification_rejections,
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
@@ -665,6 +758,7 @@ class AgentLoop:
         environment: Mapping[str, Any] | None = None,
         refused: list[RefusedReply] | None = None,
         lenient: list[LenientParse] | None = None,
+        verification_rejections: int = 0,
     ) -> AgentOutcome:
         outcome = AgentOutcome(
             answer=None,
@@ -676,6 +770,7 @@ class AgentLoop:
             environment=environment,
             refused_replies=tuple(refused or ()),
             lenient_parses=tuple(lenient or ()),
+            verification_rejections=verification_rejections,
         )
         self._record_finish(outcome, session_id, contract)
         return outcome
@@ -719,7 +814,8 @@ class AgentLoop:
         )
 
     def _record_answer_rejected(
-        self, session_id: str, rejection: int, contract: AgentTaskContract
+        self, session_id: str, rejection: int, contract: AgentTaskContract,
+        reason: str = "action_required",
     ) -> None:
         if self._events is None:
             return
@@ -729,7 +825,7 @@ class AgentLoop:
                 type=EventType.AGENT_ANSWER_REJECTED,
                 actor="agent",
                 payload={
-                    "reason": "action_required",
+                    "reason": reason,
                     "rejection": rejection,
                     "action_required": contract.action_required,
                 },
@@ -752,6 +848,9 @@ class AgentLoop:
                 contract.action_required if contract is not None else "no contract"
             ),
         }
+        # Only when the check was on: with it off the event is what it always was.
+        if self._verify_completion:
+            payload["verification_rejections"] = outcome.verification_rejections
         # Only when the context was on: with it off the event is what it always was.
         if outcome.environment is not None:
             payload["environment"] = dict(outcome.environment)

@@ -709,6 +709,8 @@ claim written in one place with nothing that notices it going stale.
                and its verdict (ADR-025, PR 2 of 2; off by default)
   #208 5d5a416  eval: ADR-025 text arm and native arm at 2d9b569 (480 runs
                each); PASS, not adopted
+  #209 465a8cc  docs: ADR-025 measured -- PASS, not adopted; every figure
+               re-derived; ledger #207 #208; handoff at 5d5a416
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1175,7 +1177,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-04, main at 5d5a416)
+NEXT SESSION HANDOFF (updated 2026-10-04, main at 465a8cc)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1202,6 +1204,17 @@ WHERE THINGS STAND (2026-10-04)
     refused as answers (9 attempts, all failed, 8 of them git-commit-release
     en, which fell 5/10 -> 0/10). Every figure:
     tests/unit/test_adr025_measurement_reading.py.
+  - BUILT (this PR, 2026-10-04): ADR-023 unit 3, §2.3 `tests_passed`, off by
+    default (ADR-023 §8.5). The owner, after ranking unit 3 first: "i require
+    real work implementation" and "i grant you: full engineering ownership of
+    personal-ai-core". Next: measure it on the rig, default arm against
+    `--verify-completion` at one commit, 10 runs each, read by
+    `bench.compare --unit 3` (target class 2, declared in amendment 1). In
+    #208's text arm (read after the data) the model did not run the tests
+    after its last change in 26 of 31 answered attempts on the five
+    test-command tasks (29 of the 31 failed, 2 succeeded; the 5 that did
+    test all failed): the check can only move those answers, so a FAIL is
+    possible even if it helps. Pinned in test_adr023_unit3_verify_completion.
   - NEXT (owner, 2026-10-04): (1) a DRAFT ADR-025 amendment only, for the two
     defects above -- which defect, why a repair is not a retroactive
     improvement of #208, how it is measured, what stays fixed, --native-tools
@@ -1256,7 +1269,8 @@ WHERE THINGS STAND (2026-10-04)
     adapter, no behaviour change) merged; main was 9d1653b. Then #207 (the
     loop, `--native-tools` and the verdict predicate, ADR-025 PR 2 of 2)
     merged; main was 2d9b569. Then #208 (the measurement, above) merged; main
-    is 5d5a416.
+    was 5d5a416. Then #209 (the record of the measurement) merged; main
+    is 465a8cc.
   - CANDIDATE-MODEL SCREEN (2026-10-03, outside the repository): run by Codex
     on the rig at 1861756, one pass of 10 agent tasks x 2 languages, its
     result files under C:\Users\loyal\pt\pac-candidate-eval-1861756\ and
