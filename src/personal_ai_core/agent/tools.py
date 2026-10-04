@@ -27,13 +27,15 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Mapping
 
 from ..core.agent import RiskLevel, ToolResult, ToolSpec
-from .commands import validate_command
+from .commands import CommandRejected, validate_command
 from .recovery import Checkpoints, atomic_write_text
 from .sandbox import SandboxError, Workspace, is_protected
 
@@ -359,6 +361,63 @@ class DeleteFile:
         return ToolResult(ok=True, output=f"deleted {self._workspace.relative(path)}")
 
 
+def _refuse_protected_arguments(workspace: Workspace, args: list[str]) -> None:
+    """Refuse a command that names a file the file tools may not touch.
+
+    `validate_command` is workspace-agnostic: it blocks escapes, but cannot
+    know which names this workspace protects or reserves (`.env`, `.git`, the
+    Core's own database). The workspace knows, so the check lives here, after
+    validation and before anything runs: without it, `cat .env` through
+    run_command put a secret file in front of the model. Each non-flag token
+    is tried whole, plus its `--opt=value` value and a short option's attached
+    value. A candidate with a colon is a `rev:path` (`git show HEAD:.env`) or an
+    option value (`-p no:cacheprovider`), not a file name, so only the part
+    after its last colon is tried: on Windows the whole token would be read as
+    an alternate data stream and refused.
+    """
+    for token in args[1:]:
+        candidates = [token]
+        if "=" in token:
+            candidates.append(token.split("=", 1)[1])
+        if token.startswith("-") and not token.startswith("--") and len(token) > 2:
+            candidates.append(token[2:])
+        candidates = [c.split(":")[-1] if ":" in c else c for c in candidates]
+        for candidate in candidates:
+            if not candidate or candidate.startswith("-"):
+                continue
+            try:
+                workspace.resolve_for_write(candidate)
+            except SandboxError as exc:
+                raise CommandRejected(
+                    f"command touches a file the agent may not use: {token} ({exc})"
+                ) from None
+
+
+def _refuse_shadowed_executable(workspace: Workspace, name: str) -> None:
+    """Refuse an allowlisted command that a workspace file would shadow.
+
+    Windows `CreateProcess` searches the working directory before `PATH`, so a
+    confirmed `ruff` could run `workspace/ruff.exe`, a file the model may have
+    written, instead of the system binary. Enforced on Windows only, where the
+    lookup happens; a name with no binary at all is left to the existing
+    not-installed path.
+    """
+    if sys.platform != "win32":
+        return
+    found = shutil.which(name)
+    if found is None:
+        return
+    try:
+        inside = Path(found).resolve().is_relative_to(workspace.root)
+    except OSError:
+        return
+    if inside:
+        raise CommandRejected(
+            f"workspace shadows the command: {name} resolves to {found}, "
+            "which the agent must not run"
+        )
+
+
 class RunCommand:
     def __init__(self, workspace: Workspace, *, timeout_seconds: int = 60) -> None:
         self._workspace = workspace
@@ -381,6 +440,8 @@ class RunCommand:
 
     def run(self, arguments: Mapping[str, Any]) -> ToolResult:
         args = validate_command(arguments["command"])
+        _refuse_protected_arguments(self._workspace, args)
+        _refuse_shadowed_executable(self._workspace, args[0])
         # An environment built from nothing, not the parent's minus a
         # denylist: the source blanked four named secrets and passed the
         # rest, so any secret it did not think of was inherited.
