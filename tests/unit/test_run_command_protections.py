@@ -69,6 +69,10 @@ def test_a_reserved_database_is_refused(tmp_path):
         "git diff HEAD~1",
         "git show HEAD",
         "pytest -q",
+        # A colon is a rev:path or an option value, not a file name. On
+        # Windows the whole token would read as an alternate data stream.
+        "pytest -q -p no:cacheprovider",
+        "git show HEAD:notes.md",
         "ruff check .",
         "grep -r needle src",
         "find . -name '*.py'",
@@ -97,3 +101,17 @@ def test_refusal_reaches_the_audit_as_a_failed_result(ws):
     assert "may not use" in (record.result.error or "")
     assert "API_KEY" not in (record.result.output or "")
     assert executor.audit.records() == (record,)
+
+
+@pytest.mark.parametrize("command", ["pytest -q -p no:cacheprovider", "git show HEAD:notes.md"])
+def test_with_windows_name_rules_a_colon_is_still_not_a_file_name(ws, monkeypatch, command):
+    """On Windows the sandbox reads `name:stream` as an NTFS stream and refuses it;
+    a colon in a command argument is a rev:path or an option value. Switched on
+    here, the Windows rules must not refuse the ordinary commands (they did, on
+    the Windows runner) -- and must still refuse `git show HEAD:.env`."""
+    from personal_ai_core.agent import sandbox
+
+    monkeypatch.setattr(sandbox, "_windows_names_apply", lambda: True)
+    check(ws, validate_command(command))
+    with pytest.raises(CommandRejected, match="may not use"):
+        check(ws, validate_command("git show HEAD:.env"))

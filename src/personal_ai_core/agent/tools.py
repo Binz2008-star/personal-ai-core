@@ -369,8 +369,11 @@ def _refuse_protected_arguments(workspace: Workspace, args: list[str]) -> None:
     Core's own database). The workspace knows, so the check lives here, after
     validation and before anything runs: without it, `cat .env` through
     run_command put a secret file in front of the model. Each non-flag token
-    is tried whole, plus its `--opt=value` value, a short option's attached
-    value, and a `rev:path` suffix (`git show HEAD:.env`).
+    is tried whole, plus its `--opt=value` value and a short option's attached
+    value. A candidate with a colon is a `rev:path` (`git show HEAD:.env`) or an
+    option value (`-p no:cacheprovider`), not a file name, so only the part
+    after its last colon is tried: on Windows the whole token would be read as
+    an alternate data stream and refused.
     """
     for token in args[1:]:
         candidates = [token]
@@ -378,8 +381,7 @@ def _refuse_protected_arguments(workspace: Workspace, args: list[str]) -> None:
             candidates.append(token.split("=", 1)[1])
         if token.startswith("-") and not token.startswith("--") and len(token) > 2:
             candidates.append(token[2:])
-        if ":" in token:
-            candidates.append(token.split(":")[-1])
+        candidates = [c.split(":")[-1] if ":" in c else c for c in candidates]
         for candidate in candidates:
             if not candidate or candidate.startswith("-"):
                 continue
