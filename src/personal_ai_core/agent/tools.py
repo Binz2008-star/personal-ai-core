@@ -36,7 +36,7 @@ from typing import Any, Mapping
 
 from ..core.agent import RiskLevel, ToolResult, ToolSpec
 from .commands import CommandRejected, validate_command
-from .recovery import Checkpoints
+from .recovery import Checkpoints, atomic_write_text
 from .sandbox import SandboxError, Workspace, is_protected
 
 MAX_OUTPUT_CHARS = 20_000
@@ -325,7 +325,7 @@ class WriteFile:
         if self._checkpoints is not None:
             self._checkpoints.before_mutation(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        atomic_write_text(path, content)
         verb = "overwrote" if existed else "created"
         return ToolResult(
             ok=True, output=f"{verb} {self._workspace.relative(path)} ({len(content)} characters)"
