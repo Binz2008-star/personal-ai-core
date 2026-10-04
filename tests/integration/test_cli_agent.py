@@ -242,6 +242,49 @@ def test_agent_and_documents_are_exclusive(tmp_path):
     assert code == 2 and "not both" in out.getvalue()
 
 
+def test_the_agent_refuses_ephemeral_and_starts_nothing(tmp_path):
+    """Every agent step is recorded (test_every_step_is_recorded_in_the_database);
+    under --ephemeral they went to memory and were gone at exit, so the runs
+    that can change files left no record. The pair is refused before a session
+    is started, a database opened or the model called."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    database = tmp_path / "core.db"
+    transport = scripted(
+        '{"tool": "write_file", "arguments": {"path": "x.md", "content": "x"}}',
+        '{"answer": "done"}',
+    )
+    out = io.StringIO()
+    code = main(
+        ["--ephemeral", "--database", str(database), "--agent", "--workspace", str(workspace)],
+        transport=transport,
+        stdin=iter(["[action_required=true] write x.md"]),
+        stdout=out,
+        env={},
+    )
+    output = out.getvalue()
+    assert code == 2
+    assert "--agent records every step it takes in the database" in output
+    assert "cannot be used with --ephemeral" in output
+    assert "session:" not in output and "agent:" not in output
+    assert transport.sent == []  # type: ignore[attr-defined]
+    assert list(workspace.iterdir()) == []
+    assert not database.exists()
+
+
+def test_either_flag_alone_is_still_accepted(tmp_path):
+    """The refusal is of the pair: --ephemeral still converses, keeping
+    nothing, and --agent still runs a task."""
+    out = io.StringIO()
+    code = main(["--ephemeral"], transport=scripted("ok"), stdin=iter(["hello"]), stdout=out, env={})
+    assert code == 0
+    assert "storage: nowhere -- --ephemeral was given" in out.getvalue()
+    assert "core> ok" in out.getvalue()
+
+    code, output, _ = run(tmp_path, scripted('{"answer": "ok"}'), "[action_required=false] hi")
+    assert code == 0 and "core> ok" in output
+
+
 def test_an_unreachable_model_is_reported(tmp_path):
     from personal_ai_core.core.errors import ProviderError
 
