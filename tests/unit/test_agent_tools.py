@@ -52,6 +52,7 @@ def test_the_declared_risk_levels_are_the_designs(ws):
         "find_files": RiskLevel.LOW,
         "search_text": RiskLevel.LOW,
         "write_file": RiskLevel.MEDIUM,
+        "edit_file": RiskLevel.MEDIUM,
         "run_command": RiskLevel.HIGH,
     }
 

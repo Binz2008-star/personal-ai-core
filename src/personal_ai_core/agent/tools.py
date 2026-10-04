@@ -8,6 +8,7 @@ Each declares its risk level, and the policy gate reads that declaration
     search_text    LOW     find lines containing a string (file contents)
     find_files     LOW     find files by name pattern, in every subdirectory
     write_file     MEDIUM  create or overwrite a text file (never a secret)
+    edit_file      MEDIUM  replace one string in a text file (never a secret)
     run_command    HIGH    run one allowlisted command -- ASKED every time
     delete_file    CRITICAL delete one file -- ASKED, and a rollback point first
 
@@ -24,12 +25,14 @@ command, and only with the owner's yes for each one.
 """
 from __future__ import annotations
 
+import difflib
 import fnmatch
 import os
 import re
 import signal
 import subprocess
 import sys
+import tempfile
 from typing import Any, Mapping
 
 from ..core.agent import RiskLevel, ToolResult, ToolSpec
@@ -330,6 +333,122 @@ class WriteFile:
         )
 
 
+class EditFile:
+    """Replace one string inside a UTF-8 text file, surgically.
+
+    MEDIUM, like `write_file`: allowed in the workspace, audited. Unlike
+    `write_file` the caller names what changes, not the whole file: with
+    `require_unique=True` (the default) the edit runs only when `old_string`
+    occurs exactly once, so an ambiguous match fails instead of editing the
+    wrong place. Zero matches fail either way. The write is atomic (a
+    temporary file in the same directory, then `os.replace`) and records a
+    rollback point first, so a failed run can be undone like any other edit.
+    """
+
+    def __init__(self, workspace: Workspace, checkpoints: Checkpoints | None = None) -> None:
+        self._workspace = workspace
+        self._checkpoints = checkpoints
+        self.spec = ToolSpec(
+            name="edit_file",
+            description=(
+                "Replace old_string with new_string in a UTF-8 text file in the "
+                "workspace. Fails when old_string matches zero times, or more "
+                "than once while require_unique is true."
+            ),
+            risk_level=RiskLevel.MEDIUM,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": _PATH,
+                    "old_string": {"type": "string"},
+                    "new_string": {"type": "string"},
+                    "require_unique": {"type": "boolean"},
+                },
+                "required": ["path", "old_string", "new_string"],
+                "additionalProperties": False,
+            },
+            timeout_seconds=10,
+            idempotent=False,
+        )
+
+    def run(self, arguments: Mapping[str, Any]) -> ToolResult:
+        old_string = arguments["old_string"]
+        new_string = arguments["new_string"]
+        require_unique = arguments.get("require_unique", True)
+        if not isinstance(old_string, str) or not isinstance(new_string, str):
+            return ToolResult(ok=False, error="old_string and new_string must be strings")
+        if not isinstance(require_unique, bool):
+            return ToolResult(ok=False, error="require_unique must be a boolean")
+        if not old_string:
+            return ToolResult(ok=False, error="old_string is empty: nothing to replace")
+        path = self._workspace.resolve_for_write(arguments["path"])
+        if path.is_dir():
+            return ToolResult(ok=False, error=f"is a directory: {arguments['path']}")
+        if not path.is_file():
+            return ToolResult(ok=False, error=f"not a file: {arguments['path']}")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return ToolResult(ok=False, error=f"not UTF-8 text: {arguments['path']}")
+        matches = text.count(old_string)
+        if matches == 0:
+            return ToolResult(ok=False, error="old_string matches zero times: nothing to replace")
+        if require_unique and matches > 1:
+            return ToolResult(
+                ok=False,
+                error=f"old_string matches {matches} times and require_unique is true: "
+                "narrow old_string or pass require_unique false",
+            )
+        new_text = text.replace(old_string, new_string)
+        if len(new_text) > MAX_WRITE_CHARS:
+            return ToolResult(ok=False, error=f"content over {MAX_WRITE_CHARS} characters")
+        if new_text == text:
+            return ToolResult(ok=True, output=f"no change to {self._workspace.relative(path)}")
+        if self._checkpoints is not None:
+            self._checkpoints.before_mutation(path)
+        self._atomic_write(path, new_text)
+        relative = self._workspace.relative(path)
+        diff = "\n".join(
+            difflib.unified_diff(
+                text.splitlines(),
+                new_text.splitlines(),
+                fromfile=f"a/{relative}",
+                tofile=f"b/{relative}",
+                lineterm="",
+            )
+        )
+        replaced = matches if not require_unique else 1
+        output, truncated = _bounded(
+            f"edited {relative} ({replaced} replacement(s), "
+            f"{len(text)} to {len(new_text)} characters)\n{diff}"
+        )
+        return ToolResult(ok=True, output=output, truncated=truncated)
+
+    @staticmethod
+    def _atomic_write(path: Any, content: str) -> None:
+        """Write through a temporary file in the same directory, then replace.
+
+        A direct `write_text` leaves a half-written file when the process dies
+        mid-write; `os.replace` is atomic on the same filesystem, so readers
+        see the old file or the new one, never a mix.
+        """
+        fd, tmp = tempfile.mkstemp(
+            dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+
 class DeleteFile:
     def __init__(self, workspace: Workspace, checkpoints: Checkpoints) -> None:
         if not isinstance(checkpoints, Checkpoints):
@@ -483,6 +602,7 @@ def default_tools(workspace: Workspace, checkpoints: Checkpoints | None = None) 
         FindFiles(workspace),
         SearchText(workspace),
         WriteFile(workspace, checkpoints),
+        EditFile(workspace, checkpoints),
         RunCommand(workspace),
     ]
     if checkpoints is not None:

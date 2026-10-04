@@ -61,7 +61,7 @@ PROTOCOL_CATEGORIES = (
 # holds this to their specs. A reply naming one meant to act.
 TOOL_NAMES = (
     "read_file", "list_directory", "search_text", "find_files", "write_file",
-    "delete_file", "run_command", "shell", "web_search", "fetch_url",
+    "edit_file", "delete_file", "run_command", "shell", "web_search", "fetch_url",
 )
 
 

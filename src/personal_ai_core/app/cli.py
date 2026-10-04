@@ -696,10 +696,11 @@ def main(
                 events=events,
                 database=database,
                 session_exists=service.has_session,
+                environment_context=True,
             )
             print(f"agent:   workspace {agent.workspace.root}", file=out)
             print(
-                "         reads, searches and writes freely inside it; asks before "
+                "         reads, searches, edits and writes freely inside it; asks before "
                 "running a command or deleting a file",
                 file=out,
             )
