@@ -701,6 +701,10 @@ claim written in one place with nothing that notices it going stale.
                (compare --unit N)
   #204 9b2c8e5  docs: ADR-024 units A and B have no formal gate under ADR-023
                amendment 1 (owner-accepted finding)
+  #205 bc68fe1  docs(adr): ADR-025 accepted as an experiment (the native
+               tool-call channel) and ADR-023 amendment 2
+  #206 9d1653b  feat(core): an optional native tool-call capability and its
+               Ollama adapter (ADR-025, PR 1 of 2; no behaviour change)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1167,7 +1171,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-03, main at 9b2c8e5)
+NEXT SESSION HANDOFF (updated 2026-10-04, main at 9d1653b)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1204,10 +1208,14 @@ WHERE THINGS STAND (2026-10-03)
     was 22b586a; then #203 (the verdict of ADR-023 amendment 1, applied by
     code: `bench.compare --unit N`; units 1-3 only) merged; main is 4f0ae89.
     Then #204 (the owner-accepted finding that ADR-024's units A and B have
-    no formal gate under the amendment) merged; main is 9b2c8e5. Open pull
-    request: #205 (ADR-025, the native tool-call channel experiment, and
-    ADR-023 amendment 2; the owner approved the gate, the implementation and
-    the rig measurement: "موافق على النقاط جميعها").
+    no formal gate under the amendment) merged; main was 9b2c8e5. Then #205
+    (ADR-025 accepted as an experiment, and ADR-023 amendment 2; the owner
+    approved the gate, the implementation and the rig measurement: "موافق على
+    النقاط جميعها") and #206 (the native tool-call capability and its Ollama
+    adapter, no behaviour change) merged; main is 9d1653b. Open pull request:
+    the loop, `--native-tools` and the verdict predicate (ADR-025 PR 2 of 2).
+    Next: the rig measurement, text arm then native arm at one commit, 10 runs
+    each, read by `bench.compare --unit native-tools`.
   - CANDIDATE-MODEL SCREEN (2026-10-03, outside the repository): run by Codex
     on the rig at 1861756, one pass of 10 agent tasks x 2 languages, its
     result files under C:\Users\loyal\pt\pac-candidate-eval-1861756\ and

@@ -65,12 +65,73 @@ GROUPS = (("agent", "en"), ("agent", "ar"), ("knowledge", "en"), ("knowledge", "
 # its runs. ADR-024's units have none (owner-accepted finding, 2026-10-03).
 TARGETS = {"1": "answered_without_executing", "2": "refused_commands",
            "3": "executed_unverified"}
+# ADR-023 amendment 2 (accepted by the owner 2026-10-03): a unit outside ADR-023
+# may declare its target in its own ADR before its runs, as a named predicate
+# over the run record. ADR-025 §6.1 is the first: NO_EXECUTED_TOOL_CALL.
+NO_EXECUTED_TOOL_CALL = "NO_EXECUTED_TOOL_CALL"
+PREDICATE_TARGETS = {"native-tools": NO_EXECUTED_TOOL_CALL}
+PROVIDER_FAILURE_BOUND = 5      # ADR-025 §6.1: more in either arm -> NOT READABLE
+CLASSIFIABLE_STOPS = ("answered", "budget")
+UNITS = sorted([*TARGETS, *PREDICATE_TARGETS])
 
 
 def sign_test(leaving: int, entering: int) -> float:
     """One-sided exact sign test: P(X >= leaving), X ~ Binomial(leaving + entering, 1/2)."""
     n = leaving + entering
     return sum(comb(n, k) for k in range(leaving, n + 1)) / 2 ** n
+
+
+def no_executed_tool_call(run: Mapping[str, Any]) -> bool | None:
+    """ADR-025 §6.1: `executed_tool_calls == 0`, from the run record alone.
+
+    True or False for a classifiable attempt (stop "answered" or "budget",
+    `steps` a list, every `executed` a boolean); None for a provider or
+    runtime failure (stop "error"), which is never counted as "no execution".
+    Raises ValueError for a malformed record, which makes a comparison not
+    readable.
+    """
+    stop = run.get("stop")
+    if stop == "error":
+        return None
+    if stop not in CLASSIFIABLE_STOPS:
+        raise ValueError(f"stop is {stop!r}")
+    steps = run.get("steps")
+    if not isinstance(steps, list):
+        raise ValueError("the record has no steps")
+    executed = [step.get("executed") if isinstance(step, Mapping) else None for step in steps]
+    if any(not isinstance(value, bool) for value in executed):
+        raise ValueError("a step's executed is not a boolean")
+    return not any(executed)
+
+
+def _predicate_problems(side: Side) -> list[str]:
+    problems: list[str] = []
+    failures = 0
+    for run in side.agent:
+        try:
+            failures += no_executed_tool_call(run) is None
+        except ValueError as exc:
+            problems.append(f"{run.get('task')} {run.get('language')} run {run.get('run')}: "
+                            f"malformed record ({exc})")
+    if failures > PROVIDER_FAILURE_BOUND:
+        problems.append(f"{failures} provider or runtime failures; more than "
+                        f"{PROVIDER_FAILURE_BOUND} make the comparison not readable (ADR-025 §6.1)")
+    return problems
+
+
+def _native_unreadable(base: Side, cand: Side) -> list[str]:
+    """R0's conditions for the native-tools unit (ADR-025 §6): `native_tools`
+    is the only experimental flag that differs, off then on."""
+    problems = []
+    if bool(base.header.get("native_tools")) or not bool(cand.header.get("native_tools")):
+        problems.append("native_tools must be off in the baseline and on in the candidate")
+    if bool(base.header.get("environment_context")) != bool(cand.header.get("environment_context")):
+        problems.append("environment_context differs")
+    if bool(base.header.get("lenient_protocol")) or bool(cand.header.get("lenient_protocol")):
+        problems.append("lenient_protocol must be off in both arms")
+    for label, side in (("baseline", base), ("candidate", cand)):
+        problems.extend(f"{label}: {p}" for p in _predicate_problems(side))
+    return problems
 
 
 def _key(run: Mapping[str, Any]) -> tuple[str, str, int]:
@@ -142,6 +203,8 @@ class Verdict:
     p_value: float = 1.0
     failures: dict[tuple[str, str], tuple[int, int]] = field(default_factory=dict)
     costs: list[tuple[str, str, str]] = field(default_factory=list)
+    # Pairs dropped from R1 because either side was a provider failure.
+    dropped: list[tuple[str, str, int]] = field(default_factory=list)
 
     @property
     def target_holds(self) -> bool:
@@ -188,6 +251,8 @@ def _costs(base: Side, cand: Side, tasks: Mapping[str, Task] | None) -> list[tup
 
 
 def decide(base: Side, cand: Side, unit: str, tasks: Mapping[str, Task] | None) -> Verdict:
+    if unit in PREDICATE_TARGETS:
+        return _decide_predicate(base, cand, unit, tasks)
     target = TARGETS[unit]
     verdict = Verdict(unit=unit, target=target, unreadable=unreadable(base, cand, tasks))
     if verdict.unreadable:
@@ -197,6 +262,33 @@ def decide(base: Side, cand: Side, unit: str, tasks: Mapping[str, Task] | None) 
     verdict.leaving = sum(a[k] == target and b[k] != target for k in a)
     verdict.entering = sum(a[k] != target and b[k] == target for k in a)
     verdict.p_value = sign_test(verdict.leaving, verdict.entering)
+    return _guard_and_costs(verdict, base, cand, tasks)
+
+
+def _decide_predicate(base: Side, cand: Side, unit: str,
+                      tasks: Mapping[str, Task] | None) -> Verdict:
+    """R1 on a named predicate (ADR-023 amendment 2; ADR-025 §6.1)."""
+    verdict = Verdict(unit=unit, target=PREDICATE_TARGETS[unit],
+                      unreadable=[*unreadable(base, cand, tasks), *_native_unreadable(base, cand)])
+    if verdict.unreadable:
+        return verdict
+    a = {_key(r): no_executed_tool_call(r) for r in base.agent}
+    b = {_key(r): no_executed_tool_call(r) for r in cand.agent}
+    verdict.dropped = sorted(k for k in a if a[k] is None or b[k] is None)
+    pairs: list[tuple[bool, bool]] = []
+    for k, x in a.items():
+        y = b[k]
+        if x is not None and y is not None:
+            pairs.append((x, y))
+    verdict.leaving = sum(x and not y for x, y in pairs)
+    verdict.entering = sum(y and not x for x, y in pairs)
+    verdict.p_value = sign_test(verdict.leaving, verdict.entering)
+    return _guard_and_costs(verdict, base, cand, tasks)
+
+
+def _guard_and_costs(verdict: Verdict, base: Side, cand: Side,
+                     tasks: Mapping[str, Task] | None) -> Verdict:
+    """R2 and R3, the same for every unit."""
 
     def failed(side: Side, group: tuple[str, str]) -> int:
         return sum(not r["success"] for r in side.runs if (r["track"], r["language"]) == group)
@@ -208,18 +300,27 @@ def decide(base: Side, cand: Side, unit: str, tasks: Mapping[str, Task] | None) 
 
 
 def report(verdict: Verdict) -> str:
-    out = [f"Verdict by ADR-023 amendment 1 (accepted 2026-10-03, #191): unit {verdict.unit}, "
-           f"target class {LABELS[verdict.target].strip()}"]
+    if verdict.target in LABELS:
+        out = [f"Verdict by ADR-023 amendment 1 (accepted 2026-10-03, #191): unit {verdict.unit}, "
+               f"target class {LABELS[verdict.target].strip()}"]
+    else:
+        out = [f"Verdict by ADR-023 amendments 1 and 2 (accepted 2026-10-03): unit {verdict.unit}, "
+               f"target predicate {verdict.target} (executed tool calls == 0, ADR-025 §6.1)"]
     if verdict.unreadable:
         out.append("  R0 readable: NO")
         out.extend(f"    {problem}" for problem in verdict.unreadable)
         out.append("  R1-R3 not computed: a comparison that is not readable is not read.")
     else:
         out.append("  R0 readable: yes")
-        out.append(f"  R1 target: {verdict.leaving} paired attempts left the class, "
+        what = "the class" if verdict.target in LABELS else verdict.target
+        out.append(f"  R1 target: {verdict.leaving} paired attempts left {what}, "
                    f"{verdict.entering} entered it; one-sided exact sign test "
                    f"p = {verdict.p_value:.4f} (holds at <= {SIGN_TEST_ALPHA}): "
                    + ("holds" if verdict.target_holds else "does not hold"))
+        if verdict.dropped:
+            out.append(f"    {len(verdict.dropped)} pair(s) dropped from R1, a provider or "
+                       "runtime failure on either side: "
+                       + ", ".join(f"{t} {lang} run {r}" for t, lang, r in verdict.dropped))
         out.append(f"  R2 no regression (a group regresses when its failures rise by "
                    f"{REGRESSION_DELTA} or more):")
         for (track, language), (a, b) in verdict.failures.items():

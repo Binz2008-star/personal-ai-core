@@ -12,7 +12,7 @@ R0 wording, the validation boundary: §4.6, §6)
 | Proposed | yes: this document, written by the lead on 2026-10-03 after a read-only audit |
 | Evidence | §1: the installed Boss template (read on the rig by the owner), the provider code, the contracts, the refused replies of #198 |
 | Authorized | by the owner, 2026-10-03 (§11): the gate `NO_EXECUTED_TOOL_CALL` with ADR-023 amendment 2, the implementation behind an off-by-default flag, and the measurement on the rig. Adoption as the default is not decided |
-| Implemented | no (two pull requests follow, §8 D1) |
+| Implemented | PR 1, the core types and the Ollama adapter (#206); PR 2, the loop, `--native-tools` and the verdict predicate (#207). Off by default. Not yet measured |
 
 - Serves: ADR-023 (plan, execute, verify), whose §7 and §8.2 reserve any change to the
   protocol the model answers in for separate review; ADR-024 is the first such review,

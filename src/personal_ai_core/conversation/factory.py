@@ -732,6 +732,7 @@ def build_agent(
     web_fetch: Fetch | None = None,
     environment_context: bool = False,
     lenient_protocol: bool = False,
+    native_tools: bool = False,
 ) -> AgentSlice:
     """The agent of AGENT_ARCHITECTURE.md, wired to the Boss model.
 
@@ -761,6 +762,12 @@ def build_agent(
     reply shapes the strict protocol refuses are read -- a Python literal, a
     numeric answer, a string `arguments` for a tool with one required field --
     and each is recorded on the outcome. Nothing the model sees changes.
+
+    `native_tools` (ADR-025) is OFF unless asked for: when on, the tools are
+    declared through the Boss model's native tool interface and its calls are
+    read from the response; each call still becomes an ordinary `ToolRequest`
+    through the policy and the executor. The system text loses its JSON-format
+    lines. It cannot be combined with `lenient_protocol`.
     """
     if events is not None and session_exists is None:
         raise ValueError(
@@ -802,5 +809,6 @@ def build_agent(
             else None
         ),
         lenient_protocol=lenient_protocol,
+        native_tools=native_tools,
     )
     return AgentSlice(loop=loop, executor=executor, checkpoints=checkpoints, workspace=sandbox)

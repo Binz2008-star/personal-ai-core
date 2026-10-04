@@ -92,6 +92,10 @@ class CallLog:
     def __call__(self, url: str, payload: Mapping[str, Any], timeout: int) -> Mapping[str, Any]:
         started = time.perf_counter()
         call: dict[str, Any] = {"options_sent": dict(payload.get("options") or {})}
+        tools = payload.get("tools")
+        if tools is not None:
+            # ADR-025: how many tools the request declared natively.
+            call["tools_sent"] = len(tools)
         try:
             raw = self._inner(url, payload, timeout)
         except Exception as exc:
@@ -104,6 +108,10 @@ class CallLog:
             completion_tokens=raw.get("eval_count"),
             done_reason=raw.get("done_reason"),
         )
+        if tools is not None:
+            message = raw.get("message")
+            returned = message.get("tool_calls") if isinstance(message, Mapping) else None
+            call["tool_calls_returned"] = len(returned) if isinstance(returned, list) else 0
         self.calls.append(call)
         return raw
 
@@ -176,7 +184,8 @@ def _contract(task: Task, language: str) -> AgentTaskContract:
 
 def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
                    workspace: Path, *, environment_context: bool = False,
-                   lenient_protocol: bool = False) -> dict[str, Any]:
+                   lenient_protocol: bool = False,
+                   native_tools: bool = False) -> dict[str, Any]:
     workspace.mkdir(parents=True)
     materialize(task, workspace)
     confirm = BenchmarkConfirm()
@@ -189,7 +198,8 @@ def run_agent_task(task: Task, language: str, settings: Settings, log: CallLog,
     try:
         agent = build_agent(settings, workspace=workspace, transport=log, confirm=confirm,
                             environment_context=environment_context,
-                            lenient_protocol=lenient_protocol)
+                            lenient_protocol=lenient_protocol,
+                            native_tools=native_tools)
         outcome = agent.loop.run(_contract(task, language), session_id="bench")
         answer, steps = outcome.answer, outcome.steps
         record["stop"] = "answered" if outcome.finished else "budget"
@@ -329,6 +339,10 @@ def _parser() -> argparse.ArgumentParser:
                         help="read three reply shapes the strict protocol refuses "
                              "(ADR-024 unit A). Off by default, so a run is comparable "
                              "with one made without it at the same commit")
+    parser.add_argument("--native-tools", action="store_true",
+                        help="declare the tools through the model's native tool interface "
+                             "(ADR-025). Off by default, so a run is comparable with one "
+                             "made without it at the same commit")
     parser.add_argument("--resume", type=Path, help="continue an interrupted result file")
     parser.add_argument("--report", type=Path, help="print the summary of a result file")
     parser.add_argument("--rescore", type=Path,
@@ -365,6 +379,12 @@ def main(
         return rescore(args.rescore, args.tasks, out)
     if args.runs < 1:
         print("--runs must be at least 1", file=out)
+        return 2
+
+    if args.native_tools and args.lenient_protocol:
+        # Lenient parsing reads the text protocol; the native arm has none (ADR-025 §5).
+        print("refusing to run: --native-tools and --lenient-protocol cannot both be on",
+              file=out)
         return 2
 
     settings = Settings.from_env(dict(env) if env is not None else None)
@@ -408,6 +428,7 @@ def main(
         "profile": "none (deliberately empty)",
         "environment_context": args.environment_context,
         "lenient_protocol": args.lenient_protocol,
+        "native_tools": args.native_tools,
         "contract": "each agent task file states action_required and the runner passes an "
                     "AgentTaskContract built from it (ADR-023 §8.3); a file without this key "
                     "ran without a contract",
@@ -430,9 +451,9 @@ def main(
         previous = _read(args.resume)
         old = previous[0] if previous and previous[0].get("kind") == "header" else {}
         for key in ("commit", "model", "tasks", "runs", "languages", "environment_context",
-                    "lenient_protocol"):
+                    "lenient_protocol", "native_tools"):
             # A file from before a flag existed ran without it.
-            flag = key in ("environment_context", "lenient_protocol")
+            flag = key in ("environment_context", "lenient_protocol", "native_tools")
             if (bool(old.get(key)) if flag else old.get(key)) != header[key]:
                 print(f"refusing to resume: {key} differs from the file's header", file=out)
                 return 2
@@ -459,7 +480,8 @@ def main(
             if task.track == "agent":
                 record = run_agent_task(task, language, settings, log, workspace,
                                         environment_context=args.environment_context,
-                                        lenient_protocol=args.lenient_protocol)
+                                        lenient_protocol=args.lenient_protocol,
+                                        native_tools=args.native_tools)
             else:
                 record = run_knowledge_task(task, language, settings, log, workspace)
             calls = log.take()
