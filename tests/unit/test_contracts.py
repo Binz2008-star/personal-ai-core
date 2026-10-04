@@ -10,6 +10,7 @@ from personal_ai_core.core.contracts import (
     ModelRegistry,
     ModelSpecLike,
     PromotionGate,
+    ToolCallingProvider,
     SessionRepository,
     UserRepository,
 )
@@ -107,6 +108,10 @@ _budget_policy: ContextBudgetPolicy = ReserveBasedBudgetPolicy()
 _hybrid_assembler: HybridContextAssemblerProtocol = HybridContextAssembler(
     ScriptAwareTokenEstimator()
 )
+# ADR-025: the Ollama adapter's native tool-call capability, its signature
+# pinned the same way.
+_tool_calling: ToolCallingProvider = OllamaProvider("http://x")
+_model_provider: ModelProvider = OllamaProvider("http://x")
 
 
 def test_event_repository_exposes_no_mutation():

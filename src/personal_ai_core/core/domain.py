@@ -210,8 +210,39 @@ class Event:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolDeclaration:
+    """A tool as it is declared to a model through its native tool interface (ADR-025).
+
+    `parameters` is the tool's JSON-schema `input_schema`, passed as it is.
+    Provider-neutral: an adapter turns it into its backend's own format.
+    """
+
+    name: str
+    description: str
+    parameters: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class NativeToolCall:
+    """A tool call as the backend returned it (ADR-025 §4.2, §4.6).
+
+    Deliberately raw: `name` and `arguments` are what the backend sent, never
+    coerced, so the caller -- not the provider -- decides what is malformed. A
+    native call reaches a tool only after explicit validation and as an
+    ordinary `ToolRequest`, through the policy and the executor.
+    """
+
+    name: Any
+    arguments: Any
+
+
+@dataclass(frozen=True, slots=True)
 class ModelResponse:
-    """What a ModelProvider returns. Provider-neutral by construction."""
+    """What a ModelProvider returns. Provider-neutral by construction.
+
+    `tool_calls` is filled only by a native tool-call request (ADR-025); it is
+    empty for every ordinary `generate`.
+    """
 
     text: str
     model: str
@@ -219,3 +250,4 @@ class ModelResponse:
     completion_tokens: int | None = None
     finish_reason: str | None = None
     raw: Mapping[str, Any] = field(default_factory=dict)
+    tool_calls: tuple[NativeToolCall, ...] = ()
