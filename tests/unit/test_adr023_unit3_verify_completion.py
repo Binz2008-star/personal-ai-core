@@ -312,3 +312,31 @@ def test_with_the_flag_the_task_is_solved_through_the_contracts_command(tmp_path
     run = next(x for x in lines if x["kind"] == "run")
     assert run["success"] and run["verification_rejections"] == 0, run["steps"]
     assert run["steps"][-1]["executed"] and run["steps"][-1]["ok"]
+
+
+# --- what the check would have met in #208's text arm (read after the data) ------------
+
+
+def test_in_208s_text_arm_most_answers_on_test_command_tasks_came_untested():
+    """The handoff's figures. Of 31 answered attempts on the five tasks with a test
+    command, 29 failed and 2 succeeded; only 5 ran pytest (in any form) after the last
+    change, and all 5 failed. A count of what was recorded, not a prediction."""
+    tasks = {t.id for t in load(BENCH) if t.track == "agent" and agent_test_command(t)}
+    path = BENCH.parent / "results" / "bench" / "bench-20261004T004107Z.jsonl"
+    runs = [r for r in map(json.loads, path.read_text(encoding="utf-8").splitlines())
+            if r.get("kind") == "run" and r["task"] in tasks and r["stop"] == "answered"]
+
+    def tested_after_last_change(run: dict) -> bool:
+        executed = [s for s in run["steps"] if s["executed"]]
+
+        def is_test(step: dict) -> bool:
+            command = str(step["arguments"].get("command", ""))
+            return step["tool"] in ("run_command", "shell") and bool(checks.TESTING.search(command))
+
+        last = max((i for i, s in enumerate(executed)
+                    if s["tool"] in checks.EDITING_TOOLS and not is_test(s)), default=-1)
+        return any(is_test(s) for s in executed[last + 1:])
+
+    assert (len(runs), sum(r["success"] for r in runs)) == (31, 2)
+    tested = [r for r in runs if tested_after_last_change(r)]
+    assert len(tested) == 5 and not any(r["success"] for r in tested)
