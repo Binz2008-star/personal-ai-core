@@ -190,6 +190,8 @@ def test_the_event_trail_survives_a_rebuild_in_order():
         assert recorded == [
             EventType.SESSION_STARTED,
             EventType.MESSAGE_RECEIVED,
+            # Every turn is measured against the window, ungrounded ones too.
+            EventType.CONTEXT_ASSEMBLED,
             EventType.GENERATION_REQUESTED,
             EventType.GENERATION_COMPLETED,
         ]

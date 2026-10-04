@@ -43,3 +43,34 @@ class IndexError_(CoreError):
 
 class RetrievalError(CoreError):
     """Retrieval failed."""
+
+
+class ContextOverflowError(CoreError):
+    """A turn's context does not fit the model's window, so it was not sent.
+
+    ADR-005: no silent overflow. Sending it anyway lets the server drop
+    whatever it chooses without saying so. `spoken_for` is what the turn needs
+    before any evidence; `context_window` is what the model has."""
+
+    def __init__(self, *, spoken_for: int, context_window: int, history_tokens: int) -> None:
+        super().__init__(
+            f"the conversation needs about {spoken_for} tokens and the model's window is "
+            f"{context_window}: the turn was not sent"
+        )
+        self.spoken_for = spoken_for
+        self.context_window = context_window
+        self.history_tokens = history_tokens
+
+
+class RollbackIncomplete(CoreError):
+    """Some touched files could not be restored; `unrestored` names them.
+
+    Raised by the agent's checkpoints after every other file was restored.
+    The unrestored files keep their checkpoints, so a later rollback can try
+    them again."""
+
+    def __init__(self, restored: tuple[str, ...], unrestored: tuple[str, ...]) -> None:
+        super().__init__(f"rollback incomplete; not restored: {', '.join(unrestored)}")
+        self.restored = restored
+        self.unrestored = unrestored
+

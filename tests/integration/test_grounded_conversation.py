@@ -97,7 +97,9 @@ def test_the_grounded_service_reports_that_it_grounds(slice_):
 
 
 def test_the_ungrounded_factory_is_unchanged(transport):
-    """Adding retrieval must not alter a path that already worked."""
+    """Adding retrieval must not alter a path that already worked -- except that
+    every turn is now measured against the window (ADR-005, P0-2): the default
+    path records CONTEXT_ASSEMBLED too, with no evidence and grounded False."""
     service, events = build_in_memory_service(transport=transport)
     assert service.grounded is False
 
@@ -108,6 +110,7 @@ def test_the_ungrounded_factory_is_unchanged(transport):
     assert recorded == [
         EventType.SESSION_STARTED,
         EventType.MESSAGE_RECEIVED,
+        EventType.CONTEXT_ASSEMBLED,
         EventType.GENERATION_REQUESTED,
         EventType.GENERATION_COMPLETED,
     ]
@@ -117,6 +120,10 @@ def test_the_ungrounded_factory_is_unchanged(transport):
     # (ADR-011: present in every model call).
     assert [m["role"] for m in transport.last_messages] == ["system", "user"]
     assert GROUNDING_PREAMBLE not in transport.last_messages[0]["content"]
+    assembled = next(e.payload for e in events.list_for_session(session.id)
+                     if e.type is EventType.CONTEXT_ASSEMBLED)
+    assert assembled["grounded"] is False and assembled["history_tokens"] > 0
+    assert assembled["overcommitted"] is False
 
 
 def find_evidence_message(transport):
@@ -341,6 +348,7 @@ def test_a_retrieval_failure_is_recorded_and_fails_the_turn(transport):
         provider=OllamaProvider("http://unused", transport=transport),
         registry=ModelRegistry.from_settings(Settings(), provider="ollama"),
         budget_policy=budget_policy,
+        estimator=estimator,
         identity=DefaultIdentityComposer(),
         context_builder=ContextBuilder(
             retriever=BrokenRetriever(),

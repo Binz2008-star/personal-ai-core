@@ -204,6 +204,7 @@ def test_the_service_accepts_any_protocol_compatible_registry():
         ),
         registry=StubRegistry(),
         budget_policy=StubBudgetPolicy(),
+        estimator=ScriptAwareTokenEstimator(),
         identity=StubIdentityComposer(),
     )
 

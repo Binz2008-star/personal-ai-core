@@ -22,10 +22,55 @@ Checkpoints
 """
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
+from ..core.errors import RollbackIncomplete
 from .sandbox import Workspace
+
+
+def atomic_write_bytes(path: Path, content: bytes) -> None:
+    """Write through a temporary file in the same directory, then replace.
+
+    A direct write leaves a half-written file when the process dies mid-write;
+    `os.replace` on one filesystem is atomic, so a reader sees the old file or
+    the new one, never a mix. The temporary file is removed if anything fails.
+    """
+    def fill(fd: int) -> None:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    _replace_atomically(path, fill)
+
+
+def atomic_write_text(path: Path, content: str) -> None:
+    """`atomic_write_bytes` for text, written as `Path.write_text(content,
+    encoding="utf-8")` writes it (text mode: newlines follow the platform)."""
+    def fill(fd: int) -> None:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    _replace_atomically(path, fill)
+
+
+def _replace_atomically(path: Path, fill: Callable[[int], None]) -> None:
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        fill(fd)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 @dataclass
@@ -84,15 +129,26 @@ class Checkpoints:
         self._before.clear()
 
     def rollback(self) -> tuple[str, ...]:
-        """Restore every touched file. Returns what was restored, in order."""
-        restored = []
+        """Restore every touched file. Returns what was restored, in order.
+
+        One file that cannot be restored does not strand the others: each is
+        tried, and then RollbackIncomplete names what was not restored. Those
+        files keep their checkpoints, so nothing about them is forgotten."""
+        restored: list[str] = []
+        unrestored: list[str] = []
         for path, content in reversed(list(self._before.items())):
-            if content is None:
-                if path.is_file():
-                    path.unlink()
-            else:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(content)
+            try:
+                if content is None:
+                    if path.is_file():
+                        path.unlink()
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    atomic_write_bytes(path, content)
+            except OSError:
+                unrestored.append(self._workspace.relative(path))
+                continue
             restored.append(self._workspace.relative(path))
-        self._before.clear()
+            del self._before[path]
+        if unrestored:
+            raise RollbackIncomplete(tuple(restored), tuple(unrestored))
         return tuple(restored)

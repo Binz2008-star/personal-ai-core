@@ -26,6 +26,7 @@ from ..core.contracts import (
     ModelProvider,
     ModelRegistry,
     SessionRepository,
+    TokenEstimator,
     UserRepository,
 )
 from ..core.domain import (
@@ -36,9 +37,10 @@ from ..core.domain import (
     Session,
     User,
 )
-from ..core.errors import ProviderError
+from ..core.context import ContextAllocation
+from ..core.errors import ContextOverflowError, ProviderError
 from .events import EventRecorder
-from .grounding import ContextBuilder, Grounding, summarize
+from .grounding import ContextBuilder, summarize
 from .language_guard import GUARD_NOTE, check_reply
 
 
@@ -53,6 +55,7 @@ class ConversationService:
         provider: ModelProvider,
         registry: ModelRegistry,
         budget_policy: ContextBudgetPolicy,
+        estimator: TokenEstimator,
         identity: IdentityComposer,
         context_builder: ContextBuilder | None = None,
         sampling: Mapping[str, Any] | None = None,
@@ -64,6 +67,10 @@ class ConversationService:
         self._provider = provider
         self._registry = registry
         self._budget_policy = budget_policy
+        # Required for the same reason: every turn is measured (ADR-005), not
+        # only the grounded ones -- the default path used to send its whole
+        # history unmeasured.
+        self._estimator = estimator
         # Required, not defaulted, for the reason the budget policy is: the
         # contract must be present in EVERY model call (ADR-011). A service
         # that can be constructed without one can make a call without one.
@@ -145,6 +152,37 @@ class ConversationService:
             history=history,
             message_id=user_message.id,
         )
+        # Every turn has an allocation and a CONTEXT_ASSEMBLED event: the
+        # grounded path's, or one measured here from the history alone.
+        allocation = (
+            grounding.allocation
+            if grounding is not None
+            else self._measure(
+                session_id=session_id, spec=spec, history=history,
+                message_id=user_message.id,
+            )
+        )
+        # ADR-005: no silent overflow. A turn that needs more than the window
+        # before any evidence is refused here, recorded, and never sent.
+        if allocation.overcommitted:
+            self._recorder.record(
+                session_id=session_id,
+                type=EventType.GENERATION_FAILED,
+                payload={
+                    "model": spec.name,
+                    "error": "the context window is overcommitted; the turn was not sent",
+                    "reason": "context_overcommitted",
+                    "spoken_for": allocation.spoken_for,
+                    "context_window": allocation.context_window,
+                    "history_tokens": allocation.history,
+                },
+                message_id=user_message.id,
+            )
+            raise ContextOverflowError(
+                spoken_for=allocation.spoken_for,
+                context_window=allocation.context_window,
+                history_tokens=allocation.history,
+            )
 
         # Identity first, then evidence, then the conversation -- ADR-011's
         # implementation boundary, rule 3. The order is the point: the rules
@@ -169,7 +207,7 @@ class ConversationService:
             "message_count": len(prompt),
             "grounded": grounding is not None and grounding.message is not None,
             "evidence_chunks": grounding.used if grounding is not None else 0,
-            "generation_limit": self._generation_limit(spec=spec, grounding=grounding),
+            "generation_limit": allocation.generation_reserve,
             "sampling": dict(self._sampling),
         }
         self._recorder.record(
@@ -183,9 +221,7 @@ class ConversationService:
         # recorded on the allocation, and never sent. A number the provider
         # never sees does not reserve anything. `_generation_options` turns it
         # into the provider's output limit.
-        generation_options = self._generation_options(
-            spec=spec, grounding=grounding, options=options
-        )
+        generation_options = self._generation_options(allocation=allocation, options=options)
 
         try:
             response = self._provider.generate(
@@ -312,35 +348,17 @@ class ConversationService:
         )
         return retried
 
-    def _generation_limit(
-        self, *, spec: ModelSpecLike, grounding: Grounding | None
-    ) -> int:
-        """Tokens the model may generate this turn.
-
-        Taken from the turn's own allocation when there is one. Without
-        grounding there is no allocation, so the policy is asked directly:
-        `history_tokens=0` because only `evidence` depends on history -- the
-        reserve does not, and it is the reserve this reads. Both paths run the
-        same policy, so both produce the same limit for the same model; that
-        equivalence is asserted rather than assumed.
-
-        Enforcement must not depend on whether retrieval happens to be wired.
-        A limit that applies only to grounded turns is not a limit.
-        """
-        if grounding is not None:
-            return grounding.allocation.generation_reserve
-        return self._budget_policy.allocate(
-            model=spec, history_tokens=0
-        ).generation_reserve
-
     def _generation_options(
         self,
         *,
-        spec: ModelSpecLike,
-        grounding: Grounding | None,
+        allocation: ContextAllocation,
         options: Mapping[str, Any] | None,
     ) -> Mapping[str, Any]:
         """The configured sampling, then caller options, plus the output limit.
+
+        The limit is the turn's own allocation's generation reserve, on every
+        path: grounded or not, every turn now has an allocation, so the limit
+        cannot depend on whether retrieval happens to be wired.
 
         An explicit caller value wins: a caller that names `num_predict` or
         `temperature` has said something more specific than the default
@@ -349,10 +367,43 @@ class ConversationService:
         way, so what was sent is recoverable.
         """
         merged = {**self._sampling, **dict(options or {})}
-        merged.setdefault(
-            "num_predict", self._generation_limit(spec=spec, grounding=grounding)
-        )
+        merged.setdefault("num_predict", allocation.generation_reserve)
         return merged
+
+    def _measure(
+        self,
+        *,
+        session_id: str,
+        spec: ModelSpecLike,
+        history: Sequence[Message],
+        message_id: str,
+    ) -> ContextAllocation:
+        """The allocation of a turn with no retrieval, measured and recorded.
+
+        The same policy and the same estimate of the history the grounded path
+        uses, so the two paths budget a conversation alike; recorded as
+        CONTEXT_ASSEMBLED so the size of every turn against the window can be
+        read back, not only the grounded ones."""
+        history_tokens = sum(self._estimator.estimate(m.content) for m in history)
+        allocation = self._budget_policy.allocate(model=spec, history_tokens=history_tokens)
+        self._recorder.record(
+            session_id=session_id,
+            type=EventType.CONTEXT_ASSEMBLED,
+            payload={
+                "grounded": False,
+                "history_messages": len(history),
+                "context_window": allocation.context_window,
+                "history_tokens": allocation.history,
+                "generation_reserve": allocation.generation_reserve,
+                "overhead": allocation.overhead,
+                "identity_reserve": allocation.identity,
+                "guard_reserve": allocation.guard,
+                "overcommitted": allocation.overcommitted,
+                "estimator": self._estimator.model_id,
+            },
+            message_id=message_id,
+        )
+        return allocation
 
     def _ground(
         self,
