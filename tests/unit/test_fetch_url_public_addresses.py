@@ -150,7 +150,9 @@ def test_a_name_that_resolves_to_a_private_address_is_refused(connections, addre
     result = FetchUrl(_fetch(_resolver(address, calls=calls))).run(
         {"url": f"{scheme}://notes.example/today"})
     assert not result.ok
-    assert f"notes.example is {address.split('%')[0]}" in (result.error or "")
+    # As this Python writes the address: ::ffff:127.0.0.1 is ::ffff:7f00:1 on some versions.
+    written = ipaddress.ip_address(address.split("%")[0])
+    assert f"notes.example is {written}," in (result.error or "")
     assert connections == []
     assert calls == ["notes.example"]
 
