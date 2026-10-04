@@ -36,6 +36,8 @@ def test_full_slice_user_session_message_provider_response_event():
     assert recorded == [
         EventType.SESSION_STARTED,
         EventType.MESSAGE_RECEIVED,
+        # Every turn is measured against the window, retrieval or not (ADR-005).
+        EventType.CONTEXT_ASSEMBLED,
         EventType.GENERATION_REQUESTED,
         EventType.GENERATION_COMPLETED,
     ]
