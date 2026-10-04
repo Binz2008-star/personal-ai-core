@@ -61,3 +61,16 @@ class ContextOverflowError(CoreError):
         self.context_window = context_window
         self.history_tokens = history_tokens
 
+
+class RollbackIncomplete(CoreError):
+    """Some touched files could not be restored; `unrestored` names them.
+
+    Raised by the agent's checkpoints after every other file was restored.
+    The unrestored files keep their checkpoints, so a later rollback can try
+    them again."""
+
+    def __init__(self, restored: tuple[str, ...], unrestored: tuple[str, ...]) -> None:
+        super().__init__(f"rollback incomplete; not restored: {', '.join(unrestored)}")
+        self.restored = restored
+        self.unrestored = unrestored
+

@@ -711,6 +711,14 @@ claim written in one place with nothing that notices it going stale.
                each); PASS, not adopted
   #209 465a8cc  docs: ADR-025 measured -- PASS, not adopted; every figure
                re-derived; ledger #207 #208; handoff at 5d5a416
+  #211 b10613d  feat(agent): ADR-023 unit 3 -- no accepted completion without a
+               passing test (off by default)
+  #212 e8cc4e7  fix(agent): fetch_url does not follow a redirect nobody
+               confirmed
+  #213 9be12bd  fix(agent): run_command refuses protected files and
+               workspace-shadowed binaries
+  #214 2dc105c  fix(agent): file writes are atomic, and a rollback that cannot
+               restore a file says so and keeps its checkpoint
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1177,7 +1185,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-04, main at 465a8cc)
+NEXT SESSION HANDOFF (updated 2026-10-04, main at 2dc105c)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1204,7 +1212,7 @@ WHERE THINGS STAND (2026-10-04)
     refused as answers (9 attempts, all failed, 8 of them git-commit-release
     en, which fell 5/10 -> 0/10). Every figure:
     tests/unit/test_adr025_measurement_reading.py.
-  - BUILT (this PR, 2026-10-04): ADR-023 unit 3, §2.3 `tests_passed`, off by
+  - BUILT (#211, 2026-10-04): ADR-023 unit 3, §2.3 `tests_passed`, off by
     default (ADR-023 §8.5). The owner, after ranking unit 3 first: "i require
     real work implementation" and "i grant you: full engineering ownership of
     personal-ai-core". Next: measure it on the rig, default arm against
@@ -1270,7 +1278,14 @@ WHERE THINGS STAND (2026-10-04)
     loop, `--native-tools` and the verdict predicate, ADR-025 PR 2 of 2)
     merged; main was 2d9b569. Then #208 (the measurement, above) merged; main
     was 5d5a416. Then #209 (the record of the measurement) merged; main
-    is 465a8cc.
+    was 465a8cc. Then #211 (unit 3, off by default), #212 (fetch_url refuses
+    unconfirmed redirects) and #213 (run_command refuses protected files and,
+    on Windows, workspace-shadowed binaries) merged; main was 9be12bd. Then
+    #214 (atomic file writes; a rollback that cannot restore a file raises
+    RollbackIncomplete and keeps its checkpoint) merged; main is 2dc105c. #212 and
+    #213 are OpenCode's Wave 1 (P0-4, P1-9 and the redirect fix), backed up on
+    `wip/opencode-20261004` with the owner's approval and reviewed by the lead;
+    P0-5 (a fixed shell environment) stays there until it is checked on the rig.
   - CANDIDATE-MODEL SCREEN (2026-10-03, outside the repository): run by Codex
     on the rig at 1861756, one pass of 10 agent tasks x 2 languages, its
     result files under C:\Users\loyal\pt\pac-candidate-eval-1861756\ and

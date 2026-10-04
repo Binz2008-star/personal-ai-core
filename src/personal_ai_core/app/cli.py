@@ -37,7 +37,7 @@ from ..conversation.factory import (
 from ..core.agent import AgentTaskContract
 from ..core.config import Settings
 from ..core.domain import EventType
-from ..core.errors import ContextOverflowError, ProviderError
+from ..core.errors import ContextOverflowError, ProviderError, RollbackIncomplete
 from ..core.feedback import CORRECTION_KEY, FEEDBACK_EVENT_TYPE, FeedbackOutcome
 from ..core.knowledge import Document
 
@@ -843,8 +843,14 @@ def _agent_session(*, agent, session_id, lines, out, err) -> int:
             lines,
             out,
         ):
-            restored = agent.checkpoints.rollback()
-            print(f"         restored: {', '.join(restored)}", file=out)
+            try:
+                restored = agent.checkpoints.rollback()
+            except RollbackIncomplete as exc:
+                if exc.restored:
+                    print(f"         restored: {', '.join(exc.restored)}", file=out)
+                print(f"         NOT restored: {', '.join(exc.unrestored)}", file=out)
+            else:
+                print(f"         restored: {', '.join(restored)}", file=out)
         else:
             agent.checkpoints.commit()
     return 2 if invalid_tasks else 0
