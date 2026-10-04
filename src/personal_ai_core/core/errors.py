@@ -43,3 +43,21 @@ class IndexError_(CoreError):
 
 class RetrievalError(CoreError):
     """Retrieval failed."""
+
+
+class ContextOverflowError(CoreError):
+    """A turn's context does not fit the model's window, so it was not sent.
+
+    ADR-005: no silent overflow. Sending it anyway lets the server drop
+    whatever it chooses without saying so. `spoken_for` is what the turn needs
+    before any evidence; `context_window` is what the model has."""
+
+    def __init__(self, *, spoken_for: int, context_window: int, history_tokens: int) -> None:
+        super().__init__(
+            f"the conversation needs about {spoken_for} tokens and the model's window is "
+            f"{context_window}: the turn was not sent"
+        )
+        self.spoken_for = spoken_for
+        self.context_window = context_window
+        self.history_tokens = history_tokens
+

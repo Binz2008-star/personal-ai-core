@@ -255,6 +255,7 @@ def test_identity_is_never_persisted():
         provider=OllamaProvider("http://unused", transport=transport),
         registry=ModelRegistry.from_settings(Settings(), provider="ollama"),
         budget_policy=ReserveBasedBudgetPolicy(),
+        estimator=ScriptAwareTokenEstimator(),
         identity=DefaultIdentityComposer(),
     )
     session = service.start_session(service.create_user().id)
