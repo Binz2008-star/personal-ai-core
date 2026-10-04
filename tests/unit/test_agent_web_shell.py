@@ -346,15 +346,17 @@ def test_shell_is_not_run_without_a_yes(ws):
     assert not record.executed and not (ws.root / "made.txt").exists()
 
 
-def test_the_shell_does_not_see_secret_variables(monkeypatch):
+def test_the_shell_sees_only_a_fixed_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "t")
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setenv("DATABASE_URL", "postgres://u:p@h/d")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "id")
     monkeypatch.setenv("PAC_WORKSPACE_NOTE", "kept")
-    env = shell_environment()
+    env = shell_environment(tmp_path)
     assert "GITHUB_TOKEN" not in env and "OPENAI_API_KEY" not in env
-    assert "DATABASE_URL" not in env and env["PAC_WORKSPACE_NOTE"] == "kept"
-    assert "PATH" in env
+    assert "DATABASE_URL" not in env and "AWS_ACCESS_KEY_ID" not in env
+    assert "PAC_WORKSPACE_NOTE" not in env
+    assert "PATH" in env and env["HOME"] == str(tmp_path)
 
 
 # --- wired into the agent -----------------------------------------------------------------

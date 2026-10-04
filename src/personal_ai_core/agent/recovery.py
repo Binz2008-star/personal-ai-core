@@ -22,10 +22,36 @@ Checkpoints
 """
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .sandbox import Workspace
+
+
+def _atomic_write_bytes(path: Path, content: bytes) -> None:
+    """Restore or write bytes through a temporary file, then replace (P0-7).
+
+    `os.replace` on the same filesystem is atomic, so readers see the old
+    file or the new one, never a mix. A temporary file left by a failure is
+    removed.
+    """
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 @dataclass
@@ -84,15 +110,30 @@ class Checkpoints:
         self._before.clear()
 
     def rollback(self) -> tuple[str, ...]:
-        """Restore every touched file. Returns what was restored, in order."""
-        restored = []
+        """Restore every touched file. Returns what was restored, in order.
+
+        A file that cannot be restored does not strand the rest: each file
+        is isolated, the loop continues, and leftovers are reported loudly
+        instead of a truncated list standing in for completion.
+        """
+        restored: list[str] = []
+        failed: list[str] = []
         for path, content in reversed(list(self._before.items())):
-            if content is None:
-                if path.is_file():
-                    path.unlink()
-            else:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(content)
-            restored.append(self._workspace.relative(path))
+            relative = self._workspace.relative(path)
+            try:
+                if content is None:
+                    if path.is_file():
+                        path.unlink()
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    _atomic_write_bytes(path, content)
+            except OSError:
+                failed.append(relative)
+                continue
+            restored.append(relative)
         self._before.clear()
+        if failed:
+            raise RuntimeError(
+                f"rollback incomplete, unrestored: {', '.join(failed)}"
+            )
         return tuple(restored)

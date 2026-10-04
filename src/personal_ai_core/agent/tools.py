@@ -28,16 +28,16 @@ from __future__ import annotations
 import difflib
 import fnmatch
 import os
-import re
+import shutil
 import signal
 import subprocess
 import sys
-import tempfile
+from pathlib import Path
 from typing import Any, Mapping
 
 from ..core.agent import RiskLevel, ToolResult, ToolSpec
-from .commands import validate_command
-from .recovery import Checkpoints
+from .commands import CommandRejected, validate_command
+from .recovery import Checkpoints, _atomic_write_bytes
 from .sandbox import SandboxError, Workspace, is_protected
 
 MAX_OUTPUT_CHARS = 20_000
@@ -297,6 +297,11 @@ class FindFiles:
         )
 
 
+def _atomic_write(path: Any, content: str) -> None:
+    """Write text atomically via `recovery._atomic_write_bytes` (P0-7)."""
+    _atomic_write_bytes(path, content.encode("utf-8"))
+
+
 class WriteFile:
     def __init__(self, workspace: Workspace, checkpoints: Checkpoints | None = None) -> None:
         self._workspace = workspace
@@ -326,7 +331,7 @@ class WriteFile:
         if self._checkpoints is not None:
             self._checkpoints.before_mutation(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        _atomic_write(path, content)
         verb = "overwrote" if existed else "created"
         return ToolResult(
             ok=True, output=f"{verb} {self._workspace.relative(path)} ({len(content)} characters)"
@@ -406,7 +411,7 @@ class EditFile:
             return ToolResult(ok=True, output=f"no change to {self._workspace.relative(path)}")
         if self._checkpoints is not None:
             self._checkpoints.before_mutation(path)
-        self._atomic_write(path, new_text)
+        _atomic_write(path, new_text)
         relative = self._workspace.relative(path)
         diff = "\n".join(
             difflib.unified_diff(
@@ -423,30 +428,6 @@ class EditFile:
             f"{len(text)} to {len(new_text)} characters)\n{diff}"
         )
         return ToolResult(ok=True, output=output, truncated=truncated)
-
-    @staticmethod
-    def _atomic_write(path: Any, content: str) -> None:
-        """Write through a temporary file in the same directory, then replace.
-
-        A direct `write_text` leaves a half-written file when the process dies
-        mid-write; `os.replace` is atomic on the same filesystem, so readers
-        see the old file or the new one, never a mix.
-        """
-        fd, tmp = tempfile.mkstemp(
-            dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(content)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(tmp, path)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
 
 
 class DeleteFile:
@@ -478,6 +459,61 @@ class DeleteFile:
         return ToolResult(ok=True, output=f"deleted {self._workspace.relative(path)}")
 
 
+def _refuse_protected_arguments(workspace: Workspace, args: list[str]) -> None:
+    """Reject commands that name a file the file tools may not touch (P0-4).
+
+    `validate_command` is workspace-agnostic: it blocks escapes but cannot
+    know which names are protected or reserved. The workspace knows, so the
+    check lives here, where the workspace is, after validation passes. Each
+    non-flag token is tried whole, plus its `--opt=value` value, its
+    short-option attached value, and its `rev:path` suffix (for git
+    `show HEAD:.env`); an empty or flag-like remainder is skipped, mirroring
+    `_refuse_escaping_path`'s shapes. A refusal raises before anything runs.
+    """
+    for token in args[1:]:
+        candidates = [token]
+        if "=" in token:
+            candidates.append(token.split("=", 1)[1])
+        if token.startswith("-") and not token.startswith("--") and len(token) > 2:
+            candidates.append(token[2:])
+        if ":" in token:
+            candidates.append(token.split(":")[-1])
+        for candidate in candidates:
+            if not candidate or candidate.startswith("-"):
+                continue
+            try:
+                workspace.resolve_for_write(candidate)
+            except SandboxError as exc:
+                raise CommandRejected(
+                    f"command touches a file the agent may not use: {token} ({exc})"
+                ) from None
+
+
+def _refuse_shadowed_executable(workspace: Workspace, name: str) -> None:
+    """Reject an allowlisted command a workspace file would shadow (P1-9).
+
+    Windows `CreateProcess` searches the working directory before `PATH`, so
+    confirming the bare name `ruff` can run `workspace/ruff.exe` instead of
+    the system binary. Only enforced on Windows, where the shadowing happens;
+    elsewhere the loader does not search CWD. A name with no system binary
+    is left to the existing not-installed path.
+    """
+    if sys.platform != "win32":
+        return
+    found = shutil.which(name)
+    if found is None:
+        return
+    try:
+        inside = Path(found).resolve().is_relative_to(workspace.root)
+    except OSError:
+        return
+    if inside:
+        raise CommandRejected(
+            f"workspace shadows the command: {name} resolves to {found}, "
+            "which the agent must not run"
+        )
+
+
 class RunCommand:
     def __init__(self, workspace: Workspace, *, timeout_seconds: int = 60) -> None:
         self._workspace = workspace
@@ -500,6 +536,8 @@ class RunCommand:
 
     def run(self, arguments: Mapping[str, Any]) -> ToolResult:
         args = validate_command(arguments["command"])
+        _refuse_protected_arguments(self._workspace, args)
+        _refuse_shadowed_executable(self._workspace, args[0])
         # An environment built from nothing, not the parent's minus a
         # denylist: the source blanked four named secrets and passed the
         # rest, so any secret it did not think of was inherited.
@@ -531,17 +569,23 @@ class RunCommand:
         return ToolResult(ok=True, output=output, truncated=truncated)
 
 
-# Environment variables whose NAMES say they hold a secret. The shell runs the
-# owner's own tools, so it inherits their environment -- minus these, so a
-# model that runs `env` or `set` does not read a token into its context.
-_SECRET_NAME = re.compile(
-    r"TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE|CREDENTIAL|AUTH|_KEY$|DSN|DATABASE_URL|COOKIE|SESSION",
-    re.IGNORECASE,
-)
+def shell_environment(home: object) -> dict[str, str]:
+    """The shell's environment, built from nothing (P0-5).
 
-
-def shell_environment() -> dict[str, str]:
-    return {name: value for name, value in os.environ.items() if not _SECRET_NAME.search(name)}
+    Mirrors `RunCommand`: fixed keys only, so no owner secret can reach the
+    model through `env` output, whatever its name. There is deliberately no
+    denylist to keep complete — the previous one missed names like
+    `AWS_ACCESS_KEY_ID`.
+    """
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(home),
+        "LANG": "C.UTF-8",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    if os.name == "nt":
+        env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
+    return env
 
 
 class Shell:
@@ -580,7 +624,8 @@ class Shell:
         try:
             # shell=True is the point of this tool; every command is confirmed.
             returncode, stdout, stderr = run_bounded(
-                command, shell=True, cwd=self._workspace.root, env=shell_environment(),
+                command, shell=True, cwd=self._workspace.root,
+                env=shell_environment(self._workspace.root),
                 timeout=self.spec.timeout_seconds,
             )
         except subprocess.TimeoutExpired:
