@@ -2,7 +2,8 @@
 
 **Status:** MEASURED (2026-10-04, #208): **PASS** on the pre-declared target
 `NO_EXECUTED_TOOL_CALL` · **NOT adopted**: native tool calls stay opt-in behind
-`--native-tools`, and the default is unchanged (the owner, 2026-10-04, §12) · ACCEPTED as an
+`--native-tools`, and the default is unchanged (the owner, 2026-10-04, §12) · Amendment 1
+is a DRAFT, neither accepted nor implemented · ACCEPTED as an
 experiment by the owner (2026-10-03, §11) · revised 2026-10-03 after the owner's review of
 #205 (six corrections, §4 to §6 and §9), and again after its second review (the R1
 predicate, the R0 wording, the validation boundary: §4.6, §6)
@@ -574,3 +575,126 @@ mechanism, not yet a proven causal fix." Only a fix and a new measurement can sh
   implementing it is authorized.
 - ADR-023's verification before completion (unit 3) ranks above any change of the default.
 
+## Amendment 1 (DRAFT, 2026-10-04): two native-channel defects, a diagnosis before any repair, and how a repair would be measured
+
+**Status: DRAFT.** Written by the lead on the owner's instruction of 2026-10-04, which
+authorized a draft and nothing more: "مسودة ADR-025 amendment — مسموح بمسودة فقط، لا
+اعتماد ولا تنفيذ". Neither accepting this amendment nor implementing any part of it is
+authorized. §12's state is unchanged: measured, PASS, **not adopted**, and
+`native_tools=False` is the default.
+
+### A1.1 The defects this amendment is about
+
+Two observations made after #208's verdict was read (§12, items 1 and 2). They are kept as
+the owner worded them: observed evidence and a likely mechanism, not a proven cause.
+
+- **D-a: replies lost between the model and the loop.** A native-arm model call whose
+  reply the loop refused as empty (`the reply is empty`), although the call generated
+  tokens (`completion_tokens` > 0) and returned no tool call (`tool_calls_returned` == 0).
+  #208 has 82 such replies (14 to 1024 tokens generated, median 37), in 71 of 240 agent
+  attempts. What the model wrote is **not recorded and cannot be recovered**: the backend
+  returned neither text nor a call. A likely mechanism, not shown: Ollama's tool-call
+  parser recognized the start of a `<tool_call>` block, could not parse it, and returned
+  nothing. If so, §5's rule that `<tool_call>` text without a parsed call is a protocol
+  error never sees the text, so the model is told its reply was empty rather than that
+  its call could not be read.
+- **D-b: calls written as a name, then an object.** An answer refused for not having
+  acted whose text is a tool name followed by a JSON object, such as
+  `shell {"command": "git commit ..."}`. §5's detector reads a call written as text only
+  when the object itself carries `"name"` or `"tool"`, so these were treated as answers
+  and the model was told to act, not to use the tool-call interface. #208 has 25, in 9
+  attempts.
+
+Out of scope here: several native calls in one reply (6 replies in #208). §5's
+one-call-per-reply rule is unchanged.
+
+### A1.2 Step 0: diagnose D-a before choosing a repair
+
+A repair for D-a cannot be chosen from a record that does not contain the text. The
+first step, proposed for separate authorization, is read-only on the rig and changes no
+code, setting or default:
+
+- For a small fixed set of task-language pairs where #208 lost a **first** reply (the
+  first call's messages depend only on the task, so they can be rebuilt exactly), send
+  the same first request a fixed number of times, and capture the model's raw output
+  next to what `/api/chat` returns for it. The exact procedure (which pairs, how many
+  repetitions, and how the raw output is obtained without changing the request) is
+  fixed in the authorization, before any request is sent.
+- Report counts only: how many raw outputs hold a well-formed `<tool_call>` block, a
+  malformed one, or none; and how many of each `/api/chat` returned as empty.
+- **What it can show:** whether the lost replies are malformed tool calls. **What it
+  cannot show:** that any repair would change a result. Sampling is not fixed
+  (the agent loop sends only `num_predict`), so a replay reproduces a distribution, not
+  #208's replies.
+
+### A1.3 Candidate repairs, none chosen
+
+Chosen only after step 0, by the owner. In every candidate a call written as text is
+never executed, `arguments` is never coerced, and §4.6's validation boundary is unchanged.
+
+- **R-a1, feedback.** When a native reply is empty but its call generated tokens, the
+  feedback says the tool call could not be read and asks for one call whose `arguments`
+  is a JSON object, instead of saying that the reply was empty. Charged to the budget as
+  today. The smallest change; it gives the model nothing it wrote back.
+- **R-a2, the channel.** The adapter obtains the model's raw output for a tool-calling
+  request and reads `<tool_call>` blocks itself, so a malformed call becomes a visible
+  protocol error with its text, as §5 intended. Larger: it changes the provider adapter,
+  and the template becomes ours to render. Only if step 0 shows malformed calls.
+- **R-b, the detector.** §5's detector also reads a tool name followed by a JSON object
+  as a call written as text: a protocol error that names the tool-call interface, charged
+  as today, never executed.
+
+### A1.4 Why a repair is not a retroactive improvement of #208
+
+- #208 was read once (ADR-023 amendment 1, R5). Its verdict and every figure in §12 stand
+  as recorded and are not re-scored, re-read or adjusted under any repair.
+- A repair changes the native arm. A result after a repair belongs to a new comparison,
+  at a new commit, with its own pre-declared target. Its figures are never added to,
+  subtracted from or combined with #208's.
+- D-a and D-b were found after #208's verdict was read. They may motivate a new target,
+  provided it is declared before the new runs. They are not evidence that a repair works.
+- No text says a repair "will" restore `git-commit-release` or raise success. That is a
+  hypothesis the new measurement tests, and it may fail.
+
+### A1.5 How a repair would be measured
+
+- **The comparison isolates the repair.** Arm 1 is the native channel as #207 built it
+  (`--native-tools`). Arm 2 is the same plus the repair, behind its own flag. Both arms run
+  at one commit, 10 runs per side, by #208's rig procedure (fresh worktree, warm-up, the
+  `/api/ps` reading before each arm, no pull during the runs).
+- **The R1 target, proposed for the owner to fix before any run:** `NO_EXECUTED_TOOL_CALL`
+  (§6.1) again, unchanged. It is outcome-based. A repair that only relabels a refusal
+  cannot move it; it moves only if the model then makes a call that executes. Rejected
+  alternative: a target counting lost or unread calls, because the repair changes how
+  those are recorded, so the count would move by construction.
+- R0, R2 and R3 as in ADR-023 amendment 1, with §6.1's bound of 5 provider failures per
+  arm.
+- **Reported, never gating:** per arm, the count of D-a and D-b replies, and the success
+  of `git-commit-release` en. Ten runs cannot decide one task.
+- **Not asked for here:** any comparison against the text protocol. Adopting the native
+  channel as the default would need that comparison and a separate decision.
+
+### A1.6 What stays fixed
+
+The Boss (`huihui_ai/qwen2.5-abliterate:7b`) and its weights digest; the task corpus and
+the scorer (`bench-checks-v2`); 10 runs, both languages and both tracks; `num_ctx` 8192;
+generation settings (only `num_predict` sent); the budget of 3 failures and 12 actions;
+the tools, policy, executor, verifier and recovery; the native system text of §4.4;
+one call per reply; environment context and lenient parsing off in both arms. The only
+difference between the arms is the chosen repair.
+
+### A1.7 Opt-in throughout
+
+`--native-tools` stays opt-in and off by default for the whole experiment. A repair sits
+behind its own flag, off by default, effective only with `--native-tools`. Nothing changes
+in `pac --agent`. Nothing here is a step towards a default change, which would be a
+separate decision on a separate comparison.
+
+### A1.8 Decisions this draft asks for, none taken
+
+- **DA1.** Authorize step 0 (A1.2) on the rig, with its procedure fixed in the
+  authorization.
+- **DA2.** After step 0, choose the repair or repairs (A1.3), or none.
+- **DA3.** Fix the R1 target (A1.5) before any run.
+- **DA4.** Authorize the implementation behind its own off-by-default flag.
+- **DA5.** Authorize the measurement.
