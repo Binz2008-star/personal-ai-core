@@ -21,6 +21,7 @@ Both tools take an injectable `fetch`, so tests never touch the network.
 from __future__ import annotations
 
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
@@ -41,6 +42,36 @@ Fetch = Callable[[str, float], "tuple[str, str, bytes]"]
 def urllib_fetch(url: str, timeout: float) -> tuple[str, str, bytes]:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 -- scheme checked by the caller
+        body = response.read(MAX_PAGE_BYTES + 1)
+        return response.geturl(), response.headers.get("Content-Type", ""), body
+
+
+class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Require a separately confirmed fetch for every redirect destination.
+
+    `fetch_url` is confirmed for one URL (HIGH risk). Following a redirect would
+    reach a URL nobody confirmed -- another host, or an address inside the
+    network. The redirect is refused and its destination named, so it can be
+    asked for, and confirmed, as a fetch of its own."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if fp is not None:
+            fp.close()
+        raise urllib.error.HTTPError(
+            req.full_url,
+            code,
+            f"redirected to {newurl}; a redirect is not followed: fetch that URL "
+            "to have it confirmed on its own",
+            headers,
+            None,
+        )
+
+
+def urllib_fetch_url(url: str, timeout: float) -> tuple[str, str, bytes]:
+    """Fetch one approved URL without following an unapproved redirect."""
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    opener = urllib.request.build_opener(_RejectRedirectHandler)
+    with opener.open(request, timeout=timeout) as response:
         body = response.read(MAX_PAGE_BYTES + 1)
         return response.geturl(), response.headers.get("Content-Type", ""), body
 
@@ -206,7 +237,7 @@ class WebSearch:
 
 class FetchUrl:
     def __init__(self, fetch: Fetch | None = None, *, timeout_seconds: int = 30) -> None:
-        self._fetch = fetch or urllib_fetch
+        self._fetch = fetch or urllib_fetch_url
         self.spec = ToolSpec(
             name="fetch_url",
             description=(

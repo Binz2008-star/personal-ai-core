@@ -4,7 +4,10 @@ No test touches the network: the web tools take an injected `fetch`.
 """
 from __future__ import annotations
 
+import socket
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -19,6 +22,7 @@ from personal_ai_core.agent.web import (
     WebSearch,
     html_to_text,
     parse_results,
+    urllib_fetch_url,
 )
 from personal_ai_core.core.agent import Decision, RiskLevel, ToolRequest
 
@@ -123,6 +127,123 @@ def test_fetch_url_reads_plain_text_and_json():
     assert result.ok and result.output.endswith('{"a": 1}')
 
 
+@pytest.mark.parametrize("scheme", ["http", "https"])
+def test_fetch_url_accepts_external_http_schemes(scheme):
+    fetch = fetch_returning("page", "text/plain")
+    result = FetchUrl(fetch).run({"url": f"{scheme}://example.test/page"})
+    assert result.ok and result.output.endswith("page")
+    assert fetch.calls == [f"{scheme}://example.test/page"]  # type: ignore[attr-defined]
+
+
+def _serve(handler):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def _redirect_handler(destination, hits):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(302)
+            self.send_header("Location", destination)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    return Handler
+
+
+def _page_handler(hits):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"private response")
+
+        def log_message(self, format, *args):
+            pass
+
+    return Handler
+
+
+def test_fetch_url_does_not_follow_a_redirect_to_loopback():
+    target_hits = []
+    target, target_thread = _serve(_page_handler(target_hits))
+    source_hits = []
+    target_url = f"http://127.0.0.1:{target.server_port}/secret"
+    source, source_thread = _serve(_redirect_handler(target_url, source_hits))
+    try:
+        result = FetchUrl(urllib_fetch_url).run(
+            {"url": f"http://127.0.0.1:{source.server_port}/redirect"}
+        )
+    finally:
+        source.shutdown()
+        source.server_close()
+        source_thread.join()
+        target.shutdown()
+        target.server_close()
+        target_thread.join()
+
+    assert not result.ok
+    assert source_hits == ["/redirect"]
+    assert target_hits == []
+    # The destination is named, so it can be asked for as a fetch of its own.
+    assert f"redirected to {target_url}" in (result.error or "")
+
+
+@pytest.mark.parametrize("blocked_address", ["10.23.45.67", "169.254.169.254"])
+def test_fetch_url_does_not_attempt_a_redirect_to_private_or_link_local_address(
+    monkeypatch, blocked_address
+):
+    source_hits = []
+    destination = f"http://{blocked_address}/private"
+    source, source_thread = _serve(_redirect_handler(destination, source_hits))
+    attempted_hosts = []
+    real_create_connection = socket.create_connection
+
+    def track_connection(address, *args, **kwargs):
+        host = address[0] if isinstance(address, tuple) else address
+        attempted_hosts.append(host)
+        if host == blocked_address:
+            raise AssertionError("redirected private/link-local request must not be attempted")
+        return real_create_connection(address, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "create_connection", track_connection)
+    try:
+        result = FetchUrl(urllib_fetch_url).run(
+            {"url": f"http://127.0.0.1:{source.server_port}/redirect"}
+        )
+    finally:
+        source.shutdown()
+        source.server_close()
+        source_thread.join()
+
+    assert not result.ok
+    assert source_hits == ["/redirect"]
+    assert blocked_address not in attempted_hosts
+
+
+def test_default_fetch_url_reads_a_direct_http_response():
+    hits = []
+    server, thread = _serve(_page_handler(hits))
+    try:
+        result = FetchUrl().run(
+            {"url": f"http://127.0.0.1:{server.server_port}/page"}
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+    assert result.ok and result.output.endswith("private response")
+    assert hits == ["/page"]
+
+
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://x.test/a", "javascript:x", "notes.md"])
 def test_fetch_url_only_speaks_http(url):
     fetch = fetch_returning(PAGE)
@@ -184,11 +305,18 @@ def test_a_query_is_sent_once_the_user_says_yes():
     assert record.executed and len(fetch.calls) == 1  # type: ignore[attr-defined]
 
 
-def test_a_url_is_not_fetched_unless_the_user_says_yes(ws):
+def test_a_url_is_not_fetched_unless_the_user_says_yes():
     fetch = fetch_returning(PAGE)
     executor = ToolExecutor([FetchUrl(fetch)], RiskPolicy(), confirm=lambda r, s: False)
     record = executor.execute(ToolRequest("fetch_url", {"url": "https://x.test/?q=secret"}))
     assert not record.executed and fetch.calls == []  # type: ignore[attr-defined]
+
+
+def test_a_url_is_fetched_once_the_user_says_yes():
+    fetch = fetch_returning(PAGE)
+    executor = ToolExecutor([FetchUrl(fetch)], RiskPolicy(), confirm=lambda r, s: True)
+    record = executor.execute(ToolRequest("fetch_url", {"url": "https://x.test/guide"}))
+    assert record.executed and fetch.calls == ["https://x.test/guide"]  # type: ignore[attr-defined]
 
 
 # --- shell ------------------------------------------------------------------------------
