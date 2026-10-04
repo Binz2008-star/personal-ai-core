@@ -192,6 +192,8 @@ def test_fetch_url_does_not_follow_a_redirect_to_loopback():
     assert not result.ok
     assert source_hits == ["/redirect"]
     assert target_hits == []
+    # The destination is named, so it can be asked for as a fetch of its own.
+    assert f"redirected to {target_url}" in (result.error or "")
 
 
 @pytest.mark.parametrize("blocked_address", ["10.23.45.67", "169.254.169.254"])

@@ -21,6 +21,7 @@ Both tools take an injectable `fetch`, so tests never touch the network.
 from __future__ import annotations
 
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
@@ -46,7 +47,12 @@ def urllib_fetch(url: str, timeout: float) -> tuple[str, str, bytes]:
 
 
 class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Require a separately confirmed fetch for every redirect destination."""
+    """Require a separately confirmed fetch for every redirect destination.
+
+    `fetch_url` is confirmed for one URL (HIGH risk). Following a redirect would
+    reach a URL nobody confirmed -- another host, or an address inside the
+    network. The redirect is refused and its destination named, so it can be
+    asked for, and confirmed, as a fetch of its own."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if fp is not None:
@@ -54,7 +60,8 @@ class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
         raise urllib.error.HTTPError(
             req.full_url,
             code,
-            "redirects require explicit approval of the destination URL",
+            f"redirected to {newurl}; a redirect is not followed: fetch that URL "
+            "to have it confirmed on its own",
             headers,
             None,
         )
