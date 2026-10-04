@@ -1,18 +1,20 @@
 # ADR-025 — An experiment: the Boss model's native tool-call channel, against the text protocol
 
-**Status:** ACCEPTED as an experiment by the owner (2026-10-03, §11) · the gate, the
-implementation and the measurement are authorized · adopting native tool calls as the
-default is **not** decided, and waits for the measurement · it proposes an experiment, not
-the adoption of native tool calling · revised 2026-10-03 after the owner's review of #205 (six
-corrections, §4 to §6 and §9), and again after its second review (the R1 predicate, the
-R0 wording, the validation boundary: §4.6, §6)
+**Status:** MEASURED (2026-10-04, #208): **PASS** on the pre-declared target
+`NO_EXECUTED_TOOL_CALL` · **NOT adopted**: native tool calls stay opt-in behind
+`--native-tools`, and the default is unchanged (the owner, 2026-10-04, §12) · ACCEPTED as an
+experiment by the owner (2026-10-03, §11) · revised 2026-10-03 after the owner's review of
+#205 (six corrections, §4 to §6 and §9), and again after its second review (the R1
+predicate, the R0 wording, the validation boundary: §4.6, §6)
 
 | Stage | State |
 |---|---|
 | Proposed | yes: this document, written by the lead on 2026-10-03 after a read-only audit |
 | Evidence | §1: the installed Boss template (read on the rig by the owner), the provider code, the contracts, the refused replies of #198 |
 | Authorized | by the owner, 2026-10-03 (§11): the gate `NO_EXECUTED_TOOL_CALL` with ADR-023 amendment 2, the implementation behind an off-by-default flag, and the measurement on the rig. Adoption as the default is not decided |
-| Implemented | PR 1, the core types and the Ollama adapter (#206); PR 2, the loop, `--native-tools` and the verdict predicate (#207). Off by default. Not yet measured |
+| Implemented | PR 1, the core types and the Ollama adapter (#206); PR 2, the loop, `--native-tools` and the verdict predicate (#207). Off by default |
+| Measured | on the rig at 2d9b569 (#208): the text arm and the native arm, 480 runs each, 0 provider errors. Verdict **PASS** (§12) |
+| Decided | by the owner, 2026-10-04 (§12): measured, PASS, **not adopted**; native tool calls stay opt-in. Merging #208 records the evidence; it is not adoption |
 
 - Serves: ADR-023 (plan, execute, verify), whose §7 and §8.2 reserve any change to the
   protocol the model answers in for separate review; ADR-024 is the first such review,
@@ -512,3 +514,63 @@ Superseded by §11. The authorization boundary as it stood before this decision
 check, the provider audit, the OSS audit, and writing this ADR as a draft are authorized.
 Merging this ADR, implementing it, any native-tools rig run, any change of the Boss, a
 router or fallback, any memory change, and any database change are not.
+
+## 12. Measured (2026-10-04)
+
+**The runs.** On the rig at 2d9b569, in a fresh worktree, the same loaded model
+(`context_length` 8192, `size_vram` 4550589152 of `size` 5378502817 before both arms):
+`python -m personal_ai_core.app.bench --runs 10 --num-ctx 8192`, then the same with
+`--native-tools`. 480 runs each, 240 of them agent attempts; 0 provider errors; no
+`context_mismatch`; every task digest identical. The files and the verbatim output of
+`compare --unit native-tools` are in #208; `tests/unit/test_adr025_measurement_reading.py`
+re-derives every figure below except the false-rejection count, which #208 records verbatim.
+
+**The verdict, by the rule fixed before the runs (§6.1, ADR-023 amendment 2): PASS.**
+- R0 readable. R1: 53 paired attempts left `NO_EXECUTED_TOOL_CALL` and 30 entered it;
+  one-sided exact sign test p = 0.0076, which holds at 5%.
+- R2 no regression: agent en failures 96 -> 92, agent ar 98 -> 94, knowledge en 0 -> 1,
+  knowledge ar 16 -> 14.
+- R3 costs (reported, never gating): attempts stopped on the budget 123 -> 74; answers
+  rejected for not having acted 113 -> 130; protocol errors 98 -> 96; false rejections
+  2 of 113 -> 0 of 130.
+
+**What it establishes, and what it does not.** It establishes the pre-declared effect:
+with the native channel the model executes a tool in more attempts. It does not establish
+that the native channel is the better default. Agent success moved from 46/240 to 54/240
+(en 24 -> 28, ar 22 -> 26), but no rule tests a rise in success: R2 only guards against a
+regression. Per task, 9 rose and 5 fell; `git-commit-release` en fell 5/10 -> 0/10.
+
+**Decided by the owner (2026-10-04), in these words:** "موافق، اقبل النتيجة بهذه الصيغة
+وادمج #208", and then, with one correction to the causal wording: "ADR-025: مُقاس — PASS
+وفق الهدف المحدد مسبقاً (`NO_EXECUTED_TOOL_CALL`) — غير معتمد" ("measured, PASS on the
+pre-defined target, not adopted"). So:
+- Native tool calls stay opt-in behind `--native-tools`; `native_tools=False` stays the
+  default everywhere. No Boss change, no widened permissions.
+- Merging #208 records the evidence and is not adoption.
+
+**Observed after the verdict was read: evidence and a likely mechanism, not a causal
+result.** The owner's wording, which this section keeps: "Observed evidence / likely
+mechanism, not yet a proven causal fix." Only a fix and a new measurement can show cause.
+1. *Replies lost between the model and the loop.* All 82 replies the native arm refused as
+   empty came from calls where the model generated 14 to 1024 tokens (median 37; 80 stopped
+   normally, 2 at the generation limit) and Ollama returned neither text nor a tool call.
+   They are 82 of the arm's 96 protocol errors, in 71 of its 240 agent attempts, 59 of
+   which failed. The text arm has none.
+2. *Calls written as a name, then an object.* 25 answers refused for not having acted were
+   a tool name followed by a JSON object, such as `shell {"command": "git commit ..."}`.
+   §5's detector reads a call written as text only when the object itself names the tool
+   (`"name"` or `"tool"`), so these were treated as answers. They fell in 9 attempts, all
+   failed: 8 of `git-commit-release` en and 1 of `multistep-change-port` ar. The text arm
+   has none.
+3. *The fall of `git-commit-release` en coincides with item 2.* In 8 of its 10 native runs
+   no step ran and every refusal was such a call. This coincides with the fall from 5/10
+   to 0/10; it is not shown to cause it.
+
+**What follows, as the owner authorized on 2026-10-04.**
+- A **draft** amendment to this ADR, and nothing more: it must say exactly which defect it
+  proposes to repair, why a repair is not a retroactive improvement of this result, how the
+  repair would be measured, what stays fixed in the benchmark protocol, and that
+  `--native-tools` stays opt-in during the experiment. Neither accepting it nor
+  implementing it is authorized.
+- ADR-023's verification before completion (unit 3) ranks above any change of the default.
+
