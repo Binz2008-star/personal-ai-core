@@ -198,16 +198,21 @@ def test_when_the_end_cannot_be_recorded_the_original_failure_is_the_one_reporte
 
 
 def test_an_interrupt_while_a_command_runs_ends_the_command(tmp_path, monkeypatch):
+    command = [sys.executable, "-c", "import time; time.sleep(60)"]
     started: list[subprocess.Popen] = []
     real_popen = subprocess.Popen
 
     class Recording(real_popen):  # type: ignore[misc, valid-type]
+        """Interrupts the wait on the command under test, and on nothing else:
+        on Windows the kill itself runs `taskkill` through Popen, and its wait
+        must go through untouched."""
+
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             started.append(self)
 
         def communicate(self, *args, **kwargs):
-            if kwargs.get("timeout") == 30:
+            if self.args == command:
                 raise KeyboardInterrupt
             return super().communicate(*args, **kwargs)
 
@@ -215,8 +220,7 @@ def test_an_interrupt_while_a_command_runs_ends_the_command(tmp_path, monkeypatc
     # Windows' Python does not start without SYSTEMROOT; elsewhere nothing is needed.
     env = {"SYSTEMROOT": os.environ.get("SYSTEMROOT", "")} if os.name == "nt" else {}
     with pytest.raises(KeyboardInterrupt):
-        run_bounded([sys.executable, "-c", "import time; time.sleep(60)"],
-                    cwd=tmp_path, env=env, timeout=30)
-    [process] = started
+        run_bounded(command, cwd=tmp_path, env=env, timeout=30)
+    process = next(p for p in started if p.args == command)
     # Killed with its tree, not left running: it exits well before its 60 s.
     assert process.wait(timeout=10) is not None
