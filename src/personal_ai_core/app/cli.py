@@ -26,13 +26,14 @@ import re
 import sys
 import uuid
 from pathlib import Path
-from typing import Callable, Iterable, NamedTuple, Sequence, TextIO
+from typing import Any, Callable, Iterable, Mapping, NamedTuple, Sequence, TextIO
 
 from ..conversation.factory import (
     build_agent,
     build_grounded_in_memory_service,
     build_in_memory_service,
     build_persistent_service,
+    describe_loaded,
 )
 from ..core.agent import AgentTaskContract
 from ..core.config import Settings
@@ -570,6 +571,7 @@ def main(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
     env: dict[str, str] | None = None,
+    probe: Callable[..., Mapping[str, Any]] | None = None,
 ) -> int:
     """Run one chat session. Returns a process exit code.
 
@@ -669,6 +671,7 @@ def main(
             session_id = service.start_session(service.create_user().id).id
 
         print(f"model:   {settings.boss_model}", file=out)
+        _say_if_the_model_must_load(settings, probe=probe, live=transport is None, out=out)
         print(f"storage: {where}", file=out)
         if profile:
             print(
@@ -718,6 +721,23 @@ def main(
     finally:
         if slice_ is not None:
             slice_.close()
+
+
+def _say_if_the_model_must_load(settings: Settings, *, probe, live: bool, out: TextIO) -> None:
+    """Say before the first turn that it will load the model, when it will.
+
+    Gap analysis P1-6: the first reply after Ollama unloaded the model loads
+    it, which on the owner's machine takes a minute or more, and pac printed
+    the banner and then nothing: it looked hung. Ollama says what it has
+    loaded. When the Boss is not among it, the wait is announced. A server
+    that cannot be asked is not guessed about here; the turn says what is
+    wrong when it fails.
+    """
+    loaded = describe_loaded("ollama", ollama_host=settings.ollama_host, llamacpp_host="",
+                             model=settings.boss_model, probe=probe, live=live)
+    if loaded.get("probed") and loaded.get("reason") == "model not loaded":
+        print("         not loaded yet: the first reply loads it, which can take "
+              "a minute or more", file=out)
 
 
 def _converse(*, service, session_id, language, lines, out) -> int:
