@@ -33,13 +33,16 @@ from ..conversation.factory import (
     build_grounded_in_memory_service,
     build_in_memory_service,
     build_persistent_service,
+    build_reply_redactor,
 )
 from ..core.agent import AgentTaskContract
 from ..core.config import Settings
+from ..core.contracts import SecretRedactor
 from ..core.domain import EventType
 from ..core.errors import ContextOverflowError, ProviderError, RollbackIncomplete
 from ..core.feedback import CORRECTION_KEY, FEEDBACK_EVENT_TYPE, FeedbackOutcome
 from ..core.knowledge import Document
+from ..core.redaction import RedactionError
 
 # What a DIRECTORY given to --documents contributes. A file named explicitly
 # is read whatever its suffix: the user chose it. A directory is walked, and
@@ -725,13 +728,23 @@ def main(
             language=args.language,
             lines=lines,
             out=out,
+            redactor=build_reply_redactor(),
         )
     finally:
         if slice_ is not None:
             slice_.close()
 
 
-def _converse(*, service, session_id, language, lines, out) -> int:
+def _converse(*, service, session_id, language, lines, out, redactor: SecretRedactor) -> int:
+    """The chat loop. Every reply passes `redactor` before it is printed.
+
+    Gap analysis P0-6: a secret the model repeats -- from the history, the
+    profile or a document -- would otherwise reach the terminal and its
+    scrollback. The value is withheld in place and a line under the reply
+    says so, in the agent's words for the same event ("it contained something
+    secret-shaped"). `redactor` has no default (ADR-018 I1): a caller that
+    wants raw text must say so. What is stored is not changed here.
+    """
     for line in lines:
         content = line.strip()
         if not content:
@@ -760,8 +773,29 @@ def _converse(*, service, session_id, language, lines, out) -> int:
                 file=out,
             )
             return 1
-        print(f"{REPLY}{reply.content}", file=out)
+        _print_reply(reply.content, redactor, out)
     return 0
+
+
+# Under the reply, aligned with the other continuation lines ("changed:").
+_NOTE = "         "
+
+
+def _print_reply(content: str, redactor: SecretRedactor, out: TextIO) -> None:
+    try:
+        shown = redactor.redact(content)
+    except RedactionError:
+        # ADR-018 section 3.8: a check that failed is not a pass. Nothing of
+        # the reply is printed, and the error carries no text to print.
+        print(f"{REPLY}[reply withheld: it could not be checked for secrets]", file=out)
+        return
+    print(f"{REPLY}{shown.text}", file=out)
+    if shown.counts:
+        print(
+            f"{_NOTE}[reply partly withheld: it contained something secret-shaped "
+            f"(looks like: {', '.join(shown.counts)})]",
+            file=out,
+        )
 
 
 YES = frozenset({"y", "yes", "نعم", "ن"})

@@ -594,7 +594,62 @@ check run as `pytest ...` (run_command does not allow `python`), so five tasks c
 and no task file or digest changes. `--verify-completion` is recorded in the header; the
 verdict reads `--unit 3` only with that flag off then on and every other flag equal.
 
-**Not measured.** Off by default, not exposed in `pac --agent`.
+**Measured (§8.6): FAIL.** Off by default, not exposed in `pac --agent`.
+
+### 8.6 Unit 3 measured: FAIL (2026-10-04)
+
+**The instrument.**
+- Two arms on the rig at b10613d (#217), 10 runs per side, 480 attempts each.
+- The Boss by weights digest, `num_ctx` 8192 confirmed by /api/ps, no context mismatch,
+  no error stops.
+- The arms differ only by `--verify-completion`. All 24 task digests are identical.
+
+**The verdict, by amendment 1 (unit 3 → target class 2):** `compare --unit 3` exits 1.
+- **R0 readable:** yes.
+- **R1 does not hold:** 48 paired attempts left class 2 and 40 entered it. The one-sided
+  exact sign test gives p = 0.2279.
+- **R2 holds:**
+  - agent en 98 → 92 failures;
+  - agent ar 97 → 94;
+  - knowledge en 0 → 0;
+  - knowledge ar 12 → 16.
+- **R3 costs:**
+  - budget stops 119 → 145;
+  - answers rejected for an unverified completion 0 → 30 (0.12 per attempt);
+  - false rejections 2 of 114 → 1 of 108.
+- **R5:** a FAIL is not re-run until it passes.
+
+**Descriptive figures.** These come from reading rules fixed at 2026-10-04T21:44:49Z,
+before arm B's file existed. They describe and decide nothing; 10 runs cannot decide a
+task.
+- **D1, success.**
+  - On the five tasks the check can act on: 3/100 → 2/100.
+  - On the seven it cannot reach: 42/140 → 52/140.
+
+  The noise beside the check is larger than anything the check moved.
+- **D2, what the check did.** It refused 30 answers on the five. Both answers it let
+  through had run the contract's command after the last change and passed. It accepted
+  nothing unverified.
+- **D3, recovery.** Of the 29 attempts refused at least once, 2 succeeded.
+- **D4, budget.** Budget stops on the five went 65 → 98. A refused answer was mostly
+  followed by more steps that ran out of budget, not by a passing test.
+
+**Reading.** The check does what it says: it accepts no completion without a passing
+test. It does not make the model produce one. On these tasks the Boss rarely writes code
+that passes (3/100 without the check), so the refusal mostly converts an unverified
+answer into a budget stop. That is a different failure, not a success.
+
+`tests/unit/test_adr023_unit3_measurement_reading.py` re-derives every figure above from
+the committed files.
+
+**Status.** Built (#211), measured (#217), FAIL, not adopted. `verify_completion` stays
+off by default. Nothing about it changes in `pac --agent`.
+
+**Pending owner decision:** what, if anything, follows. The lead's recommendation is to
+stop here. The limit these figures show is the model's ability to make the test pass,
+which a completion check cannot supply. A redesign (for example, handing the failing
+test's output back with the refusal) would be a new unit with its own pre-declared rule,
+not a re-run of this one (R5).
 
 ## Amendment 1 (ACCEPTED, 2026-10-03): the rule that decides "better"
 

@@ -721,6 +721,16 @@ claim written in one place with nothing that notices it going stale.
                restore a file says so and keeps its checkpoint
   #215 4aef2f3  fix(conversation): every turn is measured against the window,
                and an overcommitted turn is not sent (P0-1, P0-2)
+  #216 fedd03b  fix(agent): fetch_url reads public addresses only (P0-3,
+               direct targets: loopback, private, link-local, IPv6, DNS)
+  #217 72ec675  eval: ADR-023 unit 3, default arm and verify_completion arm at
+               b10613d (480 runs each); FAIL, not adopted
+  #218 fcc1b74  fix(agent): withhold secrets from chat replies; the output check
+               covers every ADR-018 kind (P0-6)
+  #219 67b473d  fix(agent): the shell passes a fixed set of environment variables,
+               never the rest (P0-5)
+  #222 67d004d  docs: ADR-023 unit 3 measured -- FAIL, not adopted; every
+               figure re-derived; ledger #216 #217
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1187,7 +1197,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-04, main at 4aef2f3)
+NEXT SESSION HANDOFF (updated 2026-10-05, main at 67b473d)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1225,6 +1235,17 @@ WHERE THINGS STAND (2026-10-04)
     test-command tasks (29 of the 31 failed, 2 succeeded; the 5 that did
     test all failed): the check can only move those answers, so a FAIL is
     possible even if it helps. Pinned in test_adr023_unit3_verify_completion.
+  - MEASURED (#217, 2026-10-04): unit 3, default arm against
+    `--verify-completion` at b10613d, 480 attempts each. VERDICT: FAIL (R1:
+    48 left class 2, 40 entered, p = 0.2279; R2 holds). Budget stops 119 ->
+    145; 30 answers refused for an unverified completion. Descriptive, by
+    rules fixed before arm B existed: success on the five test-command tasks
+    3/100 -> 2/100, on the seven the check cannot reach 42/140 -> 52/140
+    (noise larger than the effect); 2 of 29 refused attempts recovered;
+    budget stops on the five 65 -> 98. Not adopted; `verify_completion`
+    stays off. Not re-run (R5). Pending owner decision: what follows (the
+    lead recommends stopping; a redesign is a new unit). ADR-023 §8.6;
+    every figure: tests/unit/test_adr023_unit3_measurement_reading.py.
   - NEXT (owner, 2026-10-04): (1) a DRAFT ADR-025 amendment only, for the two
     defects above -- which defect, why a repair is not a retroactive
     improvement of #208, how it is measured, what stays fixed, --native-tools
@@ -1287,7 +1308,15 @@ WHERE THINGS STAND (2026-10-04)
     RollbackIncomplete and keeps its checkpoint) merged; main was 2dc105c.
     Then #215 (every turn, grounded or not, is measured against the window
     and records CONTEXT_ASSEMBLED; an overcommitted turn is refused before
-    the provider with ContextOverflowError, ADR-005) merged; main is 4aef2f3.
+    the provider with ContextOverflowError, ADR-005) merged; main was 4aef2f3.
+    Then #216 (fetch_url resolves the host once, refuses any address that is
+    not public -- IPv4, IPv6 and IPv4 inside IPv6 -- and connects only to an
+    address it checked) and #217 (the unit 3 measurement, FAIL, above)
+    merged; main was 72ec675. Then #222 (ADR-023 section 8.6, the unit 3 record, and the merge-title exception) merged; main was 67d004d. Then #218 (chat replies pass a secret check before they are printed; the output check covers every ADR-018 kind) merged; main was fcc1b74. Then #219 (the shell's environment is an allowlist of locations, locale and system names; no other variable reaches it) merged; main is 67b473d. #217 was merged with a custom title, not
+    `Merge pull request #217 ...` (the lead's mistake); history is not
+    rewritten, and the ledger checks and the session report name that one
+    merge by its full SHA (tests/support/merge_convention.py). Every merge
+    keeps GitHub's default title.
     #212 and #213 are OpenCode's Wave 1 (P0-4, P1-9 and the redirect fix), backed up on
     `wip/opencode-20261004` with the owner's approval and reviewed by the lead;
     P0-5 (a fixed shell environment) stays there until it is checked on the rig.

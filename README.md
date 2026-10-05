@@ -85,7 +85,7 @@ verifier decide what happens (`docs/AGENT_ARCHITECTURE.md`, `docs/ADR/ADR-023-pl
 | `delete_file` | critical | **asks you**, every time; can be undone |
 | `web_search` | medium | runs; sends the query to DuckDuckGo and nothing else |
 | `fetch_url` | high | **asks you**, for every URL; reads one page as text |
-| `shell` | high | **asks you**, for every command; anything your terminal can do, pipes included. It starts in the workspace, cannot be undone, and does not see environment variables whose names look secret |
+| `shell` | high | **asks you**, for every command; anything your terminal can do, pipes included. It starts in the workspace, cannot be undone, and sees only a fixed set of environment variables (locations, locale, system settings), never your tokens or keys |
 
 ```console
 $ pac --agent --workspace ~/projects/notes

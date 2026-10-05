@@ -28,7 +28,7 @@ from .tools import (
     default_tools,
 )
 from .web import FetchUrl, WebSearch
-from .verifier import Expectation, Verifier, find_secrets
+from .verifier import Expectation, SecretShapeRedactor, Verifier, find_secrets
 
 __all__ = [
     "FetchUrl",
@@ -40,6 +40,7 @@ __all__ = [
     "DeleteFile",
     "Expectation",
     "FindFiles",
+    "SecretShapeRedactor",
     "Verifier",
     "find_secrets",
     "CommandRejected",
