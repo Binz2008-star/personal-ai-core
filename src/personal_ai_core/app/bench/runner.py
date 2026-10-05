@@ -82,8 +82,9 @@ Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
 class CallLog:
     """A transport that records each model call: time, tokens, options sent.
 
-    The agent loop sends only `num_predict`, not the Boss model's sampling
-    settings; what is recorded is what the request carried, not an assumption.
+    What is recorded is what each request carried, not an assumption: an agent
+    call carries `num_predict` and `num_ctx` (N1), not the Boss model's sampling
+    settings; a knowledge call carries those settings and `num_ctx`.
     """
 
     def __init__(self, inner: Transport) -> None:
@@ -453,7 +454,10 @@ def main(
         "runs": args.runs,
         "languages": args.languages,
         "num_ctx_measured_by_owner": args.num_ctx,
-        "num_ctx_sent_by_core": False,
+        # N1: every call, agent or knowledge, carries the active model's window
+        # as `num_ctx`; the registry both tracks are built from takes it from
+        # this setting. Each call's options_sent is the evidence.
+        "num_ctx_sent_by_core": settings.boss_context_window,
         "profile": "none (deliberately empty)",
         "environment_context": args.environment_context,
         "lenient_protocol": args.lenient_protocol,
@@ -469,8 +473,9 @@ def main(
         "judge_model": "none (ADR-013)",
         "scorer": SCORER,
         "language_guard": settings.language_guard,
-        "sampling": "recorded per model call as sent (options_sent); the agent loop "
-                    "sends only num_predict",
+        "sampling": "recorded per model call as sent (options_sent); an agent call "
+                    "sends num_predict and num_ctx, a knowledge call the Boss model's "
+                    "sampling settings and num_ctx",
         "policy": describe(),
         "environment": "benchmark containment, not a sandbox: code the agent runs is not "
                        "isolated from the network (ADR-022 §3.5)",

@@ -42,8 +42,8 @@ def make(root, script, *, environment=None, events=None):
     ws = Workspace(root)
     checkpoints = Checkpoints(ws)
     executor = ToolExecutor(default_tools(ws, checkpoints), RiskPolicy())
-    return AgentLoop(provider=script, model="boss", executor=executor, checkpoints=checkpoints,
-                     events=events, environment=environment)
+    return AgentLoop(provider=script, model="boss", executor=executor, context_window=8192,
+                     checkpoints=checkpoints, events=events, environment=environment)
 
 
 def record_of(outcome) -> dict:

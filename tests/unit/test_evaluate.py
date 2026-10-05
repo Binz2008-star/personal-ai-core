@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from personal_ai_core.app import evaluate as ev
-from personal_ai_core.core.config import DEFAULT_BOSS_MODEL
+from personal_ai_core.core.config import DEFAULT_BOSS_CONTEXT_WINDOW, DEFAULT_BOSS_MODEL
 from personal_ai_core.core.errors import ProviderError
 
 REPO = Path(__file__).resolve().parents[2]
@@ -153,7 +153,9 @@ def test_a_run_writes_raw_and_scored_evidence_with_its_provenance(tmp_path):
     header = raw["header"]
     assert header["commit"] == "abc1234"
     assert header["model"] == DEFAULT_BOSS_MODEL
-    assert header["num_ctx_sent_by_core"] is False
+    # N1: what the header says was sent is what the model server received.
+    assert header["num_ctx_sent_by_core"] == DEFAULT_BOSS_CONTEXT_WINDOW
+    assert model.payloads[-1]["options"]["num_ctx"] == DEFAULT_BOSS_CONTEXT_WINDOW
     assert header["num_ctx_measured_by_owner"] == 4096
     assert header["judge_model"].startswith("none")
     assert "node" not in header["machine"]
@@ -537,10 +539,11 @@ def test_the_production_profile_sends_what_pac_sends(tmp_path):
 
 
 def test_the_none_profile_is_what_runs_before_the_adoption_measured(tmp_path):
-    """Their headers say "default" with no options: only num_predict was sent."""
+    """Their headers say "default" with no sampling options: only the budget
+    (num_predict) and, since N1, the window (num_ctx) are sent."""
     model = FakeModel("A thread shares memory.")
     _run(tmp_path, model, "--only", "lang-en-1", "--sampling", "none")
-    assert set(model.payloads[-1]["options"]) == {"num_predict"}
+    assert set(model.payloads[-1]["options"]) == {"num_predict", "num_ctx"}
     assert _header(tmp_path)["sampling_options"] == {}
 
 
@@ -602,6 +605,10 @@ def test_the_llamacpp_runtime_sends_the_grammar_and_records_it(tmp_path):
     assert "max_tokens" in payload  # the budget's num_predict, renamed
     header = _header(tmp_path)
     assert header["runtime"] == "llamacpp" and header["grammar"] == "no-foreign-script"
+    # N1: llama-server takes no per-request window and its adapter drops
+    # num_ctx, so the header says nothing was sent -- not the Core's number.
+    assert "num_ctx" not in payload
+    assert header["num_ctx_sent_by_core"] is None
 
 
 def test_a_grammar_without_llamacpp_is_refused(tmp_path):
