@@ -40,7 +40,9 @@ TASKS = {task.id: task for task in load(REPO / "evals" / "bench")}
 # The tasks a contract test command can be derived for: the only ones the check acts on.
 COMMAND = {task_id: agent_test_command(task) for task_id, task in TASKS.items()
            if task.track == "agent"}
-FIVE = {task_id for task_id, command in COMMAND.items() if command}
+# Each of the five with the command its contract names.
+TEST_COMMAND = {task_id: command for task_id, command in COMMAND.items() if command}
+FIVE = set(TEST_COMMAND)
 
 
 def _lines(path: Path) -> list[dict]:
@@ -145,7 +147,7 @@ def test_d1_success_on_the_five_and_on_the_seven_the_check_cannot_reach():
 def _passed_after_last_change(run: dict) -> bool:
     """The contract's own condition: the last exact run of the test command,
     after the last change, passed."""
-    command = shlex.split(COMMAND[run["task"]])
+    command = shlex.split(TEST_COMMAND[run["task"]])
     executed = [s for s in run["steps"] if s["executed"]]
 
     def is_test(step: dict) -> bool:
