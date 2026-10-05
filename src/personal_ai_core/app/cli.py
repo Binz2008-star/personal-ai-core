@@ -37,7 +37,7 @@ from ..conversation.factory import (
 from ..core.agent import AgentTaskContract
 from ..core.config import Settings
 from ..core.domain import EventType
-from ..core.errors import ProviderError, RollbackIncomplete
+from ..core.errors import ContextOverflowError, ProviderError, RollbackIncomplete
 from ..core.feedback import CORRECTION_KEY, FEEDBACK_EVENT_TYPE, FeedbackOutcome
 from ..core.knowledge import Document
 
@@ -745,6 +745,11 @@ def _converse(*, service, session_id, language, lines, out) -> int:
         except KeyError:
             print(f"no such session: {session_id}", file=out)
             return 2
+        except ContextOverflowError as exc:
+            # ADR-005: refused rather than sent and silently cut by the server.
+            print(f"this conversation no longer fits the model: {exc}.", file=out)
+            print("start a new session (run pac without --session) to continue.", file=out)
+            return 1
         except ProviderError as exc:
             # The commonest first-run failure by far: nothing is listening on
             # the Ollama host. Naming the variable is the difference between
@@ -824,6 +829,11 @@ def _agent_session(*, agent, session_id, lines, out, err) -> int:
         except KeyError:
             print(f"no such session: {session_id}", file=out)
             return 2
+        except ContextOverflowError as exc:
+            # ADR-005: refused rather than sent and silently cut by the server.
+            print(f"this conversation no longer fits the model: {exc}.", file=out)
+            print("start a new session (run pac without --session) to continue.", file=out)
+            return 1
         except ProviderError as exc:
             print(f"the model could not be reached: {exc}", file=out)
             print(
