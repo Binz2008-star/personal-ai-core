@@ -52,13 +52,6 @@ USER_AGENT = "Mozilla/5.0 (personal-ai-core agent)"
 Fetch = Callable[[str, float], "tuple[str, str, bytes]"]
 
 
-def urllib_fetch(url: str, timeout: float) -> tuple[str, str, bytes]:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 -- scheme checked by the caller
-        body = response.read(MAX_PAGE_BYTES + 1)
-        return response.geturl(), response.headers.get("Content-Type", ""), body
-
-
 class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Require a separately confirmed fetch for every redirect destination.
 
@@ -366,7 +359,10 @@ def parse_results(html: str) -> list[dict[str, str]]:
 
 class WebSearch:
     def __init__(self, fetch: Fetch | None = None, *, timeout_seconds: int = 20) -> None:
-        self._fetch = fetch or urllib_fetch
+        # The same fetch as fetch_url: public addresses only, no redirect
+        # followed (gap analysis P2-8). The host is fixed, but a redirect from
+        # it is a URL nobody confirmed all the same.
+        self._fetch = fetch or urllib_fetch_url
         self.spec = ToolSpec(
             name="web_search",
             description=(
@@ -393,7 +389,9 @@ class WebSearch:
             _, content_type, body = self._fetch(url, self.spec.timeout_seconds)
         except OSError as exc:
             return ToolResult(ok=False, error=f"search failed: {getattr(exc, 'reason', exc)}")
-        results = parse_results(_decode(body, content_type))[:MAX_RESULTS]
+        # The results come first on the page; past the cap is not read (P2-8),
+        # however large the page the engine sent.
+        results = parse_results(_decode(body[:MAX_PAGE_BYTES], content_type))[:MAX_RESULTS]
         if not results:
             return ToolResult(
                 ok=True,
