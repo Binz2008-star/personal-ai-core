@@ -7,13 +7,14 @@ as in the Ollama adapter, so it is testable without a server.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping, Sequence
 
 from ...core.domain import Message, ModelResponse
 from ...core.errors import ProviderError
-from ..failures import transport_failure
+from ..failures import transport_failure, with_one_retry
 
 Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
 
@@ -49,11 +50,13 @@ class LlamaCppProvider:
         timeout_seconds: int = 120,
         transport: Transport | None = None,
         grammar: str | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._host = host.rstrip("/")
         self._timeout = timeout_seconds
         self._transport: Transport = transport or http_transport
         self._grammar = grammar
+        self._sleep = sleep
 
     @property
     def name(self) -> str:
@@ -81,7 +84,8 @@ class LlamaCppProvider:
         if self._grammar:
             payload["grammar"] = self._grammar
 
-        raw = self._transport(f"{self._host}/v1/chat/completions", payload, self._timeout)
+        raw = with_one_retry(lambda: self._transport(f"{self._host}/v1/chat/completions", payload, self._timeout),
+                             sleep=self._sleep)
         try:
             choice = raw["choices"][0]
             text = choice["message"]["content"]
