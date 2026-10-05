@@ -76,6 +76,7 @@ from ..persistence.sqlite import (
     SqliteUserRepository,
     connect,
 )
+from ..persistence.sqlite import SchemaVersionMismatch as SqliteSchemaVersionMismatch
 from ..persistence.postgres import (
     DatabaseIdentity,
     PostgresEventRepository,
@@ -830,6 +831,41 @@ def build_agent(
         verify_completion=verify_completion,
     )
     return AgentSlice(loop=loop, executor=executor, checkpoints=checkpoints, workspace=sandbox)
+
+
+# What opening or writing the store can raise, for an entry point to catch.
+STORE_ERRORS: tuple[type[BaseException], ...] = (sqlite3.Error, SqliteSchemaVersionMismatch)
+
+
+def describe_store_failure(exc: BaseException, database: Path | None) -> str:
+    """One paragraph for the person at the terminal, from a STORE_ERRORS error.
+
+    Gap analysis P1-5: a second `pac` writing the same file, a damaged file
+    and a file from another schema version each ended in a traceback, which
+    says neither what happened nor what to do. Each now gets a sentence and
+    the safe next step. A damaged file is never repaired or replaced here:
+    the first step is a copy, with the `-wal` and `-shm` files that hold its
+    latest writes (ADR-010).
+    """
+    where = f"the database {database}" if database is not None else "the database"
+    text = str(exc)
+    if isinstance(exc, sqlite3.OperationalError) and ("locked" in text or "busy" in text):
+        return (f"{where} is busy: another pac, or another program, is writing to it. "
+                "Close the other one and try again.")
+    if isinstance(exc, SqliteSchemaVersionMismatch):
+        return f"{where} was written by a different version of pac: {text}"
+    if isinstance(exc, sqlite3.IntegrityError):
+        return f"{where} cannot be opened: {text}"
+    # sqlite's own words for a damaged file. Other DatabaseErrors (a disk I/O
+    # error, a read-only file) are not a sign of damage and are not called one.
+    if isinstance(exc, sqlite3.DatabaseError) and any(
+            words in text for words in ("not a database", "malformed", "corrupt")):
+        name = database.name if database is not None else "core.db"
+        return (f"{where} cannot be read ({text}); it may be damaged. Before anything "
+                f"else, copy it together with {name}-wal and {name}-shm if they exist: "
+                "they hold its latest writes. To keep working meanwhile, start a new one "
+                "with --database and another path.")
+    return f"{where} failed: {text}"
 
 
 def build_reply_redactor() -> SecretRedactor:
