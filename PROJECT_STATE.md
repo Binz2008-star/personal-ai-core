@@ -1306,7 +1306,11 @@ WHERE THINGS STAND (2026-10-04)
     Then #216 (fetch_url resolves the host once, refuses any address that is
     not public -- IPv4, IPv6 and IPv4 inside IPv6 -- and connects only to an
     address it checked) and #217 (the unit 3 measurement, FAIL, above)
-    merged; main is 72ec675.
+    merged; main is 72ec675. #217 was merged with a custom title, not
+    `Merge pull request #217 ...` (the lead's mistake); history is not
+    rewritten, and the ledger checks and the session report name that one
+    merge by its full SHA (tests/support/merge_convention.py). Every merge
+    keeps GitHub's default title.
     #212 and #213 are OpenCode's Wave 1 (P0-4, P1-9 and the redirect fix), backed up on
     `wip/opencode-20261004` with the owner's approval and reviewed by the lead;
     P0-5 (a fixed shell environment) stays there until it is checked on the rig.

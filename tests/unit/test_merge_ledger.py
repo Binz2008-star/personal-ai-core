@@ -36,6 +36,7 @@ from typing import Mapping
 
 import pytest
 from support.lag_limit import effective_limit
+from support.merge_convention import UNCONVENTIONAL_MERGES, pr_number
 
 REPO = Path(__file__).resolve().parents[2]
 STATE = REPO / "PROJECT_STATE.md"
@@ -50,7 +51,6 @@ STATE = REPO / "PROJECT_STATE.md"
 # check pass.
 LEDGER_ROW = re.compile(r"^  #(\d+)\s+(\S+)", re.MULTILINE)
 VALID_SHA = re.compile(r"^[0-9a-f]{7,40}$")
-MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+)\b")
 
 # The ledger starts after Phase 4; #1 and #2 are the phase merges themselves
 # and are recorded in TRACEABILITY instead.
@@ -85,9 +85,9 @@ def merges_in_git() -> dict[int, str]:
     # of unknown length, and git chooses the abbreviation length itself.
     for line in _git("log", "--merges", "--format=%H%x00%s").splitlines():
         full, _, subject = line.partition("\x00")
-        match = MERGE_SUBJECT.match(subject)
-        if match:
-            found[int(match.group(1))] = full
+        number = pr_number(full, subject)
+        if number is not None:
+            found[number] = full
     if not found:
         pytest.fail(
             "no `Merge pull request #N` commits found in git history at all. "
@@ -325,3 +325,20 @@ def test_a_duplicated_row_is_reported_rather_than_collapsed():
     )
     assert duplicated(rows) == [80, 79]
     assert duplicated(LEDGER_ROW.findall("  #79 338a0d1  a\n  #80 95056fe  b\n")) == []
+
+
+def test_the_one_unconventional_merge_is_named_alike_in_both_readers():
+    """#217 was merged with a custom title; history is not rewritten for it.
+    The session-start report and these checks must read it the same way, and
+    the exception must name a merge commit that is really in this history."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "session_state", REPO / "tools" / "session_state.py")
+    assert spec is not None and spec.loader is not None
+    session_state = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(session_state)
+    assert session_state.UNCONVENTIONAL_MERGES == UNCONVENTIONAL_MERGES
+    for full, number in UNCONVENTIONAL_MERGES.items():
+        parents = _git("rev-list", "--parents", "-n", "1", full).split()
+        assert len(parents) == 3, f"{full[:7]} (#{number}) is not a merge commit"
