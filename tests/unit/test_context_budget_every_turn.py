@@ -117,5 +117,8 @@ def test_the_cli_says_what_happened_instead_of_a_traceback():
                      lines=iter(["word " * 60_000]), out=out,
                      redactor=build_reply_redactor())
     assert code == 1
-    assert "no longer fits the model" in out.getvalue()
-    assert "start a new session" in out.getvalue()
+    # Older messages are left out to make room (P1-3), so a refused turn is
+    # the message itself: a new session would not help.
+    assert "this message is too long for the model" in out.getvalue()
+    assert "shorten it, or send it in parts" in out.getvalue()
+    assert "new session" not in out.getvalue()

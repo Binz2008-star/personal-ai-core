@@ -760,8 +760,10 @@ def _converse(*, service, session_id, language, lines, out, redactor: SecretReda
             return 2
         except ContextOverflowError as exc:
             # ADR-005: refused rather than sent and silently cut by the server.
-            print(f"this conversation no longer fits the model: {exc}.", file=out)
-            print("start a new session (run pac without --session) to continue.", file=out)
+            # Older messages are left out of the prompt to make room (P1-3),
+            # so this is the message itself: a new session would not help.
+            print(f"this message is too long for the model: {exc}.", file=out)
+            print("shorten it, or send it in parts.", file=out)
             return 1
         except ProviderError as exc:
             # The commonest first-run failure by far: nothing is listening on

@@ -71,7 +71,7 @@ class ContextOverflowError(CoreError):
 
     def __init__(self, *, spoken_for: int, context_window: int, history_tokens: int) -> None:
         super().__init__(
-            f"the conversation needs about {spoken_for} tokens and the model's window is "
+            f"this turn needs about {spoken_for} tokens and the model's window is "
             f"{context_window}: the turn was not sent"
         )
         self.spoken_for = spoken_for
