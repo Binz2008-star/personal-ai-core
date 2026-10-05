@@ -731,10 +731,18 @@ claim written in one place with nothing that notices it going stale.
                never the rest (P0-5)
   #220 3bfdb02  fix(app): pac --agent refuses --ephemeral -- the agent's steps are
                its record (P1-1)
+  #221 1004176  fix(agent): run_command refuses options that make a checking command
+               write (P1-2)
   #222 67d004d  docs: ADR-023 unit 3 measured -- FAIL, not adopted; every
                figure re-derived; ledger #216 #217
   #223 929b90f  fix(conversation): failure events keep a classification, never
                the error's text (P1-8)
+  #224 4bc697f  fix(core): settings from the environment are checked when read; pac says
+               which one and exits 2 (P1-4, P1-7)
+  #225 9270025  fix(app): a failing store ends in a sentence and the safe next step, not a
+               traceback (P1-5)
+  #229 02b79f4  fix(app): pac says when the first reply will load the model, and which
+               failure a failed turn was (P1-6)
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1201,7 +1209,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-05, main at 3bfdb02)
+NEXT SESSION HANDOFF (updated 2026-10-05, main at 02b79f4)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1316,7 +1324,7 @@ WHERE THINGS STAND (2026-10-04)
     Then #216 (fetch_url resolves the host once, refuses any address that is
     not public -- IPv4, IPv6 and IPv4 inside IPv6 -- and connects only to an
     address it checked) and #217 (the unit 3 measurement, FAIL, above)
-    merged; main was 72ec675. Then #222 (ADR-023 section 8.6, the unit 3 record, and the merge-title exception) merged; main was 67d004d. Then #218 (chat replies pass a secret check before they are printed; the output check covers every ADR-018 kind) merged; main was fcc1b74. Then #219 (the shell's environment is an allowlist of locations, locale and system names; no other variable reaches it) merged; main was 67b473d. Then #223 (GENERATION_FAILED and RETRIEVAL_FAILED keep the error's type and kind, never its text) merged; main was 929b90f. Then #220 (pac --agent refuses --ephemeral; the agent's steps are its record) merged. main is 3bfdb02. #217 was merged with a custom title, not
+    merged; main was 72ec675. Then #222 (ADR-023 section 8.6, the unit 3 record, and the merge-title exception) merged; main was 67d004d. Then #218 (chat replies pass a secret check before they are printed; the output check covers every ADR-018 kind) merged; main was fcc1b74. Then #219 (the shell's environment is an allowlist of locations, locale and system names; no other variable reaches it) merged; main was 67b473d. Then #223 (GENERATION_FAILED and RETRIEVAL_FAILED keep the error's type and kind, never its text) merged; main was 929b90f. Then #220 (pac --agent refuses --ephemeral; the agent's steps are its record) merged. main was 3bfdb02. Then #221 (run_command refuses the options that make a checking command write files) merged. main was 1004176. Then #224 (settings from the environment are checked when read; a bad one is a sentence and exit 2) merged. main was 4bc697f. Then #225 (a failing store ends in a sentence and the safe next step, not a traceback) merged. main was 9270025. Then #229 (pac says when the first reply will load the model, and which failure a failed turn was) merged. main is 02b79f4. #217 was merged with a custom title, not
     `Merge pull request #217 ...` (the lead's mistake); history is not
     rewritten, and the ledger checks and the session report name that one
     merge by its full SHA (tests/support/merge_convention.py). Every merge

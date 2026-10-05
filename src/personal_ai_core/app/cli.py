@@ -26,7 +26,7 @@ import re
 import sys
 import uuid
 from pathlib import Path
-from typing import Callable, Iterable, NamedTuple, Sequence, TextIO
+from typing import Any, Callable, Iterable, Mapping, NamedTuple, Sequence, TextIO
 
 from ..conversation.factory import (
     build_agent,
@@ -34,12 +34,15 @@ from ..conversation.factory import (
     build_in_memory_service,
     build_persistent_service,
     build_reply_redactor,
+    describe_loaded,
+    describe_store_failure,
+    STORE_ERRORS,
 )
 from ..core.agent import AgentTaskContract
 from ..core.config import Settings
 from ..core.contracts import SecretRedactor
 from ..core.domain import EventType
-from ..core.errors import ContextOverflowError, ProviderError, RollbackIncomplete
+from ..core.errors import ConfigError, ContextOverflowError, ProviderError, RollbackIncomplete
 from ..core.feedback import CORRECTION_KEY, FEEDBACK_EVENT_TYPE, FeedbackOutcome
 from ..core.knowledge import Document
 from ..core.redaction import RedactionError
@@ -573,8 +576,37 @@ def main(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
     env: dict[str, str] | None = None,
+    probe: Callable[..., Mapping[str, Any]] | None = None,
 ) -> int:
     """Run one chat session. Returns a process exit code.
+
+    A failure of the store, wherever in the run it comes from, ends in a
+    sentence and exit 1 rather than a traceback (gap analysis P1-5):
+    `describe_store_failure` says what happened and what to do first.
+    """
+    try:
+        return _main(argv, transport=transport, stdin=stdin, stdout=stdout,
+                     stderr=stderr, env=env, probe=probe)
+    except STORE_ERRORS as exc:
+        environment = os.environ.copy() if env is None else env
+        args = _parser().parse_args(argv)
+        database = None if args.ephemeral else _database_path(args.database, environment)
+        print(f"pac: {describe_store_failure(exc, database)}",
+              file=stdout if stdout is not None else sys.stdout)
+        return 1
+
+
+def _main(
+    argv: Sequence[str] | None = None,
+    *,
+    transport: Callable[..., object] | None = None,
+    stdin: Iterable[str] | None = None,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+    env: dict[str, str] | None = None,
+    probe: Callable[..., Mapping[str, Any]] | None = None,
+) -> int:
+    """The run itself; `main` stands between it and a failing store.
 
     Everything the outside world provides arrives as an argument, so the whole
     command is exercisable without a terminal, a home directory or a model
@@ -584,7 +616,13 @@ def main(
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
     environment = os.environ.copy() if env is None else env
-    settings = Settings.from_env(environment)
+    try:
+        settings = Settings.from_env(environment)
+    except ConfigError as exc:
+        # A usage error, as a bad flag is: a sentence and exit 2, not a
+        # traceback indistinguishable from a crash (gap analysis P1-4).
+        print(f"pac: {exc}", file=out)
+        return 2
     # One iterator, shared by the conversation and by the agent's
     # confirmation prompts: an answer to "Allow?" is the next line typed.
     lines = iter(stdin if stdin is not None else sys.stdin)
@@ -683,6 +721,7 @@ def main(
             session_id = service.start_session(service.create_user().id).id
 
         print(f"model:   {settings.boss_model}", file=out)
+        _say_if_the_model_must_load(settings, probe=probe, live=transport is None, out=out)
         print(f"storage: {where}", file=out)
         if profile:
             print(
@@ -718,7 +757,8 @@ def main(
                 file=out,
             )
             print(file=out)
-            return _agent_session(agent=agent, session_id=session_id, lines=lines, out=out, err=err)
+            return _agent_session(agent=agent, session_id=session_id, lines=lines, out=out,
+                                  err=err, settings=settings)
 
         print(file=out)
 
@@ -729,13 +769,57 @@ def main(
             lines=lines,
             out=out,
             redactor=build_reply_redactor(),
+            settings=settings,
         )
     finally:
         if slice_ is not None:
             slice_.close()
 
 
-def _converse(*, service, session_id, language, lines, out, redactor: SecretRedactor) -> int:
+def _say_if_the_model_must_load(settings: Settings, *, probe, live: bool, out: TextIO) -> None:
+    """Say before the first turn that it will load the model, when it will.
+
+    Gap analysis P1-6: the first reply after Ollama unloaded the model loads
+    it, which on the owner's machine takes a minute or more, and pac printed
+    the banner and then nothing: it looked hung. Ollama says what it has
+    loaded. When the Boss is not among it, the wait is announced. A server
+    that cannot be asked is not guessed about here; the turn says what is
+    wrong when it fails.
+    """
+    loaded = describe_loaded("ollama", ollama_host=settings.ollama_host, llamacpp_host="",
+                             model=settings.boss_model, probe=probe, live=live)
+    if loaded.get("probed") and loaded.get("reason") == "model not loaded":
+        print("         not loaded yet: the first reply loads it, which can take "
+              "a minute or more", file=out)
+
+
+def _explain_provider_failure(exc: ProviderError, settings: Settings, out: TextIO) -> None:
+    """Say which failure it was, and the fix that fits it.
+
+    Gap analysis P1-6: every provider failure said "check that the model
+    server is running". On a cold start the server is running and the model
+    is still loading, so that advice sent the owner to restart something
+    healthy. The provider classifies its failures (P1-8); each kind gets its
+    own sentence, and the one nobody classified keeps the general advice.
+    """
+    if exc.kind == "timeout":
+        print(f"the model did not answer within {settings.request_timeout_seconds} seconds.",
+              file=out)
+        print("a model that is loading -- the first reply after Ollama unloaded it -- can "
+              "take longer than that: ask again, or raise PAC_REQUEST_TIMEOUT_SECONDS.", file=out)
+    elif exc.kind == "unreachable":
+        print(f"nothing answered at {settings.ollama_host}: {exc}", file=out)
+        print("start Ollama, or set PAC_OLLAMA_HOST to where it runs.", file=out)
+    elif exc.kind == "http_status" and exc.status == 404:
+        print(f"the model server does not have {settings.boss_model}: {exc}", file=out)
+        print(f"pull it (ollama pull {settings.boss_model}), or set PAC_BOSS_MODEL.", file=out)
+    else:
+        print(f"the model could not be reached: {exc}", file=out)
+        print("check that the model server is running, or set PAC_OLLAMA_HOST.", file=out)
+
+
+def _converse(*, service, session_id, language, lines, out, redactor: SecretRedactor,
+              settings: Settings | None = None) -> int:
     """The chat loop. Every reply passes `redactor` before it is printed.
 
     Gap analysis P0-6: a secret the model repeats -- from the history, the
@@ -764,14 +848,7 @@ def _converse(*, service, session_id, language, lines, out, redactor: SecretReda
             print("start a new session (run pac without --session) to continue.", file=out)
             return 1
         except ProviderError as exc:
-            # The commonest first-run failure by far: nothing is listening on
-            # the Ollama host. Naming the variable is the difference between
-            # a fixable message and a traceback.
-            print(f"the model could not be reached: {exc}", file=out)
-            print(
-                "check that the model server is running, or set PAC_OLLAMA_HOST.",
-                file=out,
-            )
+            _explain_provider_failure(exc, settings or Settings(), out)
             return 1
         _print_reply(reply.content, redactor, out)
     return 0
@@ -840,7 +917,8 @@ def _describe_step(step) -> str:
     return f"  · {record.request.tool} {arguments} -> {status}"
 
 
-def _agent_session(*, agent, session_id, lines, out, err) -> int:
+def _agent_session(*, agent, session_id, lines, out, err,
+                   settings: Settings | None = None) -> int:
     invalid_tasks = False
     for line in lines:
         if not line.strip():
@@ -869,11 +947,7 @@ def _agent_session(*, agent, session_id, lines, out, err) -> int:
             print("start a new session (run pac without --session) to continue.", file=out)
             return 1
         except ProviderError as exc:
-            print(f"the model could not be reached: {exc}", file=out)
-            print(
-                "check that the model server is running, or set PAC_OLLAMA_HOST.",
-                file=out,
-            )
+            _explain_provider_failure(exc, settings or Settings(), out)
             return 1
         if outcome.finished:
             print(f"{REPLY}{outcome.answer}", file=out)

@@ -48,6 +48,11 @@ with it, so the Core knows what you mean by a project's name. Together they are 
 Configuration is environment variables, all optional: `PAC_BOSS_MODEL`,
 `PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`.
 
+**Backing up the database.** It is one SQLite file in WAL mode, so its latest writes can sit
+beside it in `core.db-wal` and `core.db-shm`. Copy all three together, with no `pac` running.
+If `pac` says the file cannot be read, copy those three before anything else, then keep working
+with `--database` and another path. If it says the file is busy, another `pac` is using it.
+
 **Retrieval: the conversation is kept, the corpus is re-read.** With `--documents`, each
 turn is grounded in passages from those files, cited by file URI and character range.
 Knowledge is derived data, rebuilt by re-ingestion (ADR-010 R4), so the documents are read

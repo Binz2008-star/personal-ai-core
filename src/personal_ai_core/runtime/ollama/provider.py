@@ -8,13 +8,14 @@ embedding calls were hard-wired in three files.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping, Sequence
 
 from ...core.domain import Message, ModelResponse, NativeToolCall, ToolDeclaration
 from ...core.errors import ProviderError
-from ..failures import transport_failure
+from ..failures import transport_failure, with_one_retry
 
 # A transport takes (url, payload, timeout) and returns a decoded JSON object.
 Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
@@ -45,10 +46,12 @@ class OllamaProvider:
         *,
         timeout_seconds: int = 120,
         transport: Transport | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._host = host.rstrip("/")
         self._timeout = timeout_seconds
         self._transport: Transport = transport or http_transport
+        self._sleep = sleep
 
     @property
     def name(self) -> str:
@@ -124,7 +127,8 @@ class OllamaProvider:
         return payload
 
     def _chat(self, payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
-        raw = self._transport(f"{self._host}/api/chat", payload, self._timeout)
+        raw = with_one_retry(lambda: self._transport(f"{self._host}/api/chat", payload, self._timeout),
+                             sleep=self._sleep)
         message = raw.get("message")
         if not isinstance(message, Mapping):
             raise ProviderError(
