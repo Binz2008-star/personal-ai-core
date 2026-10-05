@@ -391,6 +391,17 @@ def _remember(path: Path | None, text: str, settings: Settings, out: TextIO) -> 
     return 0
 
 
+def _owner_files(path: Path | None) -> list[Path]:
+    """The profile and the projects file beside it, existing or not.
+
+    Unlike `_profile_files` this does not ask whether they exist: a file the
+    agent could create would be read as the profile on the next run.
+    """
+    if path is None:
+        return []
+    return [path, path.parent / PROJECTS_FILENAME]
+
+
 def _profile_files(path: Path | None) -> list[Path]:
     """The profile, then the projects file beside it -- those that exist."""
     if path is None:
@@ -791,6 +802,10 @@ def _main(
                 confirm=_confirmer(lines, out),
                 events=events,
                 database=database,
+                # N4: the profile pac reads, and projects.md beside it, whether
+                # or not they exist -- the agent may neither change nor create
+                # what every later turn is told about the owner.
+                owner_files=_owner_files(profile_path),
                 session_exists=service.has_session,
             )
             print(f"agent:   workspace {agent.workspace.root}", file=out)

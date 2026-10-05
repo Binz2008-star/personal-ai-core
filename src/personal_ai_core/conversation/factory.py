@@ -13,7 +13,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 from ..agent import (
     Checkpoints,
@@ -805,6 +805,7 @@ def build_agent(
     confirm: Confirm | None = None,
     events: EventRepository | None = None,
     database: str | Path | None = None,
+    owner_files: Sequence[str | Path] = (),
     session_exists: Callable[[str], bool] | None = None,
     web_fetch: Fetch | None = None,
     environment_context: bool = False,
@@ -825,6 +826,11 @@ def build_agent(
     `database` is the file the Core's own records live in. It is reserved
     from the workspace -- with its SQLite companions -- so no tool can read,
     overwrite or delete it even when the workspace contains it (F-1).
+
+    `owner_files` are the owner's profile and projects files, wherever the
+    entry point resolved them, existing or not (N4). They are reserved the
+    same way, without companions: the profile is composed into every later
+    turn's instructions, and `write_file` runs without asking.
 
     `session_exists` is REQUIRED whenever `events` is given -- pass the
     conversation service's `has_session`. Events recorded against a session
@@ -865,7 +871,9 @@ def build_agent(
     )
     registry = ModelRegistry.from_settings(settings, provider=provider.name)
     sandbox = Workspace(
-        Path(workspace), reserved=() if database is None else (Path(database),)
+        Path(workspace),
+        reserved=() if database is None else (Path(database),),
+        owner_files=tuple(Path(path) for path in owner_files),
     )
     checkpoints = Checkpoints(sandbox)
     # The workspace tools, then the reach beyond it: the owner's shell and the
