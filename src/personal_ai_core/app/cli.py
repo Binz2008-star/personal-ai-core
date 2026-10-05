@@ -37,7 +37,7 @@ from ..conversation.factory import (
 from ..core.agent import AgentTaskContract
 from ..core.config import Settings
 from ..core.domain import EventType
-from ..core.errors import ContextOverflowError, ProviderError, RollbackIncomplete
+from ..core.errors import ConfigError, ContextOverflowError, ProviderError, RollbackIncomplete
 from ..core.feedback import CORRECTION_KEY, FEEDBACK_EVENT_TYPE, FeedbackOutcome
 from ..core.knowledge import Document
 
@@ -581,7 +581,13 @@ def main(
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
     environment = os.environ.copy() if env is None else env
-    settings = Settings.from_env(environment)
+    try:
+        settings = Settings.from_env(environment)
+    except ConfigError as exc:
+        # A usage error, as a bad flag is: a sentence and exit 2, not a
+        # traceback indistinguishable from a crash (gap analysis P1-4).
+        print(f"pac: {exc}", file=out)
+        return 2
     # One iterator, shared by the conversation and by the agent's
     # confirmation prompts: an answer to "Allow?" is the next line typed.
     lines = iter(stdin if stdin is not None else sys.stdin)
