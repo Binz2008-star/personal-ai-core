@@ -16,11 +16,24 @@ Asking the owner, who sees the query or URL in full, closes both paths.
 Everything fetched is untrusted text. The loop hands it to the model fenced
 as data, as it does a file's contents.
 
+fetch_url reads public addresses only. A confirmation shows the owner a URL,
+not where its name leads: `http://notes.example/` can resolve to 127.0.0.1,
+and `http://169.254.169.254/` is a cloud machine's credentials. So the
+default fetch resolves the host once, refuses it if any address it resolves
+to is loopback, private, link-local or otherwise not public (IPv4, IPv6, and
+IPv4 carried inside IPv6), and connects to an address it checked -- never to
+the name again, which could resolve elsewhere the second time. Through a
+configured proxy the proxy connects, so the check is made on the name before
+the request is handed to it.
+
 Both tools take an injectable `fetch`, so tests never touch the network.
 """
 from __future__ import annotations
 
+import http.client
+import ipaddress
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -67,10 +80,168 @@ class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
         )
 
 
-def urllib_fetch_url(url: str, timeout: float) -> tuple[str, str, bytes]:
-    """Fetch one approved URL without following an unapproved redirect."""
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+# (host, port) -> getaddrinfo's entries: (family, type, proto, canonname, sockaddr)
+Resolve = Callable[[str, int], "list[tuple[Any, ...]]"]
+
+# 64:ff9b::/96, the NAT64 prefix: the last 32 bits are the IPv4 address reached.
+_NAT64 = ipaddress.IPv6Network("64:ff9b::/96")
+
+
+def is_public_address(address: IPAddress) -> bool:
+    """Whether an address is on the public internet.
+
+    Not loopback, private (RFC 1918, fc00::/7), link-local (169.254/16, where
+    cloud metadata lives, and fe80::/10), shared, reserved, unspecified or
+    multicast. An IPv6 address that carries an IPv4 one (mapped, 6to4,
+    Teredo, NAT64) is judged by the IPv4 address it reaches, and ::/96
+    (unspecified, loopback, the deprecated IPv4-compatible form) is never
+    public."""
+    if isinstance(address, ipaddress.IPv6Address):
+        embedded = address.ipv4_mapped or address.sixtofour
+        if embedded is None and address.teredo is not None:
+            embedded = address.teredo[1]
+        if embedded is None and address in _NAT64:
+            embedded = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
+        if embedded is not None:
+            return is_public_address(embedded)
+        if int(address) >> 32 == 0:
+            return False
+    return address.is_global and not address.is_multicast
+
+
+def resolve_host(host: str, port: int) -> list[tuple[Any, ...]]:
+    return socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+
+
+class NotPublicAddress(OSError):
+    """fetch_url was asked for an address that is not on the public internet."""
+
+
+class AddressGuard:
+    """Connect only to public addresses.
+
+    The host is resolved once and every address it resolves to is checked: a
+    name with one public and one private address is refused, not tried in
+    turn. The connection then goes to a checked address, so a name that
+    resolves differently the second time (DNS rebinding) is never looked up
+    a second time."""
+
+    def __init__(
+        self,
+        resolve: Resolve = resolve_host,
+        allowed: Callable[[IPAddress], bool] = is_public_address,
+    ) -> None:
+        self._resolve = resolve
+        self._allowed = allowed
+
+    def addresses(self, host: str, port: int) -> list[tuple[str, int]]:
+        """The checked (address, port) pairs for host, or NotPublicAddress."""
+        checked: list[tuple[str, int]] = []
+        for *_, sockaddr in self._resolve(host, port):
+            # An IPv6 link-local address comes back with its zone: fe80::1%eth0.
+            address = ipaddress.ip_address(str(sockaddr[0]).split("%")[0])
+            if not self._allowed(address):
+                raise NotPublicAddress(
+                    f"{host} is {address}, which is not a public address: fetch_url "
+                    "does not read this machine, the local network or link-local "
+                    "addresses"
+                )
+            if (str(address), sockaddr[1]) not in checked:
+                checked.append((str(address), sockaddr[1]))
+        if not checked:
+            raise OSError(f"{host} did not resolve to any address")
+        return checked
+
+    def connect(self, address: tuple[str, int], timeout: Any,
+                source_address: tuple[str, int] | None = None) -> socket.socket:
+        """http.client's `_create_connection`, to a checked address only."""
+        host, port = address
+        failure: OSError | None = None
+        for checked in self.addresses(host, port):
+            try:
+                return socket.create_connection(checked, timeout, source_address)
+            except OSError as exc:
+                failure = exc
+        assert failure is not None
+        raise failure
+
+
+class _PublicHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host: str, *, guard: AddressGuard | None = None, **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._create_connection = (guard or AddressGuard()).connect
+
+
+class _PublicHTTPSConnection(http.client.HTTPSConnection):
+    # The TLS handshake and certificate check still use the host's name;
+    # only the TCP connection goes to the checked address.
+    def __init__(self, host: str, *, guard: AddressGuard | None = None, **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._create_connection = (guard or AddressGuard()).connect
+
+
+class _PublicHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, guard: AddressGuard) -> None:
+        super().__init__()
+        self._guard = guard
+
+    def http_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        return self.do_open(_PublicHTTPConnection, req, guard=self._guard)
+
+
+class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, guard: AddressGuard) -> None:
+        super().__init__()
+        self._guard = guard
+
+    def https_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        return self.do_open(_PublicHTTPSConnection, req, guard=self._guard)
+
+
+def _proxy_for(parts: urllib.parse.SplitResult) -> str | None:
+    """The proxy urllib would use for this URL, as its ProxyHandler decides."""
+    proxy = urllib.request.getproxies().get(parts.scheme)
+    if not proxy or urllib.request.proxy_bypass(parts.netloc.rpartition("@")[2]):
+        return None
+    return proxy
+
+
+def urllib_fetch_url(
+    url: str,
+    timeout: float,
+    *,
+    resolve: Resolve = resolve_host,
+    allowed: Callable[[IPAddress], bool] = is_public_address,
+) -> tuple[str, str, bytes]:
+    """Fetch one approved URL at a public address, without following a redirect."""
+    guard = AddressGuard(resolve, allowed)
+    parts = urllib.parse.urlsplit(url)
+    proxy = _proxy_for(parts)
+    if proxy is None:
+        handlers: list[Any] = [urllib.request.ProxyHandler({}), _PublicHTTPHandler(guard),
+                               _PublicHTTPSHandler(guard)]
+    else:
+        # The proxy resolves the name and connects, so the name is checked
+        # here. A name that does not resolve here may still resolve there
+        # (a proxy is often the only route to DNS); that is the proxy's to
+        # refuse. What this cannot close is a name that resolves differently
+        # at the proxy than here: only a direct connection pins the address.
+        host = parts.hostname or ""
+        try:
+            port = parts.port or (443 if parts.scheme == "https" else 80)
+        except ValueError:
+            port = 443 if parts.scheme == "https" else 80
+        if host:
+            try:
+                guard.addresses(host, port)
+            except NotPublicAddress:
+                raise
+            except OSError:
+                pass
+        handlers = [urllib.request.ProxyHandler({parts.scheme: proxy})]
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    opener = urllib.request.build_opener(_RejectRedirectHandler)
+    opener = urllib.request.build_opener(*handlers, _RejectRedirectHandler)
     with opener.open(request, timeout=timeout) as response:
         body = response.read(MAX_PAGE_BYTES + 1)
         return response.geturl(), response.headers.get("Content-Type", ""), body
