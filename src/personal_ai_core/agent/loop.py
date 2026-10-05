@@ -41,10 +41,13 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
 from ..core.agent import AgentTaskContract, AuditRecord, Decision, ToolRequest
+from ..core.context import ContextAllocation
 from ..core.contracts import (
+    ContextBudgetPolicy,
     EventRepository,
     IdentityComposer,
     ModelProvider,
+    TokenEstimator,
     ToolCallingProvider,
 )
 from ..core.domain import (
@@ -445,7 +448,25 @@ def fence(label: str, content: str) -> str:
     return f"<<<result {token} {label}>>>\n{content}\n<<<end result {token}>>>"
 
 
-def _describe(step: Step) -> str:
+@dataclass(frozen=True, slots=True)
+class _Window:
+    """`core.contracts.ModelSpecLike` for the model this loop calls."""
+
+    name: str
+    provider: str
+    context_window: int
+
+
+# N2, owner decision 2: a tool result cut below this many tokens is not shown
+# as a stub; the run stops instead. A few hundred tokens is the least a reply
+# can still act on.
+MIN_RESULT_TOKENS = 256
+FITTED_MARKER = "\n[output truncated to fit the context window]"
+
+
+def _describe(step: Step, *, limit: int | None = None) -> str:
+    """The tool result as the model is shown it. With `limit`, the output is
+    cut to that many characters and says so (N2)."""
     record = step.record
     decision = record.decision.decision
     if decision is Decision.DENY:
@@ -457,7 +478,9 @@ def _describe(step: Step) -> str:
     if record.decision.decision is Decision.ASK and not record.confirmed_by_user:
         status = "the user did not confirm; nothing ran"
     body = result.output or "(no output)"
-    if result.truncated:
+    if limit is not None:
+        body = body[:limit] + FITTED_MARKER
+    elif result.truncated:
         body += "\n[output truncated]"
     verdict = "" if step.verified else "\nverification failed: " + "; ".join(step.failed_checks)
     return fence(f"{record.request.tool} -> {status}", body) + verdict
@@ -471,6 +494,8 @@ class AgentLoop:
         model: str,
         executor: ToolExecutor,
         context_window: int,
+        budget_policy: ContextBudgetPolicy,
+        estimator: TokenEstimator,
         verifier: Verifier | None = None,
         checkpoints: Checkpoints | None = None,
         identity: IdentityComposer | None = None,
@@ -482,7 +507,6 @@ class AgentLoop:
         verify_completion: bool = False,
         max_actions: int = 12,
         max_failures: int = 3,
-        generation_limit: int = 1024,
     ) -> None:
         # N1: the active model's window, sent as `num_ctx` on every call so the
         # server runs the window the Core configured. Required, with no
@@ -491,6 +515,15 @@ class AgentLoop:
                 or context_window < 1:
             raise ValueError(f"context_window must be a positive whole number, not {context_window!r}")
         self._context_window = context_window
+        # N2: every request is measured before it is sent, against the same
+        # kind of policy and the same estimator a chat turn uses. The policy's
+        # identity reserve funds the identity message, which is therefore not
+        # counted again; its generation reserve is the reply limit sent as
+        # num_predict, so the reserve and the limit cannot drift apart.
+        self._budget_policy = budget_policy
+        self._estimator = estimator
+        self._window = _Window(name=model, provider=provider.name,
+                               context_window=context_window)
         self._session_exists = session_exists
         self._provider = provider
         self._model = model
@@ -529,7 +562,6 @@ class AgentLoop:
         self._verify_completion = verify_completion
         self._max_actions = max_actions
         self._max_failures = max_failures
-        self._generation_limit = generation_limit
 
     def run(
         self,
@@ -576,8 +608,20 @@ class AgentLoop:
         call = 0
 
         while budget.allowed():
+            # N2: measured before it is sent. A request the window cannot hold
+            # is never handed to the server to truncate -- the first thing it
+            # would drop is the task -- and the run stops on the record.
+            allocation = self._allocate(messages)
+            if allocation.overcommitted:
+                return self._stop(
+                    f"stopped: the next request needs about {allocation.spoken_for} tokens "
+                    f"and the model's window is {allocation.context_window}",
+                    steps, session_id, protocol_errors, contract, action_rejections,
+                    environment, refused, lenient, verification_rejections,
+                )
             call += 1
-            options = {"num_predict": self._generation_limit, "num_ctx": self._context_window}
+            options = {"num_predict": allocation.generation_reserve,
+                       "num_ctx": self._context_window}
             if self._native is not None:
                 reply = self._native.generate_with_tools(
                     model=self._model, messages=messages, tools=self._declarations,
@@ -668,7 +712,15 @@ class AgentLoop:
             self._record_step(step, session_id, contract)
             if on_step is not None:
                 on_step(step)
-            messages.append(self._user(session_id, _describe(step)))
+            described = self._fitted(step, messages)
+            if described is None:
+                return self._stop(
+                    f"stopped: the {step.record.request.tool} result does not fit what is "
+                    f"left of the model's window ({self._allocate(messages).evidence} tokens)",
+                    steps, session_id, protocol_errors, contract, action_rejections,
+                    environment, refused, lenient, verification_rejections,
+                )
+            messages.append(self._user(session_id, described))
 
         return self._stop(
             budget.summary(),
@@ -785,6 +837,42 @@ class AgentLoop:
 
     def _touched(self) -> tuple[str, ...]:
         return self._checkpoints.touched() if self._checkpoints is not None else ()
+
+    def _allocate(self, messages: Sequence[Message]) -> ContextAllocation:
+        """How the window divides for a request carrying `messages` (N2).
+
+        The identity message is not measured here: the policy's identity
+        reserve already funds it, exactly as on the chat path, and counting it
+        twice would shrink every agent run for nothing.
+        """
+        measured = messages[1:] if self._identity is not None else messages
+        history = sum(self._estimator.estimate(m.content) for m in measured)
+        return self._budget_policy.allocate(model=self._window, history_tokens=history)
+
+    def _fitted(self, step: Step, messages: Sequence[Message]) -> str | None:
+        """The step's result as it can be shown within what is left of the
+        window, or None when that is too little to be worth showing (N2).
+
+        A result that fits is shown exactly as before. One that does not is
+        cut, with a line saying so -- tool outputs are already cut at a fixed
+        size; this is the same cut with a limit that follows the space left.
+        """
+        room = self._allocate(messages).evidence
+        whole = _describe(step)
+        if self._estimator.estimate(whole) <= room:
+            return whole
+        if room < MIN_RESULT_TOKENS:
+            return None
+        output = step.record.result.output if step.record.result is not None else ""
+        low, high = 0, len(output)  # the longest prefix whose rendering fits
+        while low < high:
+            middle = (low + high + 1) // 2
+            if self._estimator.estimate(_describe(step, limit=middle)) <= room:
+                low = middle
+            else:
+                high = middle - 1
+        fitted = _describe(step, limit=low)
+        return fitted if self._estimator.estimate(fitted) <= room else None
 
     def _record_step(
         self, step: Step, session_id: str, contract: AgentTaskContract | None

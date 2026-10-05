@@ -24,6 +24,7 @@ from personal_ai_core.agent.loop import (
     AgentLoop,
 )
 from personal_ai_core.agent.policy import RiskPolicy
+from personal_ai_core.context import ReserveBasedBudgetPolicy, ScriptAwareTokenEstimator
 from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import Workspace
 from personal_ai_core.agent.tools import WriteFile
@@ -81,7 +82,8 @@ def _loop(ws, script, *, exits=None, verify=True, events=None, **kwargs):
     exits = exits or {}
     tools = [WriteFile(ws, checkpoints), Command("run_command", exits), Command("shell", exits)]
     executor = ToolExecutor(tools, RiskPolicy())
-    return AgentLoop(provider=script, model="boss", executor=executor, context_window=8192,
+    return AgentLoop(provider=script, model="boss", executor=executor, context_window=8192, budget_policy=ReserveBasedBudgetPolicy(),
+                     estimator=ScriptAwareTokenEstimator(),
                      checkpoints=checkpoints, events=events, verify_completion=verify,
                      session_exists=(lambda s: True) if events is not None else None, **kwargs)
 
