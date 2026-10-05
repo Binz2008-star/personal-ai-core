@@ -24,6 +24,7 @@ from personal_ai_core.context.token_estimator import ScriptAwareTokenEstimator
 from personal_ai_core.conversation.factory import (
     build_grounded_in_memory_service,
     build_in_memory_service,
+    build_reply_redactor,
 )
 from personal_ai_core.core.domain import EventType
 from personal_ai_core.core.errors import ContextOverflowError
@@ -113,7 +114,8 @@ def test_the_cli_says_what_happened_instead_of_a_traceback():
     session = service.start_session(service.create_user().id)
     out = io.StringIO()
     code = _converse(service=service, session_id=session.id, language=None,
-                     lines=iter(["word " * 60_000]), out=out)
+                     lines=iter(["word " * 60_000]), out=out,
+                     redactor=build_reply_redactor())
     assert code == 1
     assert "no longer fits the model" in out.getvalue()
     assert "start a new session" in out.getvalue()

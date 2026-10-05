@@ -13,6 +13,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ...core.domain import Message, ModelResponse
 from ...core.errors import ProviderError
+from ..failures import transport_failure
 
 Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
 
@@ -31,9 +32,11 @@ def http_transport(url: str, payload: Mapping[str, Any], timeout: int) -> Mappin
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise ProviderError(f"llama-server request failed: {exc}") from exc
+        kind, status = transport_failure(exc)
+        raise ProviderError(f"llama-server request failed: {exc}", kind=kind, status=status) from exc
     except json.JSONDecodeError as exc:
-        raise ProviderError(f"llama-server returned invalid JSON: {exc}") from exc
+        raise ProviderError(f"llama-server returned invalid JSON: {exc}",
+                            kind="invalid_response") from exc
 
 
 class LlamaCppProvider:
@@ -64,7 +67,7 @@ class LlamaCppProvider:
         options: Mapping[str, Any] | None = None,
     ) -> ModelResponse:
         if not messages:
-            raise ProviderError("generate() requires at least one message")
+            raise ProviderError("generate() requires at least one message", kind="invalid_request")
         payload: dict[str, Any] = {
             "model": model,
             "messages": [{"role": m.role.value, "content": m.content} for m in messages],
@@ -84,7 +87,8 @@ class LlamaCppProvider:
             text = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise ProviderError(
-                f"llama-server response missing choices[0].message.content; got keys: {sorted(raw)}"
+                f"llama-server response missing choices[0].message.content; got keys: {sorted(raw)}",
+                kind="invalid_response",
             ) from exc
         usage = raw.get("usage") or {}
         return ModelResponse(

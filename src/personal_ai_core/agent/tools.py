@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import fnmatch
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -475,17 +474,46 @@ class RunCommand:
         return ToolResult(ok=True, output=output, truncated=truncated)
 
 
-# Environment variables whose NAMES say they hold a secret. The shell runs the
-# owner's own tools, so it inherits their environment -- minus these, so a
-# model that runs `env` or `set` does not read a token into its context.
-_SECRET_NAME = re.compile(
-    r"TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE|CREDENTIAL|AUTH|_KEY$|DSN|DATABASE_URL|COOKIE|SESSION",
-    re.IGNORECASE,
-)
+# The only variables the shell passes on (gap analysis P0-5). This was the
+# owner's environment minus names that LOOKED secret, so any secret named
+# otherwise -- AWS_ACCESS_KEY_ID, a token under a project's own name -- was
+# one `env` or `set` away from the model's context. Now nothing is passed but
+# the names below, each a location, a locale or a system setting that the
+# owner's own tools need to run as they do in a terminal: git still finds its
+# global config through HOME or USERPROFILE, pip and Python their temp and
+# app-data folders, cmd its PATHEXT. Not passed, and why: proxies (their URL
+# can carry a password), and everything a project or the owner named.
+SHELL_ENV_NAMES = frozenset({
+    # Where programs, the user's files and temporary files are.
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TEMP", "TMP",
+    "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+    # Language, encoding and terminal.
+    "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "TERM", "TZ",
+    "PYTHONUTF8", "PYTHONIOENCODING",
+    # Which interpreter or toolchain: paths, never credentials.
+    "VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV", "PYENV_ROOT", "NVM_DIR",
+    "JAVA_HOME", "GOPATH", "GOROOT", "CARGO_HOME", "RUSTUP_HOME",
+    # Windows: without these cmd, Python, pip and git misbehave.
+    "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "OS",
+    "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "USERNAME", "APPDATA", "LOCALAPPDATA",
+    "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432",
+    "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432",
+    "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "PSMODULEPATH",
+})
 
 
 def shell_environment() -> dict[str, str]:
-    return {name: value for name, value in os.environ.items() if not _SECRET_NAME.search(name)}
+    """The shell's environment: the owner's values for SHELL_ENV_NAMES only.
+
+    Built up, not filtered down, as `run_command`'s is, so a secret is left out
+    whatever it is called. Windows names are matched without regard to case,
+    as Windows does. A git that wants to ask for credentials fails instead of
+    waiting for a terminal nobody is at.
+    """
+    env = {name: value for name, value in os.environ.items()
+           if name.upper() in SHELL_ENV_NAMES}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
 
 
 class Shell:
