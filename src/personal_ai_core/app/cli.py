@@ -39,7 +39,7 @@ from ..core.agent import AgentTaskContract
 from ..core.config import Settings
 from ..core.contracts import SecretRedactor
 from ..core.domain import EventType
-from ..core.errors import ContextOverflowError, ProviderError, RollbackIncomplete
+from ..core.errors import ConfigError, ContextOverflowError, ProviderError, RollbackIncomplete
 from ..core.feedback import CORRECTION_KEY, FEEDBACK_EVENT_TYPE, FeedbackOutcome
 from ..core.knowledge import Document
 from ..core.redaction import RedactionError
@@ -119,7 +119,7 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "keep nothing. Uses the in-memory slice, so the conversation ends "
             "with the process -- which is what every run did before there was "
-            "a store."
+            "a store. Not with --agent: its steps are the record of what it did."
         ),
     )
     parser.add_argument(
@@ -584,7 +584,13 @@ def main(
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
     environment = os.environ.copy() if env is None else env
-    settings = Settings.from_env(environment)
+    try:
+        settings = Settings.from_env(environment)
+    except ConfigError as exc:
+        # A usage error, as a bad flag is: a sentence and exit 2, not a
+        # traceback indistinguishable from a crash (gap analysis P1-4).
+        print(f"pac: {exc}", file=out)
+        return 2
     # One iterator, shared by the conversation and by the agent's
     # confirmation prompts: an answer to "Allow?" is the next line typed.
     lines = iter(stdin if stdin is not None else sys.stdin)
@@ -603,6 +609,17 @@ def main(
     settings = dataclasses.replace(settings, profile=profile)
 
     if args.agent:
+        # The agent's steps are its audit trail: what it read, ran and wrote,
+        # and what it was refused. --ephemeral would hold them in memory and
+        # drop them at exit, so the runs that can change files would be the
+        # ones that leave no record.
+        if args.ephemeral:
+            print(
+                "--agent records every step it takes in the database; it cannot "
+                "be used with --ephemeral, which keeps nothing",
+                file=out,
+            )
+            return 2
         if args.workspace is None:
             print("--agent needs --workspace DIR: the directory it may work in", file=out)
             return 2
