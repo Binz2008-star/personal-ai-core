@@ -30,7 +30,7 @@ from ..evaluate import FAIL, PASS, _fold, check_declines
 SCORER = "bench-checks-v2"
 COMMAND_TIMEOUT_SECONDS = 120
 # Tools that change files; a test run must come after the last of them.
-EDITING_TOOLS = frozenset({"write_file", "delete_file", "shell"})
+EDITING_TOOLS = frozenset({"write_file", "edit_file", "delete_file", "shell"})
 TESTING = re.compile(r"(^|\s)(pytest|python\s+-m\s+pytest)(\s|$)")
 
 

@@ -111,6 +111,13 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+# How long the child run may take. It is the whole suite: about 170 seconds on
+# Linux and, at about 2850 tests, past 300 on the Windows runner -- where a
+# limit of 300 failed this audit on a run in which every other test passed
+# (#233, 2026-10-05). The limit is there to stop a hang, not to time the suite.
+CHILD_RUN_TIMEOUT_SECONDS = 1800
+
+
 def _skip_report() -> list[str]:
     environment = {**os.environ, NESTED_MARKER: "1"}
     completed = subprocess.run(
@@ -122,7 +129,7 @@ def _skip_report() -> list[str]:
         capture_output=True,
         text=True,
         env=environment,
-        timeout=300,
+        timeout=CHILD_RUN_TIMEOUT_SECONDS,
     )
     return [
         line.strip()

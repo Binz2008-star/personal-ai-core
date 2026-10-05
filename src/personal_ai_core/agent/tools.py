@@ -218,14 +218,15 @@ class SearchText:
                     if wanted in haystack:
                         matches.append(f"{relative}:{number}: {line.strip()}")
                         if len(matches) > MAX_SEARCH_MATCHES:
-                            return ToolResult(
-                                ok=True,
-                                output="\n".join(matches[:MAX_SEARCH_MATCHES]),
-                                truncated=True,
-                            )
+                            # N2: the line count was bounded and each line
+                            # was not, so 200 lines of a minified file were
+                            # megabytes; the same cap as every other output.
+                            output, _ = _bounded("\n".join(matches[:MAX_SEARCH_MATCHES]))
+                            return ToolResult(ok=True, output=output, truncated=True)
         if not matches:
             return ToolResult(ok=True, output="no matches")
-        return ToolResult(ok=True, output="\n".join(matches))
+        output, truncated = _bounded("\n".join(matches))
+        return ToolResult(ok=True, output=output, truncated=truncated)
 
 
 class FindFiles:
@@ -423,8 +424,11 @@ class RunCommand:
         self.spec = ToolSpec(
             name="run_command",
             description=(
-                "Run one allowlisted, read-only or checking command in the workspace, "
-                "without a shell. Options that write files, such as ruff --fix, are "
+                "Run one allowlisted command in the workspace, without a shell: a "
+                "read-only one, or a check (pytest, ruff, mypy). A check is not "
+                "read-only: pytest runs the project's own code, and the project's "
+                "configuration can make any check write files, so the owner is asked "
+                "before every run. Options that write files, such as ruff --fix, are "
                 "refused: change files with write_file. Undoing a task restores what "
                 "the file tools wrote, not what a command wrote."
             ),

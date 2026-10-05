@@ -128,6 +128,18 @@ class ConversationService:
         if session is None:
             raise KeyError(f"unknown session: {session_id}")
 
+        spec = self._registry.active
+        # N1: the window this turn is budgeted against is the window the model
+        # server is told to use (`num_ctx`). A caller naming another one would
+        # make the budget describe a window the server does not have, so it is
+        # refused here, before anything is stored -- not overridden in silence.
+        named_window = (options or {}).get("num_ctx")
+        if named_window is not None and named_window != spec.context_window:
+            raise ValueError(
+                f"num_ctx {named_window!r} differs from the active model's context "
+                f"window {spec.context_window}, which this turn is budgeted against"
+            )
+
         user_message = Message(
             session_id=session_id,
             role=Role.USER,
@@ -143,7 +155,6 @@ class ConversationService:
             actor=session.user_id,
         )
 
-        spec = self._registry.active
         # The whole history stays in the store; the prompt gets the newest
         # messages that fit (P1-3). Both paths are measured on what is sent.
         window = window_history(
@@ -220,6 +231,9 @@ class ConversationService:
             "grounded": grounding is not None and grounding.message is not None,
             "evidence_chunks": grounding.used if grounding is not None else 0,
             "generation_limit": allocation.generation_reserve,
+            # N1: the window the server is told to use -- the one this turn
+            # was budgeted against.
+            "num_ctx": allocation.context_window,
             "sampling": dict(self._sampling),
         }
         self._recorder.record(
@@ -377,9 +391,14 @@ class ConversationService:
         policy, and silently overriding it would make the parameter a lie. The
         limit and the sampling are recorded on `GENERATION_REQUESTED` either
         way, so what was sent is recoverable.
+
+        `num_ctx` is the exception (N1): it is always the allocation's window,
+        because a server running another window truncates the prompt without
+        a word. `send` has already refused a caller that named a different one.
         """
         merged = {**self._sampling, **dict(options or {})}
         merged.setdefault("num_predict", allocation.generation_reserve)
+        merged["num_ctx"] = allocation.context_window
         return merged
 
     def _measure(
