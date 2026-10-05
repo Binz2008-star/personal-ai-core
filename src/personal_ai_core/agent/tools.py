@@ -425,7 +425,9 @@ class RunCommand:
             name="run_command",
             description=(
                 "Run one allowlisted, read-only or checking command in the workspace, "
-                "without a shell."
+                "without a shell. Options that write files, such as ruff --fix, are "
+                "refused: change files with write_file. Undoing a task restores what "
+                "the file tools wrote, not what a command wrote."
             ),
             risk_level=RiskLevel.HIGH,
             input_schema={
