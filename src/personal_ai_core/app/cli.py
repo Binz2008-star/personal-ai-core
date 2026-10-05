@@ -707,7 +707,8 @@ def main(
                 file=out,
             )
             print(file=out)
-            return _agent_session(agent=agent, session_id=session_id, lines=lines, out=out, err=err)
+            return _agent_session(agent=agent, session_id=session_id, lines=lines, out=out,
+                                  err=err, settings=settings)
 
         print(file=out)
 
@@ -717,6 +718,7 @@ def main(
             language=args.language,
             lines=lines,
             out=out,
+            settings=settings,
         )
     finally:
         if slice_ is not None:
@@ -740,7 +742,33 @@ def _say_if_the_model_must_load(settings: Settings, *, probe, live: bool, out: T
               "a minute or more", file=out)
 
 
-def _converse(*, service, session_id, language, lines, out) -> int:
+def _explain_provider_failure(exc: ProviderError, settings: Settings, out: TextIO) -> None:
+    """Say which failure it was, and the fix that fits it.
+
+    Gap analysis P1-6: every provider failure said "check that the model
+    server is running". On a cold start the server is running and the model
+    is still loading, so that advice sent the owner to restart something
+    healthy. The provider classifies its failures (P1-8); each kind gets its
+    own sentence, and the one nobody classified keeps the general advice.
+    """
+    if exc.kind == "timeout":
+        print(f"the model did not answer within {settings.request_timeout_seconds} seconds.",
+              file=out)
+        print("a model that is loading -- the first reply after Ollama unloaded it -- can "
+              "take longer than that: ask again, or raise PAC_REQUEST_TIMEOUT_SECONDS.", file=out)
+    elif exc.kind == "unreachable":
+        print(f"nothing answered at {settings.ollama_host}: {exc}", file=out)
+        print("start Ollama, or set PAC_OLLAMA_HOST to where it runs.", file=out)
+    elif exc.kind == "http_status" and exc.status == 404:
+        print(f"the model server does not have {settings.boss_model}: {exc}", file=out)
+        print(f"pull it (ollama pull {settings.boss_model}), or set PAC_BOSS_MODEL.", file=out)
+    else:
+        print(f"the model could not be reached: {exc}", file=out)
+        print("check that the model server is running, or set PAC_OLLAMA_HOST.", file=out)
+
+
+def _converse(*, service, session_id, language, lines, out,
+              settings: Settings | None = None) -> int:
     for line in lines:
         content = line.strip()
         if not content:
@@ -760,14 +788,7 @@ def _converse(*, service, session_id, language, lines, out) -> int:
             print("start a new session (run pac without --session) to continue.", file=out)
             return 1
         except ProviderError as exc:
-            # The commonest first-run failure by far: nothing is listening on
-            # the Ollama host. Naming the variable is the difference between
-            # a fixable message and a traceback.
-            print(f"the model could not be reached: {exc}", file=out)
-            print(
-                "check that the model server is running, or set PAC_OLLAMA_HOST.",
-                file=out,
-            )
+            _explain_provider_failure(exc, settings or Settings(), out)
             return 1
         print(f"{REPLY}{reply.content}", file=out)
     return 0
@@ -815,7 +836,8 @@ def _describe_step(step) -> str:
     return f"  · {record.request.tool} {arguments} -> {status}"
 
 
-def _agent_session(*, agent, session_id, lines, out, err) -> int:
+def _agent_session(*, agent, session_id, lines, out, err,
+                   settings: Settings | None = None) -> int:
     invalid_tasks = False
     for line in lines:
         if not line.strip():
@@ -844,11 +866,7 @@ def _agent_session(*, agent, session_id, lines, out, err) -> int:
             print("start a new session (run pac without --session) to continue.", file=out)
             return 1
         except ProviderError as exc:
-            print(f"the model could not be reached: {exc}", file=out)
-            print(
-                "check that the model server is running, or set PAC_OLLAMA_HOST.",
-                file=out,
-            )
+            _explain_provider_failure(exc, settings or Settings(), out)
             return 1
         if outcome.finished:
             print(f"{REPLY}{outcome.answer}", file=out)

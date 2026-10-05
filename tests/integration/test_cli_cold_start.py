@@ -82,3 +82,50 @@ def test_a_test_transport_without_a_probe_asks_no_server(tmp_path):
     code = main(["--database", str(tmp_path / "core.db")], transport=_transport,
                 stdin=iter(["hello"]), stdout=out, env={})
     assert code == 0 and NOTICE not in out.getvalue()
+
+
+# --- when the turn fails, the message names the failure it was ---------------------
+
+import pytest  # noqa: E402
+
+from personal_ai_core.core.errors import ProviderError  # noqa: E402
+
+
+def _failing(error: ProviderError):
+    def transport(url: str, payload: Mapping[str, Any], timeout: int):
+        raise error
+    return transport
+
+
+@pytest.mark.parametrize("agent", [False, True], ids=["chat", "agent"])
+@pytest.mark.parametrize(("error", "says", "never"), [
+    (ProviderError("ollama request failed: timed out", kind="timeout"),
+     ["did not answer within 120 seconds", "a model that is loading",
+      "PAC_REQUEST_TIMEOUT_SECONDS"],
+     "check that the model server is running"),
+    (ProviderError("ollama request failed: [Errno 111] Connection refused", kind="unreachable"),
+     ["nothing answered at http://127.0.0.1:11434", "start Ollama", "PAC_OLLAMA_HOST"],
+     "a model that is loading"),
+    (ProviderError("ollama request failed: HTTP Error 404: Not Found",
+                   kind="http_status", status=404),
+     [f"the model server does not have {BOSS}", f"ollama pull {BOSS}", "PAC_BOSS_MODEL"],
+     "a model that is loading"),
+    (ProviderError("ollama returned invalid JSON: Expecting value", kind="invalid_response"),
+     ["could not be reached", "check that the model server is running"],
+     "a model that is loading"),
+], ids=["timeout", "unreachable", "missing-model", "unclassified"])
+def test_a_failed_turn_says_which_failure_it_was(tmp_path, agent, error, says, never):
+    argv = ["--database", str(tmp_path / "core.db")]
+    line = "[action_required=false] hello" if agent else "hello"
+    if agent:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        argv += ["--agent", "--workspace", str(workspace)]
+    out = io.StringIO()
+    code = main(argv, transport=_failing(error), stdin=iter([line]), stdout=out, env={})
+    output = out.getvalue()
+    assert code == 1
+    for phrase in says:
+        assert phrase in output
+    assert never not in output
+    assert "Traceback" not in output
