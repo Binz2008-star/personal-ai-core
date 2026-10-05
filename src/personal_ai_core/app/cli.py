@@ -33,6 +33,8 @@ from ..conversation.factory import (
     build_grounded_in_memory_service,
     build_in_memory_service,
     build_persistent_service,
+    describe_store_failure,
+    STORE_ERRORS,
 )
 from ..core.agent import AgentTaskContract
 from ..core.config import Settings
@@ -572,6 +574,33 @@ def main(
     env: dict[str, str] | None = None,
 ) -> int:
     """Run one chat session. Returns a process exit code.
+
+    A failure of the store, wherever in the run it comes from, ends in a
+    sentence and exit 1 rather than a traceback (gap analysis P1-5):
+    `describe_store_failure` says what happened and what to do first.
+    """
+    try:
+        return _main(argv, transport=transport, stdin=stdin, stdout=stdout,
+                     stderr=stderr, env=env)
+    except STORE_ERRORS as exc:
+        environment = os.environ.copy() if env is None else env
+        args = _parser().parse_args(argv)
+        database = None if args.ephemeral else _database_path(args.database, environment)
+        print(f"pac: {describe_store_failure(exc, database)}",
+              file=stdout if stdout is not None else sys.stdout)
+        return 1
+
+
+def _main(
+    argv: Sequence[str] | None = None,
+    *,
+    transport: Callable[..., object] | None = None,
+    stdin: Iterable[str] | None = None,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+    env: dict[str, str] | None = None,
+) -> int:
+    """The run itself; `main` stands between it and a failing store.
 
     Everything the outside world provides arrives as an argument, so the whole
     command is exercisable without a terminal, a home directory or a model
