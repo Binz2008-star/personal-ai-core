@@ -380,6 +380,24 @@ class RenderedEvidenceCost:
         ) + self._estimator.estimate(_SECTION_SLACK)
 
 
+# P1-3 (R3): a grounded turn's history leaves room for this many passages.
+EVIDENCE_RESERVE_ITEMS = 2
+
+
+@dataclass(frozen=True, slots=True)
+class Retrieval:
+    """What one turn's retrieval and recall returned, before any budgeting.
+
+    `skipped` is an empty query: nothing was asked, so nothing was retrieved
+    or recalled, which is a different fact from asking and finding nothing.
+    """
+
+    results: tuple[RetrievalResult, ...] = ()
+    memories: tuple[MemoryEvidence, ...] = ()
+    memory_error: MemoryRetrievalError | None = None
+    skipped: bool = False
+
+
 class ContextBuilder:
     """Retrieval, budgeting and assembly for a single turn.
 
@@ -388,6 +406,11 @@ class ContextBuilder:
     measure the history, derive the budget from the *active* model, retrieve,
     then fit. A caller free to reorder those would eventually derive a budget
     from a stale model or fit before measuring.
+
+    `retrieve` and `assemble` are also exposed apart (P1-3, R3): retrieval
+    reads only this turn's message, so the service retrieves first, reserves
+    `evidence_reserve` of the window for what came back, cuts the history
+    window beside it, and only then assembles. `build` is the two in one.
     """
 
     def __init__(
@@ -410,6 +433,9 @@ class ContextBuilder:
         self._estimator = estimator
         self._memory_retriever = memory_retriever
         self._limit = limit
+        # Prices the evidence reserve (R3) as the assembler that production
+        # composes charges it: rendered, with the same redactor.
+        self._evidence_cost = RenderedEvidenceCost(estimator, redactor)
 
     @property
     def memory_enabled(self) -> bool:
@@ -432,7 +458,77 @@ class ContextBuilder:
         was used, is the exact failure this layer exists to prevent. The
         service records the failure as an event and lets it propagate, so the
         caller can decide whether to retry ungrounded.
+
+        `retrieve` then `assemble`, in one call. The service calls the two
+        separately, so it can cut the history window after it knows what
+        retrieval returned (`evidence_reserve`).
         """
+        return self.assemble(
+            session_id=session_id,
+            retrieval=self.retrieve(session_id=session_id, query=query, language=language),
+            model=model,
+            history=history,
+        )
+
+    def retrieve(self, *, session_id: str, query: str, language: str) -> Retrieval:
+        """What retrieval and recall return for this turn's message.
+
+        Depends on the message alone, never on the history, so it can run
+        before the history window is cut (P1-3, R3)."""
+        if not query.strip():
+            # Nothing to retrieve for. Not an error, and not worth a round trip.
+            return Retrieval(skipped=True)
+        results = self._retriever.retrieve(
+            RetrievalQuery(text=query, limit=self._limit, language=language)
+        )
+        memories, memory_error = self._recall(
+            session_id=session_id, query=query, language=language
+        )
+        return Retrieval(
+            results=tuple(results), memories=tuple(memories), memory_error=memory_error
+        )
+
+    def evidence_reserve(self, retrieval: Retrieval) -> int:
+        """Tokens a grounded turn keeps from the history for its evidence.
+
+        P1-3 (R3, the owner's decision): the history window took everything
+        but the fixed reserves, so from some turn on a grounded turn sent no
+        passage at all, silently. The reserve is the rendered cost of what
+        retrieval returned -- its section preamble and its passages, priced
+        exactly as the assembler charges them -- capped at the first TWO
+        distinct passages. Zero when no passage came back, so a turn without
+        evidence keeps the whole room for its history.
+
+        Documents only: a recalled memory is not reserved for, and one that
+        outranks the second passage can still take that passage's room.
+        """
+        top: list[RetrievalResult] = []
+        seen_ids: set[str] = set()
+        seen_text: set[str] = set()
+        for result in retrieval.results:
+            fingerprint = " ".join(result.chunk.text.split())
+            if result.chunk.id in seen_ids or fingerprint in seen_text:
+                continue  # the assembler drops it as a duplicate
+            top.append(result)
+            seen_ids.add(result.chunk.id)
+            seen_text.add(fingerprint)
+            if len(top) == EVIDENCE_RESERVE_ITEMS:
+                break
+        if not top:
+            return 0
+        return self._evidence_cost.document_section() + sum(
+            self._evidence_cost.document(result) for result in top
+        )
+
+    def assemble(
+        self,
+        *,
+        session_id: str,
+        retrieval: Retrieval,
+        model: ModelSpecLike,
+        history: Sequence[Message],
+    ) -> Grounding:
+        """Fit what `retrieve` returned into the room this history leaves."""
         history_tokens = sum(
             self._estimator.estimate(message.content) for message in history
         )
@@ -441,8 +537,7 @@ class ContextBuilder:
         )
         budget = allocation.budget(source=self._describe_source())
 
-        if not query.strip():
-            # Nothing to retrieve for. Not an error, and not worth a round trip.
+        if retrieval.skipped:
             return Grounding(
                 message=None,
                 context=HybridBudgetedContext(
@@ -455,12 +550,7 @@ class ContextBuilder:
                 memory_error=None,
             )
 
-        results = self._retriever.retrieve(
-            RetrievalQuery(text=query, limit=self._limit, language=language)
-        )
-        memories, memory_error = self._recall(
-            session_id=session_id, query=query, language=language
-        )
+        results, memories = retrieval.results, retrieval.memories
         context = self._assembler.assemble(
             results=results, memories=memories, budget=budget
         )
@@ -496,7 +586,7 @@ class ContextBuilder:
             retrieved=len(results),
             memory_enabled=self.memory_enabled,
             memories_retrieved=len(memories),
-            memory_error=memory_error,
+            memory_error=retrieval.memory_error,
             redactions=tally,
         )
 

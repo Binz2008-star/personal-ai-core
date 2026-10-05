@@ -103,10 +103,17 @@ def test_an_overcommitted_turn_is_refused_before_the_provider_is_called(build):
               if e.type is EventType.GENERATION_FAILED]
     assert len(failed) == 1 and failed[0]["reason"] == "context_overcommitted"
     assert failed[0]["spoken_for"] == caught.value.spoken_for
-    # The allocation that refused it is on the record, flagged.
-    assert _assembled(events, session.id)[-1]["overcommitted"] is True
-    # The user's message is kept: it was received, and the refusal is about it.
-    assert [m.content for m in service.history(session.id)] == [huge]
+    # The measurement that refused it is on the record (P1-3 R1: it is made
+    # before anything is stored, so there is no CONTEXT_ASSEMBLED to flag).
+    estimate = ScriptAwareTokenEstimator().estimate
+    assert failed[0]["history_tokens"] == estimate(huge) == caught.value.history_tokens
+    assert failed[0]["cause"] == "message" and failed[0]["stored"] is False
+    assert failed[0]["spoken_for"] == failed[0]["fixed_tokens"] + estimate(huge)
+    assert _assembled(events, session.id) == []
+    # R1: the message is NOT kept. Storing it left a session with a message
+    # in it that no turn could send; nothing was received into the session.
+    assert list(service.history(session.id)) == []
+    assert EventType.MESSAGE_RECEIVED not in recorded
 
 
 def test_the_cli_says_what_happened_instead_of_a_traceback():
@@ -118,7 +125,12 @@ def test_the_cli_says_what_happened_instead_of_a_traceback():
                      redactor=build_reply_redactor())
     assert code == 1
     # Older messages are left out to make room (P1-3), so a refused turn is
-    # the message itself: a new session would not help.
-    assert "this message is too long for the model" in out.getvalue()
-    assert "shorten it, or send it in parts" in out.getvalue()
+    # the message itself (R1): a new session would not help.
+    tokens = ScriptAwareTokenEstimator().estimate(("word " * 60_000).strip())  # as typed
+    (line,) = out.getvalue().splitlines()
+    assert line.startswith(
+        f"the turn was not sent: your message is about {tokens} tokens; shorten it "
+        "(the model's window is 8192 tokens, and the profile and fixed reserves need about ")
+    assert line.endswith(" of them).")
     assert "new session" not in out.getvalue()
+    assert "shorten the profile" not in out.getvalue()

@@ -708,6 +708,16 @@ def _main(
                 print(passed_over, file=out)
             _ingest(ingestion, files, out)
 
+        if not args.agent:
+            # R1, case b: when the profile and the fixed reserves fill the
+            # window, every turn would be refused. Said before a session is
+            # created for it, not after the first message is stored.
+            try:
+                service.check_room()
+            except ContextOverflowError as exc:
+                print(f"pac: no turn can be sent: {exc}.", file=out)
+                return 1
+
         if args.session:
             # Not verified here. `send` raises KeyError for an unknown
             # session and that is the contract; the agent loop raises the same
@@ -892,14 +902,21 @@ def _converse(*, service, session_id, language, lines, out, redactor: SecretReda
         except ContextOverflowError as exc:
             # ADR-005: refused rather than sent and silently cut by the server.
             # Older messages are left out of the prompt to make room (P1-3),
-            # so this is the message itself: a new session would not help.
-            print(f"this message is too long for the model: {exc}.", file=out)
-            print("shorten it, or send it in parts.", file=out)
+            # so the cause is the message or the profile, and the error says
+            # which (R1): a new session would be refused the same way.
+            print(f"the turn was not sent: {exc}.", file=out)
             return 1
         except ProviderError as exc:
             _explain_provider_failure(exc, settings or Settings(), out)
             return 1
         _print_reply(reply.content, redactor, out)
+        # R2: said once, on the turn that first leaves messages out -- not on
+        # every turn after it. The count of every turn is in its
+        # CONTEXT_ASSEMBLED event.
+        started = getattr(service, "left_out_started", None)
+        left_out = started(session_id) if started is not None else None
+        if left_out:
+            print(f"{_NOTE}{LEFT_OUT_NOTE.format(count=left_out)}", file=out)
         if confirm_window is not None:
             code, confirm_window = confirm_window(), None
             if code is not None:
@@ -909,6 +926,13 @@ def _converse(*, service, session_id, language, lines, out, redactor: SecretReda
 
 # Under the reply, aligned with the other continuation lines ("changed:").
 _NOTE = "         "
+
+# R2 (P1-3): the one line a session gets when its oldest messages stop being
+# sent to the model.
+LEFT_OUT_NOTE = (
+    "[older messages are no longer sent to the model (they are kept); "
+    "{count} left out so far]"
+)
 
 
 def _print_reply(content: str, redactor: SecretRedactor, out: TextIO) -> None:
