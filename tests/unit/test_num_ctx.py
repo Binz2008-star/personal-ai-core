@@ -195,10 +195,13 @@ def test_every_agent_call_sends_the_window_on_the_native_protocol(tmp_path):
 def test_the_agent_refuses_a_window_that_is_not_a_positive_whole_number(window):
     from personal_ai_core.agent import RiskPolicy, ToolExecutor
     from personal_ai_core.agent.loop import AgentLoop
+    from personal_ai_core.context import ReserveBasedBudgetPolicy, ScriptAwareTokenEstimator
 
     with pytest.raises(ValueError, match="context_window"):
         AgentLoop(provider=Transport(), model="boss",  # type: ignore[arg-type]
-                  executor=ToolExecutor([], RiskPolicy()), context_window=window)
+                  executor=ToolExecutor([], RiskPolicy()), context_window=window,
+                  budget_policy=ReserveBasedBudgetPolicy(),
+                  estimator=ScriptAwareTokenEstimator())
 
 
 # --- every builder, and the program itself -------------------------------------
