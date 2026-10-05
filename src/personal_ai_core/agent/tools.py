@@ -423,8 +423,11 @@ class RunCommand:
         self.spec = ToolSpec(
             name="run_command",
             description=(
-                "Run one allowlisted, read-only or checking command in the workspace, "
-                "without a shell. Options that write files, such as ruff --fix, are "
+                "Run one allowlisted command in the workspace, without a shell: a "
+                "read-only one, or a check (pytest, ruff, mypy). A check is not "
+                "read-only: pytest runs the project's own code, and the project's "
+                "configuration can make any check write files, so the owner is asked "
+                "before every run. Options that write files, such as ruff --fix, are "
                 "refused: change files with write_file. Undoing a task restores what "
                 "the file tools wrote, not what a command wrote."
             ),

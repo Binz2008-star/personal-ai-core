@@ -88,7 +88,7 @@ verifier decide what happens (`docs/AGENT_ARCHITECTURE.md`, `docs/ADR/ADR-023-pl
 |---|---|---|
 | `read_file`, `list_directory`, `search_text` | low | runs; secrets, `.git` and pac's own database are refused |
 | `write_file` | medium | runs; never a secret; can be undone |
-| `run_command` | high | **asks you**, every time; an allowlist of read-only and checking commands, no shell |
+| `run_command` | high | **asks you**, every time; an allowlist of read-only and checking commands, no shell. A check is not read-only: `pytest` runs the project's own code, and the project's configuration can make `ruff` or `mypy` write files |
 | `delete_file` | critical | **asks you**, every time; can be undone |
 | `web_search` | medium | runs; sends the query to DuckDuckGo and nothing else |
 | `fetch_url` | high | **asks you**, for every URL; reads one page as text |
