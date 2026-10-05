@@ -25,6 +25,7 @@ from typing import Mapping, Sequence
 
 import pytest
 from support.lag_limit import effective_limit
+from support.merge_convention import pr_number
 
 REPO = Path(__file__).resolve().parents[2]
 STATE = REPO / "PROJECT_STATE.md"
@@ -73,9 +74,11 @@ def _lag_failure(behind: Sequence[str], stated: str, environ: Mapping[str, str])
 def test_the_handoff_is_at_most_a_few_merges_behind_main():
     stated = _stated_commit()
     # Only PR merges count: merging main into a branch is not a landing.
-    behind = [line for line in _git("log", "--merges", "--first-parent", "--format=%s",
-                                    f"{stated}..HEAD").stdout.splitlines()
-              if line.startswith("Merge pull request #")]
+    behind = [subject for full, _, subject in (
+                  line.partition("\x00") for line in _git(
+                      "log", "--merges", "--first-parent", "--format=%H%x00%s",
+                      f"{stated}..HEAD").stdout.splitlines())
+              if pr_number(full, subject) is not None]
     failure = _lag_failure(behind, stated, os.environ)
     assert failure is None, failure
 
