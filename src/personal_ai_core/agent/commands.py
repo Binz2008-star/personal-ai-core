@@ -42,6 +42,16 @@ fails if it reopens:
 `pytest`, `ruff` and `mypy` stay. pytest runs the project's own test code; a
 command tool is HIGH risk, so every run is ASKed first (AGENT_ARCHITECTURE.md
 section 3) and the allowlist is the second gate, not the only one.
+
+They stay CHECKING commands. A rollback restores what the file tools wrote
+and nothing else (recovery.py), so a file a command rewrote stays rewritten
+after the task is undone. The options that make one of them write files by
+design are refused (WRITING_OPTIONS, read from ruff 0.15, pytest 9.1 and
+mypy 1.20, most of them run and seen writing), and so are two ways past that
+list: an argument file, `@args.txt`, which all three read, and ruff's inline
+`--config "fix = true"`. Not covered, and said in run_command's description:
+the project's own configuration (`fix = true` in pyproject.toml, pytest's
+`addopts`) and the code pytest runs can still write. ASK is the gate there.
 """
 from __future__ import annotations
 
@@ -103,6 +113,40 @@ FIND_ACTIONS = frozenset(
 GIT_WRITING_OPTIONS = ("--output", "--ext-diff")
 SHELL_METACHARACTERS = frozenset("|;&$`!{}()[]<>")
 
+# Options that make a checking command write files, refused alone or as
+# `--option=value`. `ruff format` is refused already: "format" is a blocked
+# argument.
+WRITING_OPTIONS = {
+    # --fix and --fix-only apply fixes in place, and --unsafe-fixes widens
+    # what is applied (alone, once `fix = true` is configured); --add-noqa
+    # writes noqa comments into the source; -o/--output-file writes the report.
+    "ruff": frozenset(
+        {"--fix", "--fix-only", "--unsafe-fixes", "--add-noqa", "--output-file", "-o"}
+    ),
+    # --basetemp empties the directory it names; --debug and --log-file open
+    # their file for writing, truncating it; --junitxml writes the report;
+    # -o/--override-ini can set log_file, or addopts to any of these.
+    "pytest": frozenset(
+        {"--basetemp", "--debug", "--log-file", "--junitxml", "--junit-xml",
+         "--override-ini", "-o"}
+    ),
+    # Each report option writes a directory of reports and --junit-xml a file;
+    # --install-types runs pip, which no rollback reaches either.
+    "mypy": frozenset(
+        {"--install-types", "--junit-xml", "--any-exprs-report", "--cobertura-xml-report",
+         "--html-report", "--linecount-report", "--linecoverage-report",
+         "--lineprecision-report", "--txt-report", "--xml-report", "--xslt-html-report",
+         "--xslt-txt-report"}
+    ),
+}
+# Short options that take no value. In a cluster such as `-qo` the parser
+# reads on past them, so the `-o` after them is still an option.
+SHORT_FLAGS = {"ruff": frozenset("ehnqsvwV"), "pytest": frozenset("hlqsvxV")}
+# mypy's parser takes any unique prefix of a long option: `--junit-x` is
+# `--junit-xml`. ruff's and pytest's do not.
+ABBREVIATING = frozenset({"mypy"})
+_ROLLBACK = "a rollback restores what the file tools wrote, not what a command writes"
+
 
 class CommandRejected(PermissionError):
     """A command the agent may not run. The message says why, and is shown."""
@@ -143,7 +187,56 @@ def validate_command(command: str) -> list[str]:
         for argument in arguments:
             if argument in FIND_ACTIONS:
                 raise CommandRejected(f"find may search, not act: {argument}")
+    elif executable in WRITING_OPTIONS:
+        _refuse_writing_options(executable, arguments)
     return parts
+
+
+def _refuse_writing_options(executable: str, arguments: list[str]) -> None:
+    for index, argument in enumerate(arguments):
+        if argument.startswith("@"):
+            raise CommandRejected(
+                f"{executable} would read more arguments from {argument[1:]}, "
+                "out of this check's sight; give them on the command line"
+            )
+        if _writes(executable, argument):
+            raise CommandRejected(
+                f"{argument} makes {executable} write files, and {_ROLLBACK}: "
+                f"run {executable} to check, and change files with write_file"
+            )
+        if executable == "ruff" and argument.split("=", 1)[0] == "--config":
+            if "=" in argument:
+                value = argument.split("=", 1)[1]
+            else:
+                value = arguments[index + 1] if index + 1 < len(arguments) else ""
+            # A path names a file; `key = value` is a setting, and `fix = true`
+            # fixes exactly as --fix does.
+            if "=" in value:
+                raise CommandRejected(
+                    f"--config {value}: an inline setting can turn fixing on, and "
+                    f"{_ROLLBACK}; name a configuration file instead"
+                )
+
+
+def _writes(executable: str, argument: str) -> bool:
+    writing = WRITING_OPTIONS[executable]
+    if argument.startswith("--"):
+        name = argument.split("=", 1)[0]
+        if name in writing:
+            return True
+        # `--` alone ends the options; it abbreviates nothing.
+        return executable in ABBREVIATING and len(name) > 2 and any(
+            option.startswith(name) for option in writing if option.startswith("--")
+        )
+    if argument.startswith("-"):
+        flags = SHORT_FLAGS.get(executable, frozenset())
+        for letter in argument[1:]:
+            if f"-{letter}" in writing:
+                return True
+            if letter not in flags:
+                # This option takes a value: the rest of the argument is it.
+                return False
+    return False
 
 
 def _refuse_escaping_path(argument: str) -> None:
