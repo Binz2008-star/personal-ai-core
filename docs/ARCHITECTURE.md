@@ -254,7 +254,6 @@ Gaps:
 - The promotion pipeline is unfed. `repetition_count`, user-scope recall and `supersede`
   have no producer or caller.
 - Conflict detection compares the first twelve characters of whole messages.
-- `GENERATION_FAILED` and `RETRIEVAL_FAILED` store the raw exception text.
 - Agent runs store tool names and outcomes, not tasks, arguments or answers.
 - Append-only storage is enforced by the repository API, not by the database.
 
