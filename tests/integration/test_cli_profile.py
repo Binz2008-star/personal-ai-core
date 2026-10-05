@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import io
 
-from personal_ai_core.app.cli import MAX_PROFILE_CHARS, main
+from personal_ai_core.app.cli import main
 from personal_ai_core.identity import DefaultIdentityComposer
 from personal_ai_core.identity.text import CONTRACT_HEADING, PROFILE_HEADING
+
+from .test_cli_profile_tokens import cap, cost
 
 PROFILE = "# About me\n\n- I build Rico Hunt, a job-search platform for the UAE.\n"
 
@@ -115,8 +117,16 @@ def test_an_ephemeral_run_has_no_default_profile(tmp_path):
     assert PROFILE_HEADING not in system(transport)
 
 
+def over_the_cap(unit: str) -> str:
+    """The fewest repeats of `unit` the token cap at the default window refuses."""
+    times = 1
+    while cost(unit * times) <= cap():
+        times += 1
+    return unit * times
+
+
 def test_an_oversized_profile_is_refused_before_anything_is_opened(tmp_path):
-    write_profile(tmp_path, "x" * (MAX_PROFILE_CHARS + 1))
+    write_profile(tmp_path, over_the_cap("x"))
     code, output, transport = run(tmp_path)
     assert code == 2 and "Shorten" in output
     assert transport.sent == []  # type: ignore[attr-defined]
@@ -191,7 +201,8 @@ def test_projects_alone_are_enough(tmp_path):
 
 
 def test_the_limit_is_on_profile_and_projects_together(tmp_path):
-    half = MAX_PROFILE_CHARS // 2 + 1
+    half = len(over_the_cap("p")) // 2 + 1
+    assert cost("p" * half) <= cap()  # each alone fits
     path = write_profile(tmp_path, "p" * half)
     (path.parent / "projects.md").write_text("q" * half, encoding="utf-8")
     code, output, _ = run(tmp_path)
