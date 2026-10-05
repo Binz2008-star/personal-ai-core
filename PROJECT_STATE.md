@@ -1223,6 +1223,17 @@ WHERE THINGS STAND (2026-10-04)
     test-command tasks (29 of the 31 failed, 2 succeeded; the 5 that did
     test all failed): the check can only move those answers, so a FAIL is
     possible even if it helps. Pinned in test_adr023_unit3_verify_completion.
+  - MEASURED (#217, 2026-10-04): unit 3, default arm against
+    `--verify-completion` at b10613d, 480 attempts each. VERDICT: FAIL (R1:
+    48 left class 2, 40 entered, p = 0.2279; R2 holds). Budget stops 119 ->
+    145; 30 answers refused for an unverified completion. Descriptive, by
+    rules fixed before arm B existed: success on the five test-command tasks
+    3/100 -> 2/100, on the seven the check cannot reach 42/140 -> 52/140
+    (noise larger than the effect); 2 of 29 refused attempts recovered;
+    budget stops on the five 65 -> 98. Not adopted; `verify_completion`
+    stays off. Not re-run (R5). Pending owner decision: what follows (the
+    lead recommends stopping; a redesign is a new unit). ADR-023 §8.6;
+    every figure: tests/unit/test_adr023_unit3_measurement_reading.py.
   - NEXT (owner, 2026-10-04): (1) a DRAFT ADR-025 amendment only, for the two
     defects above -- which defect, why a repair is not a retroactive
     improvement of #208, how it is measured, what stays fixed, --native-tools
