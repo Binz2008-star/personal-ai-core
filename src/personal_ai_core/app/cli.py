@@ -38,6 +38,7 @@ from ..conversation.factory import (
     backup_database,
     describe_loaded,
     describe_store_failure,
+    profile_budget,
     STORE_ERRORS,
 )
 from ..core.agent import AgentTaskContract
@@ -76,12 +77,14 @@ PROFILE_FILENAME = "profile.md"
 # so it can be rewritten as projects change without touching what the owner
 # wrote about themselves.
 PROJECTS_FILENAME = "projects.md"
-# Every character is paid for in every turn's context window. A profile
-# (with its projects) that outgrows this is refused with a message rather
-# than cut: a silently truncated profile is one the model reads differently
-# from the one written. 12000 characters of mixed Arabic and English is
-# roughly 3000 tokens of an 8192-token window.
-MAX_PROFILE_CHARS = 12_000
+# Every token of the profile (with its projects) is paid for in every turn's
+# context window, so it is capped by estimated TOKENS against the active
+# model's window, by `profile_budget` in the composition root -- not by
+# characters: an Arabic character costs about 2.5 times a Latin one, and the
+# 12000-character cap this replaces let an Arabic profile alone outgrow the
+# default 8192-token window (F-A). A profile over the cap is refused with a
+# message rather than cut: a silently truncated profile is one the model
+# reads differently from the one written.
 
 PROMPT = "you> "
 REPLY = "core> "
@@ -367,7 +370,7 @@ def _profile_path(
     return database.parent / PROFILE_FILENAME if database is not None else None
 
 
-def _remember(path: Path | None, text: str, out: TextIO) -> int:
+def _remember(path: Path | None, text: str, settings: Settings, out: TextIO) -> int:
     text = " ".join(text.split())
     if not text:
         print("--remember needs something to remember", file=out)
@@ -375,13 +378,41 @@ def _remember(path: Path | None, text: str, out: TextIO) -> int:
     if path is None:
         print(f"no profile to add to: pass --profile PATH or set ${PROFILE_ENV}", file=out)
         return 2
-    path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
     if not existing.endswith("\n"):
         existing += "\n"
-    path.write_text(existing + f"- {text}\n", encoding="utf-8")
+    updated = existing + f"- {text}\n"
+    # Measured as the next run will load it, projects and all, so a line
+    # that fits here is never refused at the next start (F-A).
+    joined = _joined_profile(path, out, profile_text=updated)
+    if joined is None:
+        return 2
+    budget = profile_budget(joined, settings)
+    if not budget.fits:
+        print(
+            f"not remembered: with this line the profile would be about "
+            f"{budget.tokens} tokens; the limit is {budget.allowed} for the model's "
+            f"{budget.window}-token window, because it is sent with every turn. "
+            f"Shorten {' or '.join(str(f) for f in _profile_files(path)) or path} "
+            f"by about {budget.excess_chars} characters first.",
+            file=out,
+        )
+        return 2
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(updated, encoding="utf-8")
     print(f"remembered, in {path}", file=out)
     return 0
+
+
+def _owner_files(path: Path | None) -> list[Path]:
+    """The profile and the projects file beside it, existing or not.
+
+    Unlike `_profile_files` this does not ask whether they exist: a file the
+    agent could create would be read as the profile on the next run.
+    """
+    if path is None:
+        return []
+    return [path, path.parent / PROJECTS_FILENAME]
 
 
 def _profile_files(path: Path | None) -> list[Path]:
@@ -391,26 +422,49 @@ def _profile_files(path: Path | None) -> list[Path]:
     return [p for p in (path, path.parent / PROJECTS_FILENAME) if p.is_file()]
 
 
-def _load_profile(path: Path | None, out: TextIO) -> str | None:
-    """The profile text; "" when there is none; None when it cannot be used."""
+def _joined_profile(
+    path: Path | None, out: TextIO, *, profile_text: str | None = None
+) -> str | None:
+    """The profile and its projects as one text; None when one is not UTF-8.
+
+    `profile_text` stands in for the profile file's content, so --remember
+    can measure the profile it is about to write.
+    """
+    files = _profile_files(path)
+    if profile_text is not None and path is not None and path not in files:
+        files.insert(0, path)
     parts = []
-    for file in _profile_files(path):
+    for file in files:
         try:
-            text = file.read_text(encoding="utf-8").strip()
+            text = (
+                profile_text if profile_text is not None and file == path
+                else file.read_text(encoding="utf-8")
+            ).strip()
         except UnicodeDecodeError:
             print(f"the profile is not UTF-8 text: {file}", file=out)
             return None
         if text:
             parts.append(text)
-    text = "\n\n".join(parts)
-    if len(text) > MAX_PROFILE_CHARS:
-        print(
-            f"the profile is {len(text)} characters; the limit is {MAX_PROFILE_CHARS}, "
-            f"because it is sent with every turn. Shorten "
-            f"{' or '.join(str(f) for f in _profile_files(path))}.",
-            file=out,
-        )
+    return "\n\n".join(parts)
+
+
+def _load_profile(path: Path | None, settings: Settings, out: TextIO) -> str | None:
+    """The profile text; "" when there is none; None when it cannot be used."""
+    text = _joined_profile(path, out)
+    if text is None:
         return None
+    if text:
+        budget = profile_budget(text, settings)
+        if not budget.fits:
+            print(
+                f"the profile is about {budget.tokens} tokens; the limit is "
+                f"{budget.allowed} for the model's {budget.window}-token window, "
+                f"because it is sent with every turn. Shorten "
+                f"{' or '.join(str(f) for f in _profile_files(path))} "
+                f"by about {budget.excess_chars} characters.",
+                file=out,
+            )
+            return None
     return text
 
 
@@ -689,8 +743,8 @@ def _main(
         return _feedback(args, database, settings, transport, out)
     profile_path = _profile_path(args.profile, environment, database)
     if args.remember is not None:
-        return _remember(profile_path, args.remember, out)
-    profile = _load_profile(profile_path, out)
+        return _remember(profile_path, args.remember, settings, out)
+    profile = _load_profile(profile_path, settings, out)
     if profile is None:
         return 2
     settings = dataclasses.replace(settings, profile=profile)
@@ -803,6 +857,10 @@ def _main(
                 confirm=_confirmer(lines, out),
                 events=events,
                 database=database,
+                # N4: the profile pac reads, and projects.md beside it, whether
+                # or not they exist -- the agent may neither change nor create
+                # what every later turn is told about the owner.
+                owner_files=_owner_files(profile_path),
                 session_exists=service.has_session,
             )
             print(f"agent:   workspace {agent.workspace.root}", file=out)
