@@ -200,8 +200,9 @@ def materialize(task: Task, workspace: Path) -> None:
     if task.git:
         _git(workspace, "init", "-q", "-b", "main")
         # In the repository's own config, not only the environment: the agent's
-        # `shell` strips variables whose names look secret, and GIT_AUTHOR_*
-        # matches "AUTH". A commit the agent makes needs an identity too.
+        # `shell` passes on only a fixed set of variables (SHELL_ENV_NAMES),
+        # and GIT_AUTHOR_* is not among them. A commit the agent makes needs an
+        # identity too.
         _git(workspace, "config", "user.name", GIT_ENV["GIT_AUTHOR_NAME"])
         _git(workspace, "config", "user.email", GIT_ENV["GIT_AUTHOR_EMAIL"])
         _git(workspace, "add", "-A")
