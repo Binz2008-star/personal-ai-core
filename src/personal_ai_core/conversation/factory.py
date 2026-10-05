@@ -77,6 +77,9 @@ from ..persistence.sqlite import (
     connect,
 )
 from ..persistence.sqlite import SchemaVersionMismatch as SqliteSchemaVersionMismatch
+# Re-exported for `pac --sessions`: the entry point may not import persistence.
+from ..persistence.sqlite import SessionSummary as SessionSummary
+from ..persistence.sqlite import list_sessions as list_sessions
 from ..persistence.postgres import (
     DatabaseIdentity,
     PostgresEventRepository,
