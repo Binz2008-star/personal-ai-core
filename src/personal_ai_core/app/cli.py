@@ -773,7 +773,9 @@ def _main(
             )
             print(file=out)
             return _agent_session(agent=agent, session_id=session_id, lines=lines, out=out,
-                                  err=err, settings=settings)
+                                  err=err, settings=settings,
+                                  confirm_window=lambda: _confirm_window(
+                                      settings, probe=probe, live=transport is None, out=out))
 
         print(file=out)
 
@@ -785,6 +787,8 @@ def _main(
             out=out,
             redactor=build_reply_redactor(),
             settings=settings,
+            confirm_window=lambda: _confirm_window(
+                settings, probe=probe, live=transport is None, out=out),
         )
     finally:
         if slice_ is not None:
@@ -803,9 +807,48 @@ def _say_if_the_model_must_load(settings: Settings, *, probe, live: bool, out: T
     """
     loaded = describe_loaded("ollama", ollama_host=settings.ollama_host, llamacpp_host="",
                              model=settings.boss_model, probe=probe, live=live)
+    window = loaded.get("context_length")
     if loaded.get("probed") and loaded.get("reason") == "model not loaded":
         print("         not loaded yet: the first reply loads it, which can take "
               "a minute or more", file=out)
+    elif (loaded.get("probed") and isinstance(window, int)
+          and window != settings.boss_context_window):
+        # N1: every request names the window the Core budgets against, and a
+        # server running another reloads the model for it -- as slow as a
+        # cold start, and just as worth announcing.
+        print(f"         loaded with a {window}-token window: the first reply reloads it at "
+              f"{settings.boss_context_window}, which can take a minute or more", file=out)
+
+
+def _confirm_window(settings: Settings, *, probe, live: bool, out: TextIO) -> int | None:
+    """N1: once, after the first reply, check the server runs the window the
+    Core budgets against. An exit code when it does not; None otherwise.
+
+    The request names the window (`num_ctx`), so the server should report it.
+    A smaller one means the window was not honoured -- the server caps
+    `num_ctx` at the model's trained context, for one -- and every turn would
+    be budgeted for room the server does not have: the run stops, with the fix.
+    A server that cannot say is not taken for a mismatch: the request still
+    named the window, and pac says only that it could not confirm it.
+    """
+    if probe is None and not live:
+        return None  # a test transport: there is no server to ask
+    loaded = describe_loaded("ollama", ollama_host=settings.ollama_host, llamacpp_host="",
+                             model=settings.boss_model, probe=probe, live=live)
+    window = loaded.get("context_length")
+    if not loaded.get("probed") or not isinstance(window, int):
+        print("         window not confirmed: the model server did not report the context "
+              "it loaded", file=out)
+        return None
+    if window < settings.boss_context_window:
+        print(f"pac: the model server runs {settings.boss_model} with a {window}-token window, "
+              f"but pac budgets every turn for {settings.boss_context_window} "
+              "(PAC_BOSS_CONTEXT_WINDOW); longer turns would be cut by the server without a "
+              "word.", file=out)
+        print(f"set PAC_BOSS_CONTEXT_WINDOW={window}, or give the model a larger window.",
+              file=out)
+        return 2
+    return None
 
 
 def _explain_provider_failure(exc: ProviderError, settings: Settings, out: TextIO) -> None:
@@ -834,7 +877,8 @@ def _explain_provider_failure(exc: ProviderError, settings: Settings, out: TextI
 
 
 def _converse(*, service, session_id, language, lines, out, redactor: SecretRedactor,
-              settings: Settings | None = None) -> int:
+              settings: Settings | None = None,
+              confirm_window: Callable[[], int | None] | None = None) -> int:
     """The chat loop. Every reply passes `redactor` before it is printed.
 
     Gap analysis P0-6: a secret the model repeats -- from the history, the
@@ -843,6 +887,9 @@ def _converse(*, service, session_id, language, lines, out, redactor: SecretReda
     says so, in the agent's words for the same event ("it contained something
     secret-shaped"). `redactor` has no default (ADR-018 I1): a caller that
     wants raw text must say so. What is stored is not changed here.
+
+    `confirm_window` runs once, after the first reply has loaded the model
+    (N1); an exit code from it ends the session.
     """
     for line in lines:
         content = line.strip()
@@ -866,6 +913,10 @@ def _converse(*, service, session_id, language, lines, out, redactor: SecretReda
             _explain_provider_failure(exc, settings or Settings(), out)
             return 1
         _print_reply(reply.content, redactor, out)
+        if confirm_window is not None:
+            code, confirm_window = confirm_window(), None
+            if code is not None:
+                return code
     return 0
 
 
@@ -933,9 +984,24 @@ def _describe_step(step) -> str:
 
 
 def _agent_session(*, agent, session_id, lines, out, err,
-                   settings: Settings | None = None) -> int:
+                   settings: Settings | None = None,
+                   confirm_window: Callable[[], int | None] | None = None) -> int:
     invalid_tasks = False
+    # N1: the window is checked once, after the first task has loaded the
+    # model and its outcome has been shown -- and before a second task runs.
+    window_due = False
+
+    def window_verdict() -> int | None:
+        nonlocal confirm_window, window_due
+        if not window_due or confirm_window is None:
+            return None
+        check, confirm_window, window_due = confirm_window, None, False
+        return check()
+
     for line in lines:
+        code = window_verdict()
+        if code is not None:
+            return code
         if not line.strip():
             continue
         try:
@@ -964,6 +1030,7 @@ def _agent_session(*, agent, session_id, lines, out, err,
         except ProviderError as exc:
             _explain_provider_failure(exc, settings or Settings(), out)
             return 1
+        window_due = True
         if outcome.finished:
             print(f"{REPLY}{outcome.answer}", file=out)
             if outcome.touched_files:
@@ -987,4 +1054,7 @@ def _agent_session(*, agent, session_id, lines, out, err,
                 print(f"         restored: {', '.join(restored)}", file=out)
         else:
             agent.checkpoints.commit()
+    code = window_verdict()
+    if code is not None:
+        return code
     return 2 if invalid_tasks else 0

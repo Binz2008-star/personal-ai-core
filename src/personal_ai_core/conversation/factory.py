@@ -821,16 +821,24 @@ def build_agent(
         FetchUrl(web_fetch),
     ]
     executor = ToolExecutor(tools, RiskPolicy(), confirm=confirm)
+    # N2: one composer and one estimator, so the identity reserve is funded
+    # from the very text the agent sends. No guard reserve: the agent has no
+    # language guard, and reserving for one would shrink every run for nothing.
+    estimator = ScriptAwareTokenEstimator()
+    identity = DefaultIdentityComposer(profile=settings.profile)
     loop = AgentLoop(
         provider=provider,
         model=registry.active.name,
         executor=executor,
+        context_window=registry.active.context_window,
+        budget_policy=ReserveBasedBudgetPolicy(identity_reserve=identity.tokens(estimator)),
+        estimator=estimator,
         checkpoints=checkpoints,
-        identity=DefaultIdentityComposer(profile=settings.profile),
+        identity=identity,
         events=events,
         session_exists=session_exists,
         environment=(
-            EnvironmentContext(sandbox.root, estimate=ScriptAwareTokenEstimator().estimate)
+            EnvironmentContext(sandbox.root, estimate=estimator.estimate)
             if environment_context
             else None
         ),

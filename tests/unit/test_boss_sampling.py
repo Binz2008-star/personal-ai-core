@@ -51,7 +51,7 @@ def test_a_caller_option_wins_over_the_configured_one():
 def test_empty_sampling_sends_only_the_budget():
     settings = dataclasses.replace(Settings.from_env({}), boss_sampling={})
     options, events = turn(settings)
-    assert set(options) == {"num_predict"}
+    assert set(options) == {"num_predict", "num_ctx"}
     requested = next(e for e in events if e.type is EventType.GENERATION_REQUESTED)
     assert requested.payload["sampling"] == {}
 
