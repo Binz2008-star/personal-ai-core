@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 
+from .errors import ConfigError
+
 # Personal AI Core Boss model (ADR-002).
 #
 # Deliberately NOT qwen2.5:7b. That model is a `local-llm-rig` benchmark result
@@ -37,6 +39,41 @@ DEFAULT_BOSS_SAMPLING: Mapping[str, float | int] = MappingProxyType(
 DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 120
 
+# What the environment may set, and the range each number must fall in (gap
+# analysis P1-4, P1-7). `int("abc")` was a traceback, and 0 or -5 seconds was
+# accepted and meant whatever the HTTP library made of it. A context window
+# below 1024 tokens cannot hold the identity and a turn; one above a million
+# is a typo. A request longer than an hour is not a request.
+CONTEXT_WINDOW_RANGE = (1024, 1_048_576)
+REQUEST_TIMEOUT_RANGE = (1, 3600)
+
+
+def _whole_number(source: Mapping[str, str], name: str, default: int,
+                  bounds: tuple[int, int], unit: str) -> int:
+    raw = source.get(name)
+    if raw is None:
+        return default
+    low, high = bounds
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        value = None
+    if value is None or not low <= value <= high:
+        raise ConfigError(f"{name} must be a whole number of {unit} from {low} to {high}, "
+                          f"not {raw!r}")
+    return value
+
+
+def _http_url(source: Mapping[str, str], name: str, default: str) -> str:
+    raw = source.get(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    if not value.startswith(("http://", "https://")) or len(value) <= len("https://"):
+        raise ConfigError(f"{name} must be an http:// or https:// address, such as "
+                          f"{default}, not {raw!r}")
+    return value
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -61,12 +98,12 @@ class Settings:
         source = os.environ if env is None else env
         return cls(
             boss_model=source.get("PAC_BOSS_MODEL", DEFAULT_BOSS_MODEL),
-            boss_context_window=int(
-                source.get("PAC_BOSS_CONTEXT_WINDOW", DEFAULT_BOSS_CONTEXT_WINDOW)
-            ),
-            ollama_host=source.get("PAC_OLLAMA_HOST", DEFAULT_OLLAMA_HOST),
-            request_timeout_seconds=int(
-                source.get("PAC_REQUEST_TIMEOUT_SECONDS", DEFAULT_REQUEST_TIMEOUT_SECONDS)
-            ),
+            boss_context_window=_whole_number(
+                source, "PAC_BOSS_CONTEXT_WINDOW", DEFAULT_BOSS_CONTEXT_WINDOW,
+                CONTEXT_WINDOW_RANGE, "tokens"),
+            ollama_host=_http_url(source, "PAC_OLLAMA_HOST", DEFAULT_OLLAMA_HOST),
+            request_timeout_seconds=_whole_number(
+                source, "PAC_REQUEST_TIMEOUT_SECONDS", DEFAULT_REQUEST_TIMEOUT_SECONDS,
+                REQUEST_TIMEOUT_RANGE, "seconds"),
             language_guard=source.get("PAC_LANGUAGE_GUARD", "1").strip() not in ("0", "false", "no", "off"),
         )
