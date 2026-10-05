@@ -721,6 +721,10 @@ claim written in one place with nothing that notices it going stale.
                restore a file says so and keeps its checkpoint
   #215 4aef2f3  fix(conversation): every turn is measured against the window,
                and an overcommitted turn is not sent (P0-1, P0-2)
+  #216 fedd03b  fix(agent): fetch_url reads public addresses only (P0-3,
+               direct targets: loopback, private, link-local, IPv6, DNS)
+  #217 72ec675  eval: ADR-023 unit 3, default arm and verify_completion arm at
+               b10613d (480 runs each); FAIL, not adopted
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1187,7 +1191,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-04, main at 4aef2f3)
+NEXT SESSION HANDOFF (updated 2026-10-05, main at 72ec675)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1298,7 +1302,11 @@ WHERE THINGS STAND (2026-10-04)
     RollbackIncomplete and keeps its checkpoint) merged; main was 2dc105c.
     Then #215 (every turn, grounded or not, is measured against the window
     and records CONTEXT_ASSEMBLED; an overcommitted turn is refused before
-    the provider with ContextOverflowError, ADR-005) merged; main is 4aef2f3.
+    the provider with ContextOverflowError, ADR-005) merged; main was 4aef2f3.
+    Then #216 (fetch_url resolves the host once, refuses any address that is
+    not public -- IPv4, IPv6 and IPv4 inside IPv6 -- and connects only to an
+    address it checked) and #217 (the unit 3 measurement, FAIL, above)
+    merged; main is 72ec675.
     #212 and #213 are OpenCode's Wave 1 (P0-4, P1-9 and the redirect fix), backed up on
     `wip/opencode-20261004` with the owner's approval and reviewed by the lead;
     P0-5 (a fixed shell environment) stays there until it is checked on the rig.
