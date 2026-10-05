@@ -57,14 +57,12 @@ def test_the_listed_names_pass_with_the_owners_values(monkeypatch, tmp_path):
     assert env["PATH"] == os.environ["PATH"]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows itself folds the case of names")
 def test_a_listed_name_is_matched_without_regard_to_case(monkeypatch):
     # Windows names are case-insensitive: `Path` and `SystemRoot` are PATH
-    # and SYSTEMROOT. Python folds them on Windows; here they are set as-is.
-    monkeypatch.setenv("SystemRoot", r"C:\Windows")
-    monkeypatch.setenv("Acme_Token", "fake")
-    env = shell_environment()
-    assert env["SystemRoot"] == r"C:\Windows" and "Acme_Token" not in env
+    # and SYSTEMROOT. A plain mapping keeps the case as written, on every
+    # platform, so this runs everywhere (os.environ folds case on Windows).
+    monkeypatch.setattr(os, "environ", {"SystemRoot": r"C:\Windows", "Acme_Token": "fake"})
+    assert shell_environment() == {"SystemRoot": r"C:\Windows", "GIT_TERMINAL_PROMPT": "0"}
 
 
 def test_git_never_waits_for_a_terminal():
