@@ -135,6 +135,24 @@ def test_the_header_binds_the_result(tmp_path):
     assert header["num_ctx_sent_by_core"] == 8192
 
 
+def test_the_header_says_what_every_recorded_call_carried(tmp_path):
+    """The header's statements about what was sent are checked against the
+    calls themselves, on both tracks: a header is a record, not an assumption."""
+    _, _, lines = _run(tmp_path)
+    header, runs = lines[0], [x for x in lines if x.get("kind") == "run"]
+    assert {r["track"] for r in runs} == {"agent", "knowledge"}
+    for run in runs:
+        assert run["model_calls"], run["task"]
+        for call in run["model_calls"]:
+            assert call["options_sent"]["num_ctx"] == header["num_ctx_sent_by_core"]
+            if run["track"] == "agent":
+                assert set(call["options_sent"]) == {"num_predict", "num_ctx"}
+            else:
+                assert set(call["options_sent"]) > {"num_ctx"}  # sampling settings too
+    assert "only num_predict" not in header["sampling"]
+    assert "num_ctx" in header["sampling"]
+
+
 def test_a_network_tool_is_denied_and_the_run_says_so(tmp_path):
     scripts = dict(SOLVES)
     scripts["test_calc.py"] = [_tool("web_search", query="python off by one"),

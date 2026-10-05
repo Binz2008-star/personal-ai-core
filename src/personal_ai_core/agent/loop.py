@@ -86,7 +86,7 @@ VERIFICATION_REQUIRED_MESSAGE = (
 # What changes the workspace, as the benchmark's tested_after_last_edit check
 # counts it (app/bench/checks.py; a test holds the two equal). A shell command
 # may write files, so it counts unless it is the test run itself.
-EDITING_TOOLS = frozenset({"write_file", "delete_file", "shell"})
+EDITING_TOOLS = frozenset({"write_file", "edit_file", "delete_file", "shell"})
 TEST_RUNNERS = frozenset({"run_command", "shell"})
 
 PROTOCOL = """You are working as an agent in the user's workspace, with tools.
