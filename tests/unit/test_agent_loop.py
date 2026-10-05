@@ -6,6 +6,7 @@ import pytest
 from personal_ai_core.agent.executor import ToolExecutor
 from personal_ai_core.agent.loop import ACTION_REQUIRED_MESSAGE, AgentLoop, fence, parse_reply
 from personal_ai_core.agent.policy import RiskPolicy
+from personal_ai_core.context import ReserveBasedBudgetPolicy, ScriptAwareTokenEstimator
 from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import Workspace
 from personal_ai_core.agent.tools import default_tools
@@ -43,6 +44,8 @@ def loop(ws, script, *, confirm=None, events=None, max_failures=3, max_actions=1
         provider=script,
         model="boss",
         executor=executor,
+        context_window=8192, budget_policy=ReserveBasedBudgetPolicy(),
+                     estimator=ScriptAwareTokenEstimator(),
         checkpoints=checkpoints,
         events=events,
         max_failures=max_failures,
@@ -293,10 +296,13 @@ def test_the_model_is_told_the_protocol_and_the_tools(ws):
     assert script.calls[0]["messages"][-1].content == "hi"
 
 
-def test_the_generation_limit_is_sent(ws):
+def test_the_generation_limit_and_the_window_are_sent(ws):
+    """N1: the window the agent was built for goes with the reply limit, and
+    nothing else is sent -- the set is exact, so an option added in passing
+    fails here."""
     script = Script('{"answer": "ok"}')
     loop(ws, script).run("hi", session_id="s1")
-    assert script.calls[0]["options"] == {"num_predict": 1024}
+    assert script.calls[0]["options"] == {"num_predict": 1024, "num_ctx": 8192}
 
 
 def test_a_protocol_error_is_explained_and_charged(ws):
@@ -453,6 +459,8 @@ def test_an_unknown_session_is_refused_before_anything_happens(ws):
         provider=script,
         model="boss",
         executor=ToolExecutor(default_tools(ws), RiskPolicy()),
+        context_window=8192, budget_policy=ReserveBasedBudgetPolicy(),
+                     estimator=ScriptAwareTokenEstimator(),
         events=events,
         session_exists=lambda session_id: session_id == "known",
     )

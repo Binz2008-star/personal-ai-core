@@ -172,6 +172,7 @@ def test_a_store_failure_mid_task_still_offers_the_undo(tmp_path, monkeypatch):
 def test_when_the_end_cannot_be_recorded_the_original_failure_is_the_one_reported(tmp_path):
     from personal_ai_core.agent import RiskPolicy, ToolExecutor
     from personal_ai_core.agent.loop import AgentLoop
+    from personal_ai_core.context import ReserveBasedBudgetPolicy, ScriptAwareTokenEstimator
 
     class Events:
         def append(self, event):
@@ -188,7 +189,9 @@ def test_when_the_end_cannot_be_recorded_the_original_failure_is_the_one_reporte
             raise server_error()
 
     loop = AgentLoop(provider=DownProvider(), model="boss",  # type: ignore[arg-type]
-                     executor=ToolExecutor([], RiskPolicy()),
+                     executor=ToolExecutor([], RiskPolicy()), context_window=8192,
+                     budget_policy=ReserveBasedBudgetPolicy(),
+                     estimator=ScriptAwareTokenEstimator(),
                      events=Events(), session_exists=lambda s: True)  # type: ignore[arg-type]
     with pytest.raises(ProviderError):
         loop.run("x", session_id="s1")
