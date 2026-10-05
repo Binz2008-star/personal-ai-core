@@ -14,7 +14,24 @@ class ModelNotFoundError(CoreError):
 
 
 class ProviderError(CoreError):
-    """A model provider failed to produce a response."""
+    """A model provider failed to produce a response.
+
+    The message is for the person at the terminal. What a durable record
+    keeps is `kind`, one word from KINDS, and `status`, the HTTP status when
+    there was one -- never the message, which can quote a host, a path, or
+    whatever the server sent back (gap analysis P1-8).
+    """
+
+    KINDS = ("unreachable", "timeout", "http_status", "invalid_response",
+             "invalid_request", "unclassified")
+
+    def __init__(self, message: str = "", *, kind: str = "unclassified",
+                 status: int | None = None) -> None:
+        if kind not in self.KINDS:
+            raise ValueError(f"unknown provider failure kind: {kind}")
+        super().__init__(message)
+        self.kind = kind
+        self.status = status
 
 
 class InvariantViolation(CoreError):
