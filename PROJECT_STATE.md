@@ -725,10 +725,10 @@ claim written in one place with nothing that notices it going stale.
                direct targets: loopback, private, link-local, IPv6, DNS)
   #217 72ec675  eval: ADR-023 unit 3, default arm and verify_completion arm at
                b10613d (480 runs each); FAIL, not adopted
-  #222 67d004d  docs: ADR-023 unit 3 measured -- FAIL, not adopted; every
-               figure re-derived; ledger #216 #217
   #218 fcc1b74  fix(agent): withhold secrets from chat replies; the output check
                covers every ADR-018 kind (P0-6)
+  #222 67d004d  docs: ADR-023 unit 3 measured -- FAIL, not adopted; every
+               figure re-derived; ledger #216 #217
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
