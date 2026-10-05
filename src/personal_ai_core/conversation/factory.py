@@ -13,7 +13,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 from ..agent import (
     Checkpoints,
@@ -119,6 +119,71 @@ def _budget_policy(identity: DefaultIdentityComposer, settings: Settings) -> Res
     return ReserveBasedBudgetPolicy(
         identity_reserve=identity.tokens(estimator),
         guard_reserve=estimator.estimate(GUARD_NOTE) if settings.language_guard else 0,
+    )
+
+
+# Kept free, beside the owner's profile, for the conversation's history and
+# its retrieved evidence: room for at least two retrieved passages, per the R3
+# budget math. A profile that leaves less than this is refused (F-A): with the
+# window spent on who the owner is, there is none left for what they asked.
+PROFILE_FREE_FLOOR = 2048
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileBudget:
+    """What the owner's profile costs every turn, against what it may cost.
+
+    `tokens` is what the profile adds to the identity message, measured as
+    the identity with it minus the identity without it, by the estimator the
+    budget uses. `allowed` is what is left of the active model's window after
+    the generation reserve, the overhead, the guard reserve, the identity
+    without a profile and `PROFILE_FREE_FLOOR`. `excess_chars` is how many
+    characters must come off the end of the profile for it to fit; 0 when it
+    fits.
+    """
+
+    tokens: int
+    allowed: int
+    window: int
+    excess_chars: int
+
+    @property
+    def fits(self) -> bool:
+        return self.tokens <= self.allowed
+
+
+def profile_budget(profile: str, settings: Settings) -> ProfileBudget:
+    """Measure `profile` against `settings.boss_context_window` (F-A).
+
+    The same composer, estimator, reserves and window the services use, so
+    a profile accepted here is one the turn's budget can hold with
+    `PROFILE_FREE_FLOOR` to spare. Nothing is cut: the caller refuses.
+    """
+    estimator = ScriptAwareTokenEstimator()
+    bare = DefaultIdentityComposer()
+    bare_tokens = bare.tokens(estimator)
+    model = ModelRegistry.from_settings(settings, provider="profile-check").active
+    allocation = _budget_policy(bare, settings).allocate(model=model, history_tokens=0)
+    allowed = allocation.context_window - allocation.spoken_for - PROFILE_FREE_FLOOR
+
+    def cost(text: str) -> int:
+        return DefaultIdentityComposer(profile=text).tokens(estimator) - bare_tokens
+
+    tokens = cost(profile)
+    excess = 0
+    if tokens > allowed:
+        # The fewest characters off the end that make it fit: the cost only
+        # grows with the text, so a binary search finds it.
+        low, high = 1, len(profile)
+        while low < high:
+            middle = (low + high) // 2
+            if cost(profile[: len(profile) - middle]) <= allowed:
+                high = middle
+            else:
+                low = middle + 1
+        excess = low
+    return ProfileBudget(
+        tokens=tokens, allowed=allowed, window=model.context_window, excess_chars=excess
     )
 
 
@@ -740,6 +805,7 @@ def build_agent(
     confirm: Confirm | None = None,
     events: EventRepository | None = None,
     database: str | Path | None = None,
+    owner_files: Sequence[str | Path] = (),
     session_exists: Callable[[str], bool] | None = None,
     web_fetch: Fetch | None = None,
     environment_context: bool = False,
@@ -760,6 +826,11 @@ def build_agent(
     `database` is the file the Core's own records live in. It is reserved
     from the workspace -- with its SQLite companions -- so no tool can read,
     overwrite or delete it even when the workspace contains it (F-1).
+
+    `owner_files` are the owner's profile and projects files, wherever the
+    entry point resolved them, existing or not (N4). They are reserved the
+    same way, without companions: the profile is composed into every later
+    turn's instructions, and `write_file` runs without asking.
 
     `session_exists` is REQUIRED whenever `events` is given -- pass the
     conversation service's `has_session`. Events recorded against a session
@@ -800,7 +871,9 @@ def build_agent(
     )
     registry = ModelRegistry.from_settings(settings, provider=provider.name)
     sandbox = Workspace(
-        Path(workspace), reserved=() if database is None else (Path(database),)
+        Path(workspace),
+        reserved=() if database is None else (Path(database),),
+        owner_files=tuple(Path(path) for path in owner_files),
     )
     checkpoints = Checkpoints(sandbox)
     # The workspace tools, then the reach beyond it: the owner's shell and the
