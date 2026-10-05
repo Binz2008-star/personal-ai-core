@@ -29,6 +29,7 @@ from ..agent import (
 from ..agent.environment import EnvironmentContext
 from ..agent.executor import Confirm
 from ..agent.loop import AgentLoop
+from ..agent.recovery import atomic_write_text
 from ..agent.web import Fetch
 from ..context import (
     PatternSecretRedactor,
@@ -846,3 +847,16 @@ def build_reply_redactor() -> SecretRedactor:
     what is stored is unchanged. It withholds at the terminal only.
     """
     return SecretShapeRedactor()
+
+
+def save_owner_text(path: Path, text: str) -> None:
+    """Write a file the owner wrote (their profile) so it is never left torn.
+
+    Gap analysis P2-7: `--remember` rewrote profile.md in place, so a full
+    disk or a crash mid-write left it truncated -- the owner's own text, sent
+    with every turn. This is the agent's atomic write (#214): a temporary
+    file beside it, fsynced, then renamed over it; on any failure the old
+    file stands. `app` may not import `agent`, so it is handed over here.
+    """
+    atomic_write_text(path, text)
+

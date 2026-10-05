@@ -34,6 +34,7 @@ from ..conversation.factory import (
     build_in_memory_service,
     build_persistent_service,
     build_reply_redactor,
+    save_owner_text,
 )
 from ..core.agent import AgentTaskContract
 from ..core.config import Settings
@@ -359,11 +360,21 @@ def _remember(path: Path | None, text: str, out: TextIO) -> int:
     if path is None:
         print(f"no profile to add to: pass --profile PATH or set ${PROFILE_ENV}", file=out)
         return 2
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
-    if not existing.endswith("\n"):
-        existing += "\n"
-    path.write_text(existing + f"- {text}\n", encoding="utf-8")
+    # Gap analysis P2-7: written whole or not at all, and a failure is a
+    # sentence. The profile is the owner's own text; it is never left torn.
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
+        if not existing.endswith("\n"):
+            existing += "\n"
+        save_owner_text(path, existing + f"- {text}\n")
+    except UnicodeDecodeError:
+        print(f"nothing added: the profile is not UTF-8 text: {path}", file=out)
+        return 1
+    except OSError as exc:
+        print(f"nothing added to {path}: {exc.strerror or exc}. The profile is as it was.",
+              file=out)
+        return 1
     print(f"remembered, in {path}", file=out)
     return 0
 
@@ -383,6 +394,11 @@ def _load_profile(path: Path | None, out: TextIO) -> str | None:
             text = file.read_text(encoding="utf-8").strip()
         except UnicodeDecodeError:
             print(f"the profile is not UTF-8 text: {file}", file=out)
+            return None
+        except OSError as exc:
+            # Unreadable (permissions, a directory by that name): a sentence,
+            # not a traceback (gap analysis P2-7).
+            print(f"the profile cannot be read: {file} ({exc.strerror or exc})", file=out)
             return None
         if text:
             parts.append(text)
