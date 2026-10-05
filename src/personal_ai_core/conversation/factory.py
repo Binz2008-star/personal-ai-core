@@ -77,6 +77,9 @@ from ..persistence.sqlite import (
     connect,
 )
 from ..persistence.sqlite import SchemaVersionMismatch as SqliteSchemaVersionMismatch
+# Re-exported for `pac --backup`: the entry point may not import persistence.
+from ..persistence.sqlite import BackupError as BackupError
+from ..persistence.sqlite import backup as backup_database  # noqa: F401 -- re-exported
 from ..persistence.postgres import (
     DatabaseIdentity,
     PostgresEventRepository,

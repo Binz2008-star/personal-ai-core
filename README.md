@@ -48,8 +48,10 @@ with it, so the Core knows what you mean by a project's name. Together they are 
 Configuration is environment variables, all optional: `PAC_BOSS_MODEL`,
 `PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`.
 
-**Backing up the database.** It is one SQLite file in WAL mode, so its latest writes can sit
-beside it in `core.db-wal` and `core.db-shm`. Copy all three together, with no `pac` running.
+**Backing up the database.** `pac --backup PATH` copies it, consistently and checked, safe
+while another `pac` runs; it never overwrites PATH, and `pac --database PATH` uses the copy.
+By hand: it is one SQLite file in WAL mode, so its latest writes can sit beside it in
+`core.db-wal` and `core.db-shm`. Copy all three together, with no `pac` running.
 If `pac` says the file cannot be read, copy those three before anything else, then keep working
 with `--database` and another path. If it says the file is busy, another `pac` is using it.
 

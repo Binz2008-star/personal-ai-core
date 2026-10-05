@@ -156,6 +156,45 @@ class SchemaVersionMismatch(RuntimeError):
     """
 
 
+class BackupError(RuntimeError):
+    """A backup that was not made, or that did not check out. Says which."""
+
+
+def backup(source: str | Path, destination: str | Path) -> int:
+    """Copy the database to `destination`, consistently, and check the copy.
+
+    SQLite's online backup, not a file copy: it reads one consistent snapshot,
+    writes still in `-wal` included, and it is safe while another pac holds the
+    database. The source is opened `mode=ro`, so the filesystem refuses a write
+    to it. A destination that exists is refused -- a backup never overwrites
+    anything -- and the copy is checked (`integrity_check`, schema version)
+    before success is reported. Returns the copy's size in bytes.
+    """
+    source, destination = Path(source), Path(destination)
+    if destination.exists():
+        raise BackupError(f"{destination} already exists; a backup never overwrites a file")
+    reader = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        row = reader.execute("SELECT version FROM schema_version").fetchone()
+        if row is None or row[0] != SCHEMA_VERSION:
+            raise SchemaVersionMismatch(
+                f"database schema version is {None if row is None else row[0]}, this build "
+                f"reads {SCHEMA_VERSION}. Nothing was copied."
+            )
+        copy = sqlite3.connect(str(destination))
+        try:
+            reader.backup(copy)
+            verdict = copy.execute("PRAGMA integrity_check").fetchone()
+            version = copy.execute("SELECT version FROM schema_version").fetchone()
+        finally:
+            copy.close()
+    finally:
+        reader.close()
+    if verdict is None or verdict[0] != "ok" or version is None or version[0] != SCHEMA_VERSION:
+        raise BackupError(f"the copy at {destination} did not pass its check; do not rely on it")
+    return destination.stat().st_size
+
+
 def audit_feedback_rows(path: str | Path) -> FeedbackAudit:
     """READ-ONLY. Report what would block `events_feedback_idem_unique`.
 
