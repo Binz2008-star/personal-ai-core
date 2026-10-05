@@ -10,6 +10,7 @@ from personal_ai_core.agent.policy import RiskPolicy
 from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import Workspace
 from personal_ai_core.agent.tools import default_tools
+from personal_ai_core.context.budget import ReserveBasedBudgetPolicy
 from personal_ai_core.context.token_estimator import ScriptAwareTokenEstimator
 from personal_ai_core.core.agent import AgentTaskContract
 from personal_ai_core.core.domain import EventType, ModelResponse, Role
@@ -42,8 +43,9 @@ def make(root, script, *, environment=None, events=None):
     ws = Workspace(root)
     checkpoints = Checkpoints(ws)
     executor = ToolExecutor(default_tools(ws, checkpoints), RiskPolicy())
-    return AgentLoop(provider=script, model="boss", executor=executor, checkpoints=checkpoints,
-                     events=events, environment=environment)
+    return AgentLoop(provider=script, model="boss", executor=executor, context_window=8192, budget_policy=ReserveBasedBudgetPolicy(),
+                     estimator=ScriptAwareTokenEstimator(),
+                     checkpoints=checkpoints, events=events, environment=environment)
 
 
 def record_of(outcome) -> dict:
