@@ -39,6 +39,7 @@ from ..core.domain import (
 )
 from ..core.context import ContextAllocation
 from ..core.errors import ContextOverflowError, ProviderError
+from ..core.redaction import RedactionError
 from .events import EventRecorder
 from .grounding import ContextBuilder, summarize
 from .language_guard import GUARD_NOTE, check_reply
@@ -231,7 +232,7 @@ class ConversationService:
             self._recorder.record(
                 session_id=session_id,
                 type=EventType.GENERATION_FAILED,
-                payload={"model": spec.name, "error": str(exc)},
+                payload={"model": spec.name, **_provider_failure(exc)},
                 message_id=user_message.id,
             )
             raise
@@ -333,7 +334,7 @@ class ConversationService:
             self._recorder.record(
                 session_id=session_id,
                 type=EventType.GENERATION_FAILED,
-                payload={"model": spec.name, "error": str(exc), "attempt": 2},
+                payload={"model": spec.name, **_provider_failure(exc), "attempt": 2},
                 message_id=user_message.id,
             )
             # The trigger is recorded on this path too: a retry that never
@@ -434,10 +435,17 @@ class ConversationService:
                 history=history,
             )
         except Exception as exc:
+            # The type, not the message: a retriever's message can quote a
+            # document path, a database host or the text it failed on (P1-8).
+            # A redactor's failure says which of its declared classifications
+            # it is, and nothing else can be in it (ADR-018 section 3.8).
+            failure: dict[str, object] = {"error_type": type(exc).__name__}
+            if isinstance(exc, RedactionError):
+                failure["classification"] = exc.classification
             self._recorder.record(
                 session_id=session_id,
                 type=EventType.RETRIEVAL_FAILED,
-                payload={"error": str(exc), "error_type": type(exc).__name__},
+                payload=failure,
                 message_id=message_id,
             )
             raise
@@ -470,3 +478,15 @@ class ConversationService:
 
     def history(self, session_id: str) -> Sequence[Message]:
         return self._messages.list_for_session(session_id)
+
+
+def _provider_failure(exc: ProviderError) -> dict[str, object]:
+    """What a durable GENERATION_FAILED keeps of a provider's failure.
+
+    Gap analysis P1-8: the message went into the event as it was, and a
+    transport's message can name the host, the port and whatever the server
+    answered. A row in the event store outlives the terminal it was printed
+    on, so it keeps a classification -- the error's type, its kind and an
+    HTTP status -- and the person at the terminal still gets the message.
+    """
+    return {"error_type": type(exc).__name__, "error_kind": exc.kind, "status": exc.status}

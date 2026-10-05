@@ -29,7 +29,7 @@ earlier run to continue it.
 | | |
 |---|---|
 | `--database PATH` | where the file lives. Also `$PAC_DATABASE`; the flag wins |
-| `--ephemeral` | keep nothing — the conversation ends with the process |
+| `--ephemeral` | keep nothing — the conversation ends with the process. Not with `--agent`, whose steps are its record |
 | `--session ID` | continue an earlier conversation |
 | `--language ar` | tag the turn. Left undetermined when not given, because guessing it would record a claim nothing measured |
 | `--documents PATH` | answer from a file, or a directory of `.md` and `.txt` files. Repeatable |
@@ -90,7 +90,7 @@ verifier decide what happens (`docs/AGENT_ARCHITECTURE.md`, `docs/ADR/ADR-023-pl
 | `delete_file` | critical | **asks you**, every time; can be undone |
 | `web_search` | medium | runs; sends the query to DuckDuckGo and nothing else |
 | `fetch_url` | high | **asks you**, for every URL; reads one page as text |
-| `shell` | high | **asks you**, for every command; anything your terminal can do, pipes included. It starts in the workspace, cannot be undone, and does not see environment variables whose names look secret |
+| `shell` | high | **asks you**, for every command; anything your terminal can do, pipes included. It starts in the workspace, cannot be undone, and sees only a fixed set of environment variables (locations, locale, system settings), never your tokens or keys |
 
 ```console
 $ pac --agent --workspace ~/projects/notes
