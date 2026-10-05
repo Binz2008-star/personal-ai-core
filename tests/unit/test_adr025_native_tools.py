@@ -29,6 +29,7 @@ from personal_ai_core.agent.loop import (
     tool_declarations,
 )
 from personal_ai_core.agent.policy import RiskPolicy
+from personal_ai_core.context import ReserveBasedBudgetPolicy, ScriptAwareTokenEstimator
 from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import Workspace
 from personal_ai_core.agent.tools import default_tools
@@ -92,7 +93,8 @@ def ws(tmp_path):
 def _loop(ws, provider, *, events=None, **kwargs):
     checkpoints = Checkpoints(ws)
     executor = ToolExecutor(default_tools(ws, checkpoints), RiskPolicy())
-    return AgentLoop(provider=provider, model="boss", executor=executor, context_window=8192,
+    return AgentLoop(provider=provider, model="boss", executor=executor, context_window=8192, budget_policy=ReserveBasedBudgetPolicy(),
+                     estimator=ScriptAwareTokenEstimator(),
                      checkpoints=checkpoints, events=events, native_tools=True, **kwargs)
 
 
