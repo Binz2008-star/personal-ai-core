@@ -725,6 +725,8 @@ claim written in one place with nothing that notices it going stale.
                direct targets: loopback, private, link-local, IPv6, DNS)
   #217 72ec675  eval: ADR-023 unit 3, default arm and verify_completion arm at
                b10613d (480 runs each); FAIL, not adopted
+  #222 67d004d  docs: ADR-023 unit 3 measured -- FAIL, not adopted; every
+               figure re-derived; ledger #216 #217
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1191,7 +1193,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-05, main at 72ec675)
+NEXT SESSION HANDOFF (updated 2026-10-05, main at 67d004d)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1306,7 +1308,7 @@ WHERE THINGS STAND (2026-10-04)
     Then #216 (fetch_url resolves the host once, refuses any address that is
     not public -- IPv4, IPv6 and IPv4 inside IPv6 -- and connects only to an
     address it checked) and #217 (the unit 3 measurement, FAIL, above)
-    merged; main is 72ec675. #217 was merged with a custom title, not
+    merged; main was 72ec675. Then #222 (ADR-023 section 8.6, the unit 3 record, and the merge-title exception) merged; main is 67d004d. #217 was merged with a custom title, not
     `Merge pull request #217 ...` (the lead's mistake); history is not
     rewritten, and the ledger checks and the session report name that one
     merge by its full SHA (tests/support/merge_convention.py). Every merge
