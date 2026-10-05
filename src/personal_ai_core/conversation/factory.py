@@ -122,6 +122,71 @@ def _budget_policy(identity: DefaultIdentityComposer, settings: Settings) -> Res
     )
 
 
+# Kept free, beside the owner's profile, for the conversation's history and
+# its retrieved evidence: room for at least two retrieved passages, per the R3
+# budget math. A profile that leaves less than this is refused (F-A): with the
+# window spent on who the owner is, there is none left for what they asked.
+PROFILE_FREE_FLOOR = 2048
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileBudget:
+    """What the owner's profile costs every turn, against what it may cost.
+
+    `tokens` is what the profile adds to the identity message, measured as
+    the identity with it minus the identity without it, by the estimator the
+    budget uses. `allowed` is what is left of the active model's window after
+    the generation reserve, the overhead, the guard reserve, the identity
+    without a profile and `PROFILE_FREE_FLOOR`. `excess_chars` is how many
+    characters must come off the end of the profile for it to fit; 0 when it
+    fits.
+    """
+
+    tokens: int
+    allowed: int
+    window: int
+    excess_chars: int
+
+    @property
+    def fits(self) -> bool:
+        return self.tokens <= self.allowed
+
+
+def profile_budget(profile: str, settings: Settings) -> ProfileBudget:
+    """Measure `profile` against `settings.boss_context_window` (F-A).
+
+    The same composer, estimator, reserves and window the services use, so
+    a profile accepted here is one the turn's budget can hold with
+    `PROFILE_FREE_FLOOR` to spare. Nothing is cut: the caller refuses.
+    """
+    estimator = ScriptAwareTokenEstimator()
+    bare = DefaultIdentityComposer()
+    bare_tokens = bare.tokens(estimator)
+    model = ModelRegistry.from_settings(settings, provider="profile-check").active
+    allocation = _budget_policy(bare, settings).allocate(model=model, history_tokens=0)
+    allowed = allocation.context_window - allocation.spoken_for - PROFILE_FREE_FLOOR
+
+    def cost(text: str) -> int:
+        return DefaultIdentityComposer(profile=text).tokens(estimator) - bare_tokens
+
+    tokens = cost(profile)
+    excess = 0
+    if tokens > allowed:
+        # The fewest characters off the end that make it fit: the cost only
+        # grows with the text, so a binary search finds it.
+        low, high = 1, len(profile)
+        while low < high:
+            middle = (low + high) // 2
+            if cost(profile[: len(profile) - middle]) <= allowed:
+                high = middle
+            else:
+                low = middle + 1
+        excess = low
+    return ProfileBudget(
+        tokens=tokens, allowed=allowed, window=model.context_window, excess_chars=excess
+    )
+
+
 def build_llamacpp_provider(
     host: str,
     *,
@@ -813,16 +878,24 @@ def build_agent(
         FetchUrl(web_fetch),
     ]
     executor = ToolExecutor(tools, RiskPolicy(), confirm=confirm)
+    # N2: one composer and one estimator, so the identity reserve is funded
+    # from the very text the agent sends. No guard reserve: the agent has no
+    # language guard, and reserving for one would shrink every run for nothing.
+    estimator = ScriptAwareTokenEstimator()
+    identity = DefaultIdentityComposer(profile=settings.profile)
     loop = AgentLoop(
         provider=provider,
         model=registry.active.name,
         executor=executor,
+        context_window=registry.active.context_window,
+        budget_policy=ReserveBasedBudgetPolicy(identity_reserve=identity.tokens(estimator)),
+        estimator=estimator,
         checkpoints=checkpoints,
-        identity=DefaultIdentityComposer(profile=settings.profile),
+        identity=identity,
         events=events,
         session_exists=session_exists,
         environment=(
-            EnvironmentContext(sandbox.root, estimate=ScriptAwareTokenEstimator().estimate)
+            EnvironmentContext(sandbox.root, estimate=estimator.estimate)
             if environment_context
             else None
         ),

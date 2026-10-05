@@ -15,7 +15,9 @@ import io
 import pytest
 
 from personal_ai_core.app import cli
-from personal_ai_core.app.cli import MAX_PROFILE_CHARS, main
+from personal_ai_core.app.cli import main
+from personal_ai_core.conversation.factory import profile_budget
+from personal_ai_core.core.config import Settings
 from personal_ai_core.core.redaction import Redaction, RedactionError
 
 GITHUB = "ghp_" + "PLANTED" + "a" * 29
@@ -78,11 +80,19 @@ def test_remember_refuses_a_secret_without_creating_the_file(tmp_path):
 
 
 def test_remember_refuses_an_entry_that_would_pass_the_limit(tmp_path):
-    full = "# About me\n" + "- " + "x" * (MAX_PROFILE_CHARS - 20) + "\n"
+    # The limit is in tokens against the model's window (F-A, #246, which
+    # tests the arithmetic itself); here, only that --remember still refuses
+    # a line that would cross it, and writes nothing.
+    sentence = "أعمل على بناء منصة للبحث عن الوظائف في الإمارات، وأفضل الإجابات القصيرة. "
+    times = 1
+    while profile_budget("# About me\n- " + sentence * (times + 1), Settings()).fits:
+        times += 1
+    full = "# About me\n- " + sentence * times + "\n"
     path = write_profile(tmp_path, full)
-    code, output, _ = run(tmp_path, "--remember", "one more thing about me")
+    code, output, _ = run(tmp_path, "--remember", sentence * 3)
     assert code == 2
-    assert f"the limit is {MAX_PROFILE_CHARS}" in output and str(path) in output
+    assert "not remembered" in output and "tokens; the limit is" in output
+    assert str(path) in output
     assert path.read_text(encoding="utf-8") == full
 
 
