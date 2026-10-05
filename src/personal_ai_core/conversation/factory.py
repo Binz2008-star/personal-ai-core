@@ -19,6 +19,7 @@ from ..agent import (
     Checkpoints,
     FetchUrl,
     RiskPolicy,
+    SecretShapeRedactor,
     Shell,
     ToolExecutor,
     WebSearch,
@@ -36,7 +37,13 @@ from ..context import (
     ScriptAwareTokenEstimator,
 )
 from ..core.config import Settings
-from ..core.contracts import EventRepository, MemoryStore, ModelProvider, SessionRepository
+from ..core.contracts import (
+    EventRepository,
+    MemoryStore,
+    ModelProvider,
+    SecretRedactor,
+    SessionRepository,
+)
 from ..core.feedback import FEEDBACK_EVENT_TYPE, feedback_record_from_event
 from ..core.memory import MemoryReader
 from ..core.observation import Observation, UnobservedFeedback
@@ -823,3 +830,19 @@ def build_agent(
         verify_completion=verify_completion,
     )
     return AgentSlice(loop=loop, executor=executor, checkpoints=checkpoints, workspace=sandbox)
+
+
+def build_reply_redactor() -> SecretRedactor:
+    """What withholds a secret from a chat reply before `pac` prints it.
+
+    Gap analysis P0-6: the agent's answer was checked for secrets and the
+    chat reply was printed raw, so a secret the model repeated from the
+    history, the profile or a document reached the terminal and its
+    scrollback. This is the agent's own check (`agent/verifier.py`), so both
+    paths withhold the same shapes; `app` may not import `agent`, so it is
+    handed over here, behind `core.contracts.SecretRedactor`.
+
+    It is not ADR-018's evidence redactor and is not given to the service:
+    what is stored is unchanged. It withholds at the terminal only.
+    """
+    return SecretShapeRedactor()

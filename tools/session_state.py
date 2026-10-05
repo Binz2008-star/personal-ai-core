@@ -31,6 +31,17 @@ REPO = Path(__file__).resolve().parents[1]
 STATE = REPO / "PROJECT_STATE.md"
 LEDGER_ROW = re.compile(r"^  #(\d+)\s+(\S+)", re.MULTILINE)
 MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+)\b")
+# The one PR merge whose subject breaks the convention, by full SHA: #217,
+# merged with a custom title on 2026-10-05. tests/support/merge_convention.py
+# holds the same table, and test_merge_ledger.py keeps the two equal.
+UNCONVENTIONAL_MERGES = {"72ec675a7cf8ec589674c70e7d5c9e53bd3c63e2": 217}
+
+
+def pr_number(full_sha: str, subject: str) -> int | None:
+    match = MERGE_SUBJECT.match(subject)
+    if match:
+        return int(match.group(1))
+    return UNCONVENTIONAL_MERGES.get(full_sha)
 HANDOFF = re.compile(r"^NEXT SESSION HANDOFF \(updated (\S+), main at ([0-9a-f]{7,40})\)",
                      re.MULTILINE)
 MAX_UNRECORDED_MERGES = 3  # tests/unit/test_merge_ledger.py
@@ -46,15 +57,15 @@ def git(*args: str) -> str:
 def merges(rev: str = "HEAD") -> list[tuple[int, str, str]]:
     """(PR number, short SHA, PR title) for each merge of a PR, newest first."""
     out = []
-    log = git("log", "--merges", "--first-parent", "--format=%h%x1f%s%x1f%b%x1e", rev)
+    log = git("log", "--merges", "--first-parent", "--format=%H%x1f%s%x1f%b%x1e", rev)
     for record in log.split("\x1e"):
         parts = record.strip().split("\x1f")
         if len(parts) < 2:
             continue
-        match = MERGE_SUBJECT.match(parts[1])
-        if match:
+        number = pr_number(parts[0], parts[1])
+        if number is not None:
             body = parts[2].strip().splitlines() if len(parts) > 2 else []
-            out.append((int(match.group(1)), parts[0], body[0] if body else ""))
+            out.append((number, parts[0][:7], body[0] if body else ""))
     return out
 
 
@@ -79,10 +90,11 @@ def handoff_lag(stated: str) -> int | None:
         git("merge-base", "--is-ancestor", stated, "HEAD")
     except subprocess.CalledProcessError:
         return None
-    subjects = git("log", "--merges", "--first-parent", "--format=%s",
-                   f"{stated}..HEAD").splitlines()
+    records = git("log", "--merges", "--first-parent", "--format=%H%x00%s",
+                  f"{stated}..HEAD").splitlines()
     # Only PR merges count: merging main into a branch is not a landing.
-    return sum(1 for subject in subjects if MERGE_SUBJECT.match(subject))
+    return sum(1 for full, _, subject in (r.partition("\x00") for r in records)
+               if pr_number(full, subject) is not None)
 
 
 def report() -> list[str]:
