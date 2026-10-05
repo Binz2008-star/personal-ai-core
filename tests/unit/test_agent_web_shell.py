@@ -1,12 +1,16 @@
 """The agent's reach: web_search, fetch_url and shell.
 
-No test touches the network: the web tools take an injected `fetch`.
+No test touches the network: the web tools take an injected `fetch`. The
+redirect tests run a local server and reach it through a name, as if it were
+a public host: fetch_url does not read loopback addresses
+(test_fetch_url_public_addresses.py).
 """
 from __future__ import annotations
 
 import socket
 import sys
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -171,6 +175,23 @@ def _page_handler(hits):
     return Handler
 
 
+@pytest.fixture(autouse=True)
+def _no_proxy(monkeypatch):
+    # Whatever proxy the machine running the tests has, these tests decide.
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {})
+
+
+def _as_public_host():
+    """The default fetch, with source.example resolving to the local test
+    server and that one address accepted as if it were public."""
+    def resolve(host, port):
+        assert host == "source.example"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+
+    return lambda url, timeout: urllib_fetch_url(
+        url, timeout, resolve=resolve, allowed=lambda address: str(address) == "127.0.0.1")
+
+
 def test_fetch_url_does_not_follow_a_redirect_to_loopback():
     target_hits = []
     target, target_thread = _serve(_page_handler(target_hits))
@@ -178,8 +199,8 @@ def test_fetch_url_does_not_follow_a_redirect_to_loopback():
     target_url = f"http://127.0.0.1:{target.server_port}/secret"
     source, source_thread = _serve(_redirect_handler(target_url, source_hits))
     try:
-        result = FetchUrl(urllib_fetch_url).run(
-            {"url": f"http://127.0.0.1:{source.server_port}/redirect"}
+        result = FetchUrl(_as_public_host()).run(
+            {"url": f"http://source.example:{source.server_port}/redirect"}
         )
     finally:
         source.shutdown()
@@ -215,8 +236,8 @@ def test_fetch_url_does_not_attempt_a_redirect_to_private_or_link_local_address(
 
     monkeypatch.setattr(socket, "create_connection", track_connection)
     try:
-        result = FetchUrl(urllib_fetch_url).run(
-            {"url": f"http://127.0.0.1:{source.server_port}/redirect"}
+        result = FetchUrl(_as_public_host()).run(
+            {"url": f"http://source.example:{source.server_port}/redirect"}
         )
     finally:
         source.shutdown()
@@ -228,7 +249,9 @@ def test_fetch_url_does_not_attempt_a_redirect_to_private_or_link_local_address(
     assert blocked_address not in attempted_hosts
 
 
-def test_default_fetch_url_reads_a_direct_http_response():
+def test_default_fetch_url_does_not_read_a_direct_loopback_address():
+    # This asserted the opposite until the public-address guard: a confirmed
+    # http://127.0.0.1/ reached whatever listened there.
     hits = []
     server, thread = _serve(_page_handler(hits))
     try:
@@ -240,8 +263,8 @@ def test_default_fetch_url_reads_a_direct_http_response():
         server.server_close()
         thread.join()
 
-    assert result.ok and result.output.endswith("private response")
-    assert hits == ["/page"]
+    assert not result.ok and "not a public address" in (result.error or "")
+    assert hits == []
 
 
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://x.test/a", "javascript:x", "notes.md"])
