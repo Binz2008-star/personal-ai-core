@@ -82,6 +82,13 @@ def run_bounded(
         except subprocess.TimeoutExpired:
             pass  # something outside the tree holds the pipes; give up on its output
         raise
+    except BaseException:
+        # N3: anything else that ends the wait -- a Ctrl-C above all -- ends
+        # the command too. It runs in its own process group, so the terminal's
+        # interrupt never reaches it; left alone it would go on running, and
+        # writing, after pac had exited.
+        _kill_tree(process)
+        raise
     return process.returncode, stdout, stderr
 
 
