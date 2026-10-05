@@ -16,13 +16,14 @@ from __future__ import annotations
 import pytest
 
 from personal_ai_core.agent.executor import ToolExecutor
-from personal_ai_core.agent.loop import AgentLoop, fence
+from personal_ai_core.agent.loop import FITTED_MARKER, AgentLoop, fence
 from personal_ai_core.agent.policy import RiskPolicy
 from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import Workspace
 from personal_ai_core.agent.tools import default_tools
 from personal_ai_core.agent.verifier import WITHHELD_MARKER, SecretShapeRedactor
 from personal_ai_core.agent.web import FetchUrl
+from personal_ai_core.context import ReserveBasedBudgetPolicy, ScriptAwareTokenEstimator
 from personal_ai_core.core.domain import ModelResponse
 from personal_ai_core.core.redaction import RedactionError
 
@@ -52,7 +53,8 @@ def loop(tmp_path, script, *, extra_tools=(), files=None):
     executor = ToolExecutor([*default_tools(workspace, checkpoints), *extra_tools],
                             RiskPolicy(), confirm=lambda request, spec: True)
     return AgentLoop(provider=script, model="boss", executor=executor,
-                     checkpoints=checkpoints)
+                     context_window=8192, budget_policy=ReserveBasedBudgetPolicy(),
+                     estimator=ScriptAwareTokenEstimator(), checkpoints=checkpoints)
 
 
 def shown_after(script) -> str:
@@ -157,3 +159,53 @@ def test_text_with_nothing_to_withhold_is_returned_as_is(text):
     from personal_ai_core.agent.loop import _withheld
 
     assert _withheld(text) == text
+
+
+def _read_once(tmp_path, name, text):
+    """One read of `text` in a fresh workspace: every message the model was
+    sent, and the result it was shown."""
+    script = Script('{"tool": "read_file", "arguments": {"path": "%s"}}' % name,
+                    '{"answer": "done"}')
+    (tmp_path / name).mkdir()
+    agent = loop(tmp_path / name, script, files={name: text})
+    agent.run("summarise " + name, session_id="s1")
+    return [m.content for call in script.calls for m in call], shown_after(script)
+
+
+def test_a_secret_where_the_cut_lands_is_withheld_before_the_cut(tmp_path):
+    """N2 cuts a result too big for the room left; N7 withholds secrets. The
+    withholding comes first: cutting first could split a token at the cut into
+    a fragment too short for its shape (`ghp_` and fewer than 20 characters
+    after it), and that fragment would reach the model.
+
+    The cut is forced the way the context-budget tests force it: an output
+    larger than what is left of an 8192-token window. A first run with a
+    same-length stand-in that is not secret-shaped finds about where the cut
+    lands. The cut then moves a little with the token in place (the failed
+    verification adds a line), so the token is placed at every fourth
+    character over the 120 before that point: whatever the exact cut, one of
+    the placements straddles it with 8 to 23 characters of the token before it,
+    which a cut taken first would leave unrecognised.
+    """
+    filler = "def total(items):\n    return sum(item.price for item in items)\n" * 400
+    stand_in = "zzz_" + GITHUB[4:]
+    assert len(stand_in) == len(GITHUB)
+
+    def document(token: str, at: int) -> str:
+        return (filler[:at] + token + filler)[:19_000]
+
+    _, probe = _read_once(tmp_path, "probe.py", document(stand_in, 0))
+    assert FITTED_MARKER in probe  # the output is cut
+    content = probe.split("\n", 1)[1]  # after the fence's opening line
+    cut = content.index(FITTED_MARKER)
+    assert 200 < cut < 18_000
+
+    for at in range(cut - 120, cut + 1, 4):
+        sent, shown = _read_once(tmp_path, f"big{at}.py", document(GITHUB, at))
+        # No prefix of the token of 8 characters or more reaches the model:
+        # every longer prefix contains this one.
+        assert not any(GITHUB[:8] in text for text in sent), at
+        assert WITHHELD_MARKER in shown or FITTED_MARKER in shown
+        # Still a cut result, ending with the line that says so.
+        body = shown[: shown.rindex("\n<<<end result")]
+        assert body.endswith(FITTED_MARKER), at

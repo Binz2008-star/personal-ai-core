@@ -119,6 +119,10 @@ task:
   `num_predict`, not the Boss model's sampling settings, and the record says so rather
   than assuming.
 
+  > **Note (2026-10-05, N1, #236):** the sentence above is superseded. Agent Ollama
+  > calls now send `num_predict` and `num_ctx` (the active model's window), still not
+  > the Boss model's sampling settings. Each call's `options_sent` records what was sent.
+
 ### 3.5 Approvals during a benchmark: containment, not a sandbox
 
 The agent asks the owner before a HIGH or CRITICAL tool call. A benchmark cannot ask, so
