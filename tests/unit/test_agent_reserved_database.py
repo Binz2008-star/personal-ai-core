@@ -214,7 +214,9 @@ def test_a_live_sqlite_database_survives_every_tool(tmp_path):
 
 
 def test_without_a_reserved_database_nothing_is_reserved(tmp_path):
-    """--ephemeral has no database file; the workspace reserves nothing."""
+    """With no database to reserve -- the benchmark's agent has none -- the
+    workspace reserves nothing. `pac --agent` always has one: it refuses
+    --ephemeral."""
     root = tmp_path / "ws"
     root.mkdir()
     (root / "core.db").write_bytes(b"not ours")

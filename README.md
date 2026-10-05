@@ -29,7 +29,7 @@ earlier run to continue it.
 | | |
 |---|---|
 | `--database PATH` | where the file lives. Also `$PAC_DATABASE`; the flag wins |
-| `--ephemeral` | keep nothing — the conversation ends with the process |
+| `--ephemeral` | keep nothing — the conversation ends with the process. Not with `--agent`, whose steps are its record |
 | `--session ID` | continue an earlier conversation |
 | `--language ar` | tag the turn. Left undetermined when not given, because guessing it would record a claim nothing measured |
 | `--documents PATH` | answer from a file, or a directory of `.md` and `.txt` files. Repeatable |
