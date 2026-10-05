@@ -375,10 +375,12 @@ def test_the_shell_does_not_see_secret_variables(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "t")
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setenv("DATABASE_URL", "postgres://u:p@h/d")
-    monkeypatch.setenv("PAC_WORKSPACE_NOTE", "kept")
+    monkeypatch.setenv("PAC_WORKSPACE_NOTE", "not passed either")
     env = shell_environment()
     assert "GITHUB_TOKEN" not in env and "OPENAI_API_KEY" not in env
-    assert "DATABASE_URL" not in env and env["PAC_WORKSPACE_NOTE"] == "kept"
+    # A name nobody listed is not passed, secret-looking or not: P0-5
+    # (test_shell_environment.py).
+    assert "DATABASE_URL" not in env and "PAC_WORKSPACE_NOTE" not in env
     assert "PATH" in env
 
 

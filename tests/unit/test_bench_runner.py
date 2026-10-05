@@ -251,9 +251,9 @@ def test_report_counts_and_signals():
 def test_a_commit_through_shell_lands_with_the_fixed_identity(tmp_path):
     """Local git through `shell`, end to end: approved by the policy, committed
     under the fixtures' identity, seen by the git check. The identity is in the
-    repository's config: `shell` strips GIT_AUTHOR_* from its environment
-    (the name matches "AUTH"), and CI has no global git identity to fall
-    back on -- which is how this was found."""
+    repository's config: `shell` passes on only SHELL_ENV_NAMES, not
+    GIT_AUTHOR_*, and CI has no global git identity to fall back on -- which
+    is how this was found."""
     tasks = tmp_path / "tasks"
     (tasks / "fixtures" / "repo").mkdir(parents=True)
     (tasks / "fixtures" / "repo" / "notes.txt").write_text("draft\n", encoding="utf-8")
