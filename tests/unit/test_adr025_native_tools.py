@@ -92,7 +92,7 @@ def ws(tmp_path):
 def _loop(ws, provider, *, events=None, **kwargs):
     checkpoints = Checkpoints(ws)
     executor = ToolExecutor(default_tools(ws, checkpoints), RiskPolicy())
-    return AgentLoop(provider=provider, model="boss", executor=executor,
+    return AgentLoop(provider=provider, model="boss", executor=executor, context_window=8192,
                      checkpoints=checkpoints, events=events, native_tools=True, **kwargs)
 
 

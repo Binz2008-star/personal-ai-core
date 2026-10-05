@@ -81,8 +81,8 @@ def _loop(ws, script, *, exits=None, verify=True, events=None, **kwargs):
     exits = exits or {}
     tools = [WriteFile(ws, checkpoints), Command("run_command", exits), Command("shell", exits)]
     executor = ToolExecutor(tools, RiskPolicy())
-    return AgentLoop(provider=script, model="boss", executor=executor, checkpoints=checkpoints,
-                     events=events, verify_completion=verify,
+    return AgentLoop(provider=script, model="boss", executor=executor, context_window=8192,
+                     checkpoints=checkpoints, events=events, verify_completion=verify,
                      session_exists=(lambda s: True) if events is not None else None, **kwargs)
 
 

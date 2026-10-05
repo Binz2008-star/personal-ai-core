@@ -453,7 +453,8 @@ def main(
         "runs": args.runs,
         "languages": args.languages,
         "num_ctx_measured_by_owner": args.num_ctx,
-        "num_ctx_sent_by_core": False,
+        # N1: the agent sends the active model's window as `num_ctx` on every call.
+        "num_ctx_sent_by_core": settings.boss_context_window,
         "profile": "none (deliberately empty)",
         "environment_context": args.environment_context,
         "lenient_protocol": args.lenient_protocol,

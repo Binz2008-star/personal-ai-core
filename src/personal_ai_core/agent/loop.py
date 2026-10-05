@@ -470,6 +470,7 @@ class AgentLoop:
         provider: ModelProvider,
         model: str,
         executor: ToolExecutor,
+        context_window: int,
         verifier: Verifier | None = None,
         checkpoints: Checkpoints | None = None,
         identity: IdentityComposer | None = None,
@@ -483,6 +484,13 @@ class AgentLoop:
         max_failures: int = 3,
         generation_limit: int = 1024,
     ) -> None:
+        # N1: the active model's window, sent as `num_ctx` on every call so the
+        # server runs the window the Core configured. Required, with no
+        # default: a default would be a second source for the number.
+        if isinstance(context_window, bool) or not isinstance(context_window, int) \
+                or context_window < 1:
+            raise ValueError(f"context_window must be a positive whole number, not {context_window!r}")
+        self._context_window = context_window
         self._session_exists = session_exists
         self._provider = provider
         self._model = model
@@ -569,7 +577,7 @@ class AgentLoop:
 
         while budget.allowed():
             call += 1
-            options = {"num_predict": self._generation_limit}
+            options = {"num_predict": self._generation_limit, "num_ctx": self._context_window}
             if self._native is not None:
                 reply = self._native.generate_with_tools(
                     model=self._model, messages=messages, tools=self._declarations,

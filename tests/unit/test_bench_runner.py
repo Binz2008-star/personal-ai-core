@@ -116,8 +116,9 @@ def test_every_model_call_is_recorded_with_what_was_sent(tmp_path):
     _, _, lines = _run(tmp_path)
     solved = next(x for x in lines if x.get("task") == "verify-off-by-one")
     assert len(solved["model_calls"]) == 4
-    # The agent loop sends num_predict and nothing else: recorded, not assumed.
-    assert solved["model_calls"][0]["options_sent"] == {"num_predict": 1024}
+    # The agent loop sends num_predict and num_ctx (N1) and nothing else:
+    # recorded, not assumed.
+    assert solved["model_calls"][0]["options_sent"] == {"num_predict": 1024, "num_ctx": 8192}
     assert solved["prompt_tokens"] == 400 and solved["completion_tokens"] == 40
 
 
@@ -130,6 +131,8 @@ def test_the_header_binds_the_result(tmp_path):
     assert "Not a security sandbox" in header["policy"]
     assert "not isolated from the network" in header["environment"]
     assert header["judge_model"].startswith("none")
+    # N1: the header states the window the agent sent, which every call shows.
+    assert header["num_ctx_sent_by_core"] == 8192
 
 
 def test_a_network_tool_is_denied_and_the_run_says_so(tmp_path):

@@ -817,6 +817,7 @@ def build_agent(
         provider=provider,
         model=registry.active.name,
         executor=executor,
+        context_window=registry.active.context_window,
         checkpoints=checkpoints,
         identity=DefaultIdentityComposer(profile=settings.profile),
         events=events,
