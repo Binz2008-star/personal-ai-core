@@ -54,6 +54,9 @@ Configuration is environment variables, all optional: `PAC_BOSS_MODEL`,
 `PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`,
 `PAC_PROFILE`, and `PAC_LANGUAGE_GUARD` (`0` turns off the reply-language check of ADR-019).
 
+**Finding a conversation again.** `pac --sessions` lists the stored conversations,
+newest first, with their ids; `pac --session ID` continues one. It only reads.
+
 **Backing up the database.** `pac --backup PATH` copies it, consistently and checked, safe
 while another `pac` runs; it never overwrites PATH, and `pac --database PATH` uses the copy.
 By hand: it is one SQLite file in WAL mode, so its latest writes can sit beside it in

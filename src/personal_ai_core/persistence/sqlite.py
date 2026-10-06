@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -156,6 +156,55 @@ class SchemaVersionMismatch(RuntimeError):
     """
 
 
+@dataclass(frozen=True, slots=True)
+class SessionSummary:
+    """One stored conversation, as `pac --sessions` lists it."""
+
+    id: str
+    started_at: datetime
+    status: str
+    messages: int
+    last_activity: datetime | None
+
+
+def list_sessions(path: str | Path) -> tuple[SessionSummary, ...]:
+    """READ-ONLY. Every session in the database, the most recently started first.
+
+    The session id is the only way back into a conversation, and pac printed it
+    once, at the start: lose it and the conversation was still in the file but
+    out of reach. Like `audit_feedback_rows` this opens the file `mode=ro`, so
+    the filesystem refuses a write, and it is safe while another pac writes.
+    A file from another schema version is refused, as `connect` refuses it.
+    """
+    connection = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        row = connection.execute("SELECT version FROM schema_version").fetchone()
+        if row is None or row[0] != SCHEMA_VERSION:
+            raise SchemaVersionMismatch(
+                f"database schema version is {None if row is None else row[0]}, this build "
+                f"reads {SCHEMA_VERSION}. Nothing was read or written."
+            )
+        rows = connection.execute(
+            """
+            SELECT s.id, s.created_at, s.status,
+                   (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id),
+                   (SELECT MAX(e.occurred_at) FROM events e WHERE e.session_id = s.id)
+            FROM sessions s
+            ORDER BY s.created_at DESC, s.id
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+    return tuple(
+        SessionSummary(
+            id=session_id,
+            started_at=_dt(created_at),
+            status=status,
+            messages=messages,
+            last_activity=_dt(last) if last is not None else None,
+        )
+        for session_id, created_at, status, messages, last in rows
+    )
 class BackupError(RuntimeError):
     """A backup that was not made, or that did not check out. Says which."""
 
