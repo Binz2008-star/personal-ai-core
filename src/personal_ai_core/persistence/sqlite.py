@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -154,6 +154,94 @@ class SchemaVersionMismatch(RuntimeError):
     does not recognise is how data is quietly lost; this says what it found
     and what it expected, and leaves the decision to a human.
     """
+
+
+@dataclass(frozen=True, slots=True)
+class SessionSummary:
+    """One stored conversation, as `pac --sessions` lists it."""
+
+    id: str
+    started_at: datetime
+    status: str
+    messages: int
+    last_activity: datetime | None
+
+
+def list_sessions(path: str | Path) -> tuple[SessionSummary, ...]:
+    """READ-ONLY. Every session in the database, the most recently started first.
+
+    The session id is the only way back into a conversation, and pac printed it
+    once, at the start: lose it and the conversation was still in the file but
+    out of reach. Like `audit_feedback_rows` this opens the file `mode=ro`, so
+    the filesystem refuses a write, and it is safe while another pac writes.
+    A file from another schema version is refused, as `connect` refuses it.
+    """
+    connection = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        row = connection.execute("SELECT version FROM schema_version").fetchone()
+        if row is None or row[0] != SCHEMA_VERSION:
+            raise SchemaVersionMismatch(
+                f"database schema version is {None if row is None else row[0]}, this build "
+                f"reads {SCHEMA_VERSION}. Nothing was read or written."
+            )
+        rows = connection.execute(
+            """
+            SELECT s.id, s.created_at, s.status,
+                   (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id),
+                   (SELECT MAX(e.occurred_at) FROM events e WHERE e.session_id = s.id)
+            FROM sessions s
+            ORDER BY s.created_at DESC, s.id
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+    return tuple(
+        SessionSummary(
+            id=session_id,
+            started_at=_dt(created_at),
+            status=status,
+            messages=messages,
+            last_activity=_dt(last) if last is not None else None,
+        )
+        for session_id, created_at, status, messages, last in rows
+    )
+class BackupError(RuntimeError):
+    """A backup that was not made, or that did not check out. Says which."""
+
+
+def backup(source: str | Path, destination: str | Path) -> int:
+    """Copy the database to `destination`, consistently, and check the copy.
+
+    SQLite's online backup, not a file copy: it reads one consistent snapshot,
+    writes still in `-wal` included, and it is safe while another pac holds the
+    database. The source is opened `mode=ro`, so the filesystem refuses a write
+    to it. A destination that exists is refused -- a backup never overwrites
+    anything -- and the copy is checked (`integrity_check`, schema version)
+    before success is reported. Returns the copy's size in bytes.
+    """
+    source, destination = Path(source), Path(destination)
+    if destination.exists():
+        raise BackupError(f"{destination} already exists; a backup never overwrites a file")
+    reader = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        row = reader.execute("SELECT version FROM schema_version").fetchone()
+        if row is None or row[0] != SCHEMA_VERSION:
+            raise SchemaVersionMismatch(
+                f"database schema version is {None if row is None else row[0]}, this build "
+                f"reads {SCHEMA_VERSION}. Nothing was copied."
+            )
+        copy = sqlite3.connect(str(destination))
+        try:
+            reader.backup(copy)
+            verdict = copy.execute("PRAGMA integrity_check").fetchone()
+            version = copy.execute("SELECT version FROM schema_version").fetchone()
+        finally:
+            copy.close()
+    finally:
+        reader.close()
+    if verdict is None or verdict[0] != "ok" or version is None or version[0] != SCHEMA_VERSION:
+        raise BackupError(f"the copy at {destination} did not pass its check; do not rely on it")
+    return destination.stat().st_size
 
 
 def audit_feedback_rows(path: str | Path) -> FeedbackAudit:
