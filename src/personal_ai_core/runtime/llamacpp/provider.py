@@ -7,12 +7,14 @@ as in the Ollama adapter, so it is testable without a server.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping, Sequence
 
 from ...core.domain import Message, ModelResponse
 from ...core.errors import ProviderError
+from ..failures import transport_failure, with_one_retry
 
 Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
 
@@ -31,9 +33,11 @@ def http_transport(url: str, payload: Mapping[str, Any], timeout: int) -> Mappin
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise ProviderError(f"llama-server request failed: {exc}") from exc
+        kind, status = transport_failure(exc)
+        raise ProviderError(f"llama-server request failed: {exc}", kind=kind, status=status) from exc
     except json.JSONDecodeError as exc:
-        raise ProviderError(f"llama-server returned invalid JSON: {exc}") from exc
+        raise ProviderError(f"llama-server returned invalid JSON: {exc}",
+                            kind="invalid_response") from exc
 
 
 class LlamaCppProvider:
@@ -46,11 +50,13 @@ class LlamaCppProvider:
         timeout_seconds: int = 120,
         transport: Transport | None = None,
         grammar: str | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._host = host.rstrip("/")
         self._timeout = timeout_seconds
         self._transport: Transport = transport or http_transport
         self._grammar = grammar
+        self._sleep = sleep
 
     @property
     def name(self) -> str:
@@ -64,7 +70,7 @@ class LlamaCppProvider:
         options: Mapping[str, Any] | None = None,
     ) -> ModelResponse:
         if not messages:
-            raise ProviderError("generate() requires at least one message")
+            raise ProviderError("generate() requires at least one message", kind="invalid_request")
         payload: dict[str, Any] = {
             "model": model,
             "messages": [{"role": m.role.value, "content": m.content} for m in messages],
@@ -78,13 +84,15 @@ class LlamaCppProvider:
         if self._grammar:
             payload["grammar"] = self._grammar
 
-        raw = self._transport(f"{self._host}/v1/chat/completions", payload, self._timeout)
+        raw = with_one_retry(lambda: self._transport(f"{self._host}/v1/chat/completions", payload, self._timeout),
+                             sleep=self._sleep)
         try:
             choice = raw["choices"][0]
             text = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise ProviderError(
-                f"llama-server response missing choices[0].message.content; got keys: {sorted(raw)}"
+                f"llama-server response missing choices[0].message.content; got keys: {sorted(raw)}",
+                kind="invalid_response",
             ) from exc
         usage = raw.get("usage") or {}
         return ModelResponse(

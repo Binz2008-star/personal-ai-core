@@ -41,12 +41,17 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
 from ..core.agent import AgentTaskContract, AuditRecord, Decision, ToolRequest
+from ..core.context import ContextAllocation
+from ..core.errors import ProviderError
 from ..core.contracts import (
+    ContextBudgetPolicy,
     EventRepository,
     IdentityComposer,
     ModelProvider,
+    TokenEstimator,
     ToolCallingProvider,
 )
+from ..core.redaction import RedactionError
 from ..core.domain import (
     Event,
     EventType,
@@ -59,7 +64,7 @@ from ..core.domain import (
 from .environment import EnvironmentContext
 from .executor import ToolExecutor
 from .recovery import ActionBudget, Checkpoints
-from .verifier import Verifier
+from .verifier import SecretShapeRedactor, Verifier
 
 MAX_TASK_CHARS = 8_000
 RESULT_TOKEN_LENGTH = 16
@@ -83,7 +88,7 @@ VERIFICATION_REQUIRED_MESSAGE = (
 # What changes the workspace, as the benchmark's tested_after_last_edit check
 # counts it (app/bench/checks.py; a test holds the two equal). A shell command
 # may write files, so it counts unless it is the test run itself.
-EDITING_TOOLS = frozenset({"write_file", "delete_file", "shell"})
+EDITING_TOOLS = frozenset({"write_file", "edit_file", "delete_file", "shell"})
 TEST_RUNNERS = frozenset({"run_command", "shell"})
 
 PROTOCOL = """You are working as an agent in the user's workspace, with tools.
@@ -445,7 +450,42 @@ def fence(label: str, content: str) -> str:
     return f"<<<result {token} {label}>>>\n{content}\n<<<end result {token}>>>"
 
 
-def _describe(step: Step) -> str:
+_OUTPUT_UNCHECKED = "[output withheld: it could not be checked for secrets]"
+
+
+def _withheld(text: str) -> str:
+    """`text` with each secret-shaped value replaced by the withheld marker.
+
+    Fail-closed, as everywhere a check guards what is shown (ADR-018 §3.8): a
+    check that could not run withholds the whole text, never passes it.
+    """
+    if not text:
+        return text
+    try:
+        return SecretShapeRedactor().redact(text).text
+    except RedactionError:
+        return _OUTPUT_UNCHECKED
+
+
+@dataclass(frozen=True, slots=True)
+class _Window:
+    """`core.contracts.ModelSpecLike` for the model this loop calls."""
+
+    name: str
+    provider: str
+    context_window: int
+
+
+# N2, owner decision 2: a tool result cut below this many tokens is not shown
+# as a stub; the run stops instead. A few hundred tokens is the least a reply
+# can still act on.
+MIN_RESULT_TOKENS = 256
+FITTED_MARKER = "\n[output truncated to fit the context window]"
+
+
+def _describe(step: Step, *, limit: int | None = None) -> str:
+    """The tool result as the model is shown it. With `limit`, the output is
+    cut to that many characters and says so (N2)."""
     record = step.record
     decision = record.decision.decision
     if decision is Decision.DENY:
@@ -453,13 +493,25 @@ def _describe(step: Step) -> str:
     result = record.result
     if result is None:
         return "no result"
-    status = "ok" if result.ok else f"failed ({result.error})"
+    status = "ok" if result.ok else f"failed ({_withheld(result.error or '')})"
     if record.decision.decision is Decision.ASK and not record.confirmed_by_user:
         status = "the user did not confirm; nothing ran"
-    body = result.output or "(no output)"
-    if result.truncated:
+    # N7: a secret-shaped value in what a tool returned -- a key in a file a
+    # command printed, a token in a page -- is withheld before the model reads
+    # it, as a chat reply's is before the owner does (P0-6). The verifier
+    # still fails the step on it; that only charged the budget, and the value
+    # went to the model whole.
+    # Withheld first, then cut (N2): a cut taken first could split a secret
+    # into a fragment the shape check no longer recognises.
+    body = _withheld(result.output) or "(no output)"
+    if limit is not None:
+        body = body[:limit] + FITTED_MARKER
+    elif result.truncated:
         body += "\n[output truncated]"
-    verdict = "" if step.verified else "\nverification failed: " + "; ".join(step.failed_checks)
+    # The verifier quotes a failed tool's error in its checks, so they are
+    # withheld from the same way.
+    verdict = "" if step.verified else "\nverification failed: " + "; ".join(
+        _withheld(check) for check in step.failed_checks)
     return fence(f"{record.request.tool} -> {status}", body) + verdict
 
 
@@ -470,6 +522,9 @@ class AgentLoop:
         provider: ModelProvider,
         model: str,
         executor: ToolExecutor,
+        context_window: int,
+        budget_policy: ContextBudgetPolicy,
+        estimator: TokenEstimator,
         verifier: Verifier | None = None,
         checkpoints: Checkpoints | None = None,
         identity: IdentityComposer | None = None,
@@ -481,8 +536,23 @@ class AgentLoop:
         verify_completion: bool = False,
         max_actions: int = 12,
         max_failures: int = 3,
-        generation_limit: int = 1024,
     ) -> None:
+        # N1: the active model's window, sent as `num_ctx` on every call so the
+        # server runs the window the Core configured. Required, with no
+        # default: a default would be a second source for the number.
+        if isinstance(context_window, bool) or not isinstance(context_window, int) \
+                or context_window < 1:
+            raise ValueError(f"context_window must be a positive whole number, not {context_window!r}")
+        self._context_window = context_window
+        # N2: every request is measured before it is sent, against the same
+        # kind of policy and the same estimator a chat turn uses. The policy's
+        # identity reserve funds the identity message, which is therefore not
+        # counted again; its generation reserve is the reply limit sent as
+        # num_predict, so the reserve and the limit cannot drift apart.
+        self._budget_policy = budget_policy
+        self._estimator = estimator
+        self._window = _Window(name=model, provider=provider.name,
+                               context_window=context_window)
         self._session_exists = session_exists
         self._provider = provider
         self._model = model
@@ -521,7 +591,6 @@ class AgentLoop:
         self._verify_completion = verify_completion
         self._max_actions = max_actions
         self._max_failures = max_failures
-        self._generation_limit = generation_limit
 
     def run(
         self,
@@ -539,9 +608,40 @@ class AgentLoop:
         Raises KeyError for a session `session_exists` does not know, before
         the model is called or anything is recorded: the same refusal, and the
         same exception, as ConversationService.send (F-2).
+
+        A run that ends by an exception -- the model server failing, an
+        interrupt, a store error -- still records its end (N3): AGENT_FINISHED
+        with `finished: false`, a classification of what ended it and the
+        files it touched, never the error's text. Then the exception is
+        raised again, unchanged, for the caller to explain and to offer the
+        undo. If that record cannot be written either, the original exception
+        is the one raised.
         """
         if self._session_exists is not None and not self._session_exists(session_id):
             raise KeyError(f"unknown session: {session_id}")
+        contract = task if isinstance(task, AgentTaskContract) else None
+        audited = len(self._executor.audit.records())
+        try:
+            return self._run(task, session_id=session_id, on_step=on_step,
+                             on_protocol_error=on_protocol_error)
+        except BaseException as exc:
+            try:
+                self._record_abnormal_end(
+                    exc, session_id, contract,
+                    steps=len(self._executor.audit.records()) - audited,
+                )
+            except Exception:  # noqa: BLE001 -- the original failure is the one to report
+                pass
+            raise
+
+    def _run(
+        self,
+        task: str | AgentTaskContract,
+        *,
+        session_id: str,
+        on_step: Callable[[Step], None] | None,
+        on_protocol_error: Callable[[str], None] | None,
+    ) -> AgentOutcome:
         if isinstance(task, AgentTaskContract):
             contract, task_text = task, task.task_text
         else:
@@ -568,8 +668,20 @@ class AgentLoop:
         call = 0
 
         while budget.allowed():
+            # N2: measured before it is sent. A request the window cannot hold
+            # is never handed to the server to truncate -- the first thing it
+            # would drop is the task -- and the run stops on the record.
+            allocation = self._allocate(messages)
+            if allocation.overcommitted:
+                return self._stop(
+                    f"stopped: the next request needs about {allocation.spoken_for} tokens "
+                    f"and the model's window is {allocation.context_window}",
+                    steps, session_id, protocol_errors, contract, action_rejections,
+                    environment, refused, lenient, verification_rejections,
+                )
             call += 1
-            options = {"num_predict": self._generation_limit}
+            options = {"num_predict": allocation.generation_reserve,
+                       "num_ctx": self._context_window}
             if self._native is not None:
                 reply = self._native.generate_with_tools(
                     model=self._model, messages=messages, tools=self._declarations,
@@ -660,7 +772,15 @@ class AgentLoop:
             self._record_step(step, session_id, contract)
             if on_step is not None:
                 on_step(step)
-            messages.append(self._user(session_id, _describe(step)))
+            described = self._fitted(step, messages)
+            if described is None:
+                return self._stop(
+                    f"stopped: the {step.record.request.tool} result does not fit what is "
+                    f"left of the model's window ({self._allocate(messages).evidence} tokens)",
+                    steps, session_id, protocol_errors, contract, action_rejections,
+                    environment, refused, lenient, verification_rejections,
+                )
+            messages.append(self._user(session_id, described))
 
         return self._stop(
             budget.summary(),
@@ -778,6 +898,45 @@ class AgentLoop:
     def _touched(self) -> tuple[str, ...]:
         return self._checkpoints.touched() if self._checkpoints is not None else ()
 
+    def _allocate(self, messages: Sequence[Message]) -> ContextAllocation:
+        """How the window divides for a request carrying `messages` (N2).
+
+        The identity message is not measured here: the policy's identity
+        reserve already funds it, exactly as on the chat path, and counting it
+        twice would shrink every agent run for nothing.
+        """
+        measured = messages[1:] if self._identity is not None else messages
+        history = sum(self._estimator.estimate(m.content) for m in measured)
+        return self._budget_policy.allocate(model=self._window, history_tokens=history)
+
+    def _fitted(self, step: Step, messages: Sequence[Message]) -> str | None:
+        """The step's result as it can be shown within what is left of the
+        window, or None when that is too little to be worth showing (N2).
+
+        A result that fits is shown exactly as before. One that does not is
+        cut, with a line saying so -- tool outputs are already cut at a fixed
+        size; this is the same cut with a limit that follows the space left.
+        """
+        room = self._allocate(messages).evidence
+        whole = _describe(step)
+        if self._estimator.estimate(whole) <= room:
+            return whole
+        if room < MIN_RESULT_TOKENS:
+            return None
+        # Sized on the output as `_describe` cuts it: already withheld (N7).
+        output = (
+            _withheld(step.record.result.output) if step.record.result is not None else ""
+        )
+        low, high = 0, len(output)  # the longest prefix whose rendering fits
+        while low < high:
+            middle = (low + high + 1) // 2
+            if self._estimator.estimate(_describe(step, limit=middle)) <= room:
+                low = middle
+            else:
+                high = middle - 1
+        fitted = _describe(step, limit=low)
+        return fitted if self._estimator.estimate(fitted) <= room else None
+
     def _record_step(
         self, step: Step, session_id: str, contract: AgentTaskContract | None
     ) -> None:
@@ -860,6 +1019,45 @@ class AgentLoop:
                 type=EventType.AGENT_FINISHED,
                 actor="agent",
                 payload=payload,
+            )
+        )
+
+    def _record_abnormal_end(
+        self,
+        exc: BaseException,
+        session_id: str,
+        contract: AgentTaskContract | None,
+        *,
+        steps: int,
+    ) -> None:
+        """AGENT_FINISHED for a run an exception ended (N3).
+
+        A classification only: the provider's failure kind, "interrupted", or
+        the exception's type name -- never its message, which can quote a
+        host, a path or the workspace (the repository's rule, P1-8).
+        """
+        if self._events is None:
+            return
+        if isinstance(exc, ProviderError):
+            reason = f"provider_failure ({exc.kind})"
+        elif isinstance(exc, KeyboardInterrupt):
+            reason = "interrupted"
+        else:
+            reason = f"internal_error ({type(exc).__name__})"
+        self._events.append(
+            Event(
+                session_id=session_id,
+                type=EventType.AGENT_FINISHED,
+                actor="agent",
+                payload={
+                    "finished": False,
+                    "steps": steps,
+                    "stopped_reason": reason,
+                    "touched_files": list(self._touched()),
+                    "action_required": (
+                        contract.action_required if contract is not None else "no contract"
+                    ),
+                },
             )
         )
 

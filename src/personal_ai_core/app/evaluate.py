@@ -687,7 +687,12 @@ def main(
         "model": settings.boss_model,
         "role": role,
         "core_assumed_context_window": settings.boss_context_window,
-        "num_ctx_sent_by_core": False,
+        # N1: Core sends the window it budgets against as Ollama's `num_ctx`.
+        # llama-server takes no per-request window (its adapter drops the
+        # option), so on that runtime nothing is sent.
+        "num_ctx_sent_by_core": (
+            settings.boss_context_window if args.runtime == "ollama" else None
+        ),
         "num_ctx_measured_by_owner": args.num_ctx,
         "machine": _machine(),
         "started_at": stamp.isoformat(),
