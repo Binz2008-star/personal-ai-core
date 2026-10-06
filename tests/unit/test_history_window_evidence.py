@@ -6,7 +6,12 @@ turn on -- about turn 38 in English and 19 in Arabic, measured on #231 -- a
 grounded turn sent no passage at all, and said so only in CONTEXT_ASSEMBLED
 (`used: 0`). Now retrieval runs before the window is cut, and the window leaves
 room for the rendered cost of what retrieval returned, capped at its top two
-passages. A turn that retrieved nothing keeps the whole room for its history.
+passages. A turn whose retrieval returned no passage keeps the whole room for
+its history.
+
+That is "returned no passage", not "needs no evidence": against a populated
+corpus retrieval returns passages for any message, an off-topic one included,
+so such a turn reserves too. Pinned below as a known limitation, not changed.
 """
 from __future__ import annotations
 
@@ -205,8 +210,12 @@ def test_the_history_gives_up_only_the_room_the_evidence_needs(language):
 
 
 @pytest.mark.parametrize("language", ["en", "ar"])
-def test_a_long_turn_without_evidence_keeps_the_whole_room_for_its_history(language):
-    # No documents: retrieval returns nothing, so nothing is reserved.
+def test_a_long_turn_whose_retrieval_returns_nothing_keeps_the_whole_room_for_its_history(
+    language,
+):
+    # No documents: retrieval returns nothing, so nothing is reserved. An empty
+    # corpus is how to get there -- a populated one returns passages for any
+    # message (see the off-topic test below).
     service, events, session, _ = _session(language, documents=False)
     last = _assembled(events, session.id)[-1]
     assert last["retrieved"] == 0 and last["evidence_reserve"] == 0
@@ -216,6 +225,34 @@ def test_a_long_turn_without_evidence_keeps_the_whole_room_for_its_history(langu
     expected = window_history(seen, estimate=estimate, fits=lambda tokens: tokens <= room)
     assert last["history_left_out"] == expected.left_out
     assert last["history_tokens"] == sum(estimate(m.content) for m in expected.sent)
+
+
+OFF_TOPIC = {"en": "ok, thanks!", "ar": "شكراً"}
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_an_off_topic_turn_over_a_populated_corpus_still_reserves(language):
+    # KNOWN LIMITATION, characterized, not endorsed. The vector arm has no
+    # similarity floor, so a message that needs no evidence still retrieves
+    # passages from a populated corpus, and its history gives up their room.
+    # A change that makes this turn reserve nothing (a similarity floor) is a
+    # retrieval change and must update this test on purpose, measured against
+    # the retrieval-only bench gate.
+    service, events, session, _ = _session(language)
+    service.send(session_id=session.id, content=OFF_TOPIC[language], language=language)
+    last = _assembled(events, session.id)[-1]
+    assert last["retrieved"] > 0
+    assert last["evidence_reserve"] > 0
+    seen = list(service.history(session.id))[:-1]
+    room = last["context_window"] - _fixed(last)
+
+    def left_out(reserve: int) -> int:
+        return window_history(seen, estimate=estimate,
+                              fits=lambda tokens: tokens + reserve <= room).left_out
+
+    # The history gave up the reserve's room for passages nobody asked about.
+    assert last["history_left_out"] == left_out(last["evidence_reserve"])
+    assert last["history_left_out"] > left_out(0)
 
 
 # --- the reserve ---------------------------------------------------------------------------

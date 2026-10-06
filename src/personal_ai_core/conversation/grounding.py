@@ -381,6 +381,14 @@ class RenderedEvidenceCost:
 
 
 # P1-3 (R3): a grounded turn's history leaves room for this many passages.
+#
+# Known limitation, measured (not a guarantee of the right passage): with the
+# retrieval stack as built, retrieval alone ranks the document a bench case
+# cites within its top two for 8 of 8 English questions but 6 of 8 Arabic ones
+# (`evals/bench` kb-* cases; kb-deploy-day and kb-leave-carryover rank it
+# third in Arabic). Once the history fills the window only these two are
+# guaranteed room, so those two Arabic questions can lose their source in a
+# long session. Left at two for v1 by the owner's decision.
 EVIDENCE_RESERVE_ITEMS = 2
 
 
@@ -496,8 +504,17 @@ class ContextBuilder:
         passage at all, silently. The reserve is the rendered cost of what
         retrieval returned -- its section preamble and its passages, priced
         exactly as the assembler charges them -- capped at the first TWO
-        distinct passages. Zero when no passage came back, so a turn without
-        evidence keeps the whole room for its history.
+        distinct passages. Zero only when retrieval returned no passage: then,
+        and only then, the turn keeps the whole room for its history.
+
+        Known limitation: "returned no passage" is not "needs no evidence".
+        The vector arm has no similarity floor, so against a non-empty corpus
+        retrieval returns passages for any message -- "ok", "thanks", "شكراً"
+        included -- and the turn reserves for them. In practice the reserve is
+        zero only when no chunk is eligible: an empty corpus, an empty query,
+        or no chunk in (or undeclared for) the turn's language. Recorded, not
+        changed, for v1
+        (`test_an_off_topic_turn_over_a_populated_corpus_still_reserves`).
 
         Documents only: a recalled memory is not reserved for, and one that
         outranks the second passage can still take that passage's room.
