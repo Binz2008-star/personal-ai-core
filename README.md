@@ -42,14 +42,25 @@ earlier run to continue it.
 like answers. It is read into every conversation and every agent task, in every session.
 It stays a file you can open and edit. `pac --remember "I prefer answers in Arabic"` adds a
 line without opening it. A `projects.md` beside it -- one paragraph per project -- is read
-with it, so the Core knows what you mean by a project's name. Together they are capped at
-12000 characters, because they are sent with every turn.
+with it, so the Core knows what you mean by a project's name. Together they are capped in
+tokens against the model's window -- about 4300 of an 8192-token window, leaving the rest for
+the conversation and its evidence -- because they are sent with every turn; Arabic costs about
+twice the tokens of English per character. `pac` and `--remember` refuse a profile over the cap
+and say how much to shorten it. For the same reason they are no place
+for a key or a password: `--remember` refuses one, and one already in the file is withheld
+from the model, with a line saying where it is.
 
 Configuration is environment variables, all optional: `PAC_BOSS_MODEL`,
-`PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`.
+`PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`,
+`PAC_PROFILE`, and `PAC_LANGUAGE_GUARD` (`0` turns off the reply-language check of ADR-019).
 
-**Backing up the database.** It is one SQLite file in WAL mode, so its latest writes can sit
-beside it in `core.db-wal` and `core.db-shm`. Copy all three together, with no `pac` running.
+**Finding a conversation again.** `pac --sessions` lists the stored conversations,
+newest first, with their ids; `pac --session ID` continues one. It only reads.
+
+**Backing up the database.** `pac --backup PATH` copies it, consistently and checked, safe
+while another `pac` runs; it never overwrites PATH, and `pac --database PATH` uses the copy.
+By hand: it is one SQLite file in WAL mode, so its latest writes can sit beside it in
+`core.db-wal` and `core.db-shm`. Copy all three together, with no `pac` running.
 If `pac` says the file cannot be read, copy those three before anything else, then keep working
 with `--database` and another path. If it says the file is busy, another `pac` is using it.
 
@@ -88,7 +99,7 @@ verifier decide what happens (`docs/AGENT_ARCHITECTURE.md`, `docs/ADR/ADR-023-pl
 | `write_file` | medium | runs; never a secret; can be undone |
 | `run_command` | high | **asks you**, every time; an allowlist of read-only and checking commands, no shell. A check is not read-only: `pytest` runs the project's own code, and the project's configuration can make `ruff` or `mypy` write files |
 | `delete_file` | critical | **asks you**, every time; can be undone |
-| `web_search` | medium | runs; sends the query to DuckDuckGo and nothing else |
+| `web_search` | high | **asks you**, for every query; sends it to DuckDuckGo and nothing else -- the query is what could carry data out |
 | `fetch_url` | high | **asks you**, for every URL; reads one page as text |
 | `shell` | high | **asks you**, for every command; anything your terminal can do, pipes included. It starts in the workspace, cannot be undone, and sees only a fixed set of environment variables (locations, locale, system settings), never your tokens or keys |
 
@@ -118,7 +129,9 @@ machine and what the agent reads travels there. The agent is told that text from
 is data and not instructions, but a local 7B model's resistance to a page written to
 mislead it has not been measured.
 
-**Status: Phase 4 — Memory-Aware Context Recall ACCEPTED / MERGED (PR #2 — MERGED, main `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`, implementation `e8062ff2fa8b6eb5a4471ac8475f29bed76fd369`).**
+**Status: Phase 6 — production persistence (ADR-016) ACCEPTED (PR #73, 2026-09-25); v1.0
+stabilization in progress.** [`PROJECT_STATE.md`](PROJECT_STATE.md) is the record of what is
+merged; this list is the summary.
 
 Phases:
 - **Phase 0** — HISTORICAL / COMPLETED — core source audit, evidence freeze, extraction matrix (no separate gate; see [`docs/COMPONENT_EXTRACTION_MATRIX.md`](docs/COMPONENT_EXTRACTION_MATRIX.md))
@@ -136,7 +149,11 @@ Phases:
 - **Phase 4** — ACCEPTED / MERGED (`e8062ff2fa8b6eb5a4471ac8475f29bed76fd369` → `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`, branch `claude/phase-4-memory-aware-context`, PR #2 — MERGED)
   Session-scoped MemoryReader, deterministic retrieval, MemoryRetrievalError, hybrid document/memory context, shared token budget, Grounding (`memory_enabled`), degraded failure, ADR-009.
   Tests: 494 passed / 14 skipped. pyright: 0 errors. Architectural review: PASS. Post-commit audit: PASS.
-- **Phase 5** — NOT AUTHORIZED / DESIGN NOT STARTED — UNAUTHORIZED / FUTURE DESIGN (no cross-session recall approval; no contract)
+- **Phase 5** — ACCEPTED (PR #69, 2026-09-24) — memory ownership derived from the session
+  (ADR-014) and recall scope on the query (ADR-015): session-scoped by default, user scope
+  opt-in.
+- **Phase 6** — ACCEPTED (PR #72 backend, PR #73 wiring, 2026-09-25) — a PostgreSQL backend
+  (ADR-016) beside SQLite, composed as `build_server_service`. `pac` itself still uses SQLite.
 
 ## Start here
 
@@ -202,7 +219,9 @@ assumption to bake in silently.
 3. **Boss model** — `huihui_ai/qwen2.5-abliterate:7b` (config only)
 4. **No dead enum members** — every `RetrievalMethod` / `ExclusionReason` has a producer
 5. **SealedMemoryStore** — remains sealed until explicit authorization
-6. **No Neon/pgvector/Postgres/migrations** — without explicit owner authorization
+6. **No Neon/pgvector/Postgres/migrations** — without explicit owner authorization (ADR-016
+   authorized the PostgreSQL backend that exists; pgvector, migrations and any production
+   schema change still need it)
 7. **Source repositories never modified** — Rico, unified-llm-local, second-brain-kb are read-only
 
 ## Phase progression
@@ -210,7 +229,7 @@ assumption to bake in silently.
 ```
 Phase 0: source audit + evidence freeze + extraction matrix
          ↓
-Phase 1: core foundation vertical slice        (PARTIAL — never closed)
+Phase 1: core foundation vertical slice        (accepted 2026-10-03)
          ↓
 Phase 2: knowledge + context foundations
          ↓
@@ -218,7 +237,9 @@ Phase 3: memory domain + promotion + persistence contracts + write path
          ↓
 Phase 4: memory READ/RECALL enrichment of conversation context (session-scoped)
          ↓
-Phase 5: NOT AUTHORIZED
+Phase 5: memory ownership and recall scope (ADR-014, ADR-015)
+         ↓
+Phase 6: production persistence, PostgreSQL beside SQLite (ADR-016)
 ```
 
 Explicit distinction:
@@ -228,18 +249,24 @@ Explicit distinction:
 
 ## Current limitations (accepted)
 
-- Phase 4 recall is **session-scoped** — no cross-session recall
+- Recall is **session-scoped** by default; user scope (ADR-015) is opt-in on the query, and
+  `pac` does not opt in
 - No semantic embedding-based memory ranking
 - Memory retrieval is enrichment/degradation, not a write path
 - Evidence is charged at its rendered cost (F-4, #52). The provider's own chat-template
   tokens are still an estimate inside the fixed `DEFAULT_OVERHEAD`
 - `pac` retrieves only from documents named with `--documents` on that run. The corpus is
   not stored, and chunk ids in recorded events refer to the run that produced them
-- Retrieval uses a hashing embedder and a lexical index, with no semantic model; memory
-  recall is not wired into `pac`
-- No Neon, no pgvector, no server database and no migrations. The durable store is one
-  SQLite file and `sqlite3` is stdlib, so the project still has no runtime dependencies
+- Retrieval uses a hashing embedder and a lexical index, with no semantic model
+- Memory recall is wired into `pac --documents`, but nothing in `pac` writes memories: the
+  promotion pipeline (`ExperiencePipeline`) has no caller in `pac`, so recall finds nothing
+  there. Feedback (`--feedback`, `--observations`) is recorded and shown, and changes no turn
+- `pac`'s durable store is one SQLite file and `sqlite3` is stdlib, so `pac` has no runtime
+  dependencies. The PostgreSQL backend (ADR-016) needs the `server` extra and is not used by
+  `pac`. No pgvector, no migrations: a database from another schema version is refused
 
 ## Current state
 
-Phase 4 (PR #2) — **MERGED** to `main` at `bbbf4c30aad8c7064d920a68249ddd8e9bd2d43a`. Phase 5 — NOT AUTHORIZED / FUTURE DESIGN.
+Phase 6 is the accepted phase. The v1.0 stabilization items -- what they are and which are
+merged -- are tracked in [`PROJECT_STATE.md`](PROJECT_STATE.md) and the pull requests that
+close them; this file does not repeat a commit hash that the next merge would make stale.
