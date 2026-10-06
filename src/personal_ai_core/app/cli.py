@@ -1228,16 +1228,31 @@ def _agent_session(*, agent, session_id, lines, out, err,
                 ),
             )
         except KeyError:
+            # Raised before anything ran: there is nothing to undo.
             print(f"no such session: {session_id}", file=out)
             return 2
+        # N3: however a task ends early, the owner hears what it changed and
+        # is offered the undo. Before this, only a budget stop asked; a model
+        # server that failed mid-task, or a Ctrl-C, left the files changed and
+        # the rollback points in memory, gone at exit.
         except ContextOverflowError as exc:
             # ADR-005: refused rather than sent and silently cut by the server.
             print(f"this conversation no longer fits the model: {exc}.", file=out)
             print("start a new session (run pac without --session) to continue.", file=out)
-            return 1
+            return 130 if _offer_undo(agent, lines, out) else 1
         except ProviderError as exc:
             _explain_provider_failure(exc, settings or Settings(), out)
-            return 1
+            return 130 if _offer_undo(agent, lines, out) else 1
+        except KeyboardInterrupt:
+            print(file=out)
+            print("interrupted: the task was stopped before it finished.", file=out)
+            _offer_undo(agent, lines, out)
+            return 130
+        except STORE_ERRORS:
+            # The store's own sentence is printed by `main`; the files are not
+            # in the store, so their undo is offered first.
+            _offer_undo(agent, lines, out)
+            raise
         window_due = True
         if outcome.finished:
             print(f"{REPLY}{outcome.answer}", file=out)
@@ -1246,23 +1261,46 @@ def _agent_session(*, agent, session_id, lines, out, err,
             agent.checkpoints.commit()
             continue
         print(f"{outcome.stopped_reason}", file=out)
-        if outcome.touched_files and _ask(
-            f"  ? undo {len(outcome.touched_files)} file change(s) from this task "
-            f"({', '.join(outcome.touched_files)})? [y/N] ",
-            lines,
-            out,
-        ):
-            try:
-                restored = agent.checkpoints.rollback()
-            except RollbackIncomplete as exc:
-                if exc.restored:
-                    print(f"         restored: {', '.join(exc.restored)}", file=out)
-                print(f"         NOT restored: {', '.join(exc.unrestored)}", file=out)
-            else:
-                print(f"         restored: {', '.join(restored)}", file=out)
-        else:
-            agent.checkpoints.commit()
+        if _offer_undo(agent, lines, out):
+            return 130
     code = window_verdict()
     if code is not None:
         return code
     return 2 if invalid_tasks else 0
+
+
+def _offer_undo(agent, lines, out) -> bool:
+    """Offer to undo what this task's file tools changed. True if interrupted.
+
+    Nothing touched: nothing is asked. End of input keeps the changes, as does
+    a Ctrl-C at the question (N3, decisions A and B: keep is the default
+    everywhere). Kept or not, the owner is told which files.
+    """
+    touched = agent.checkpoints.touched()
+    if not touched:
+        agent.checkpoints.commit()
+        return False
+    try:
+        undo = _ask(
+            f"  ? undo {len(touched)} file change(s) from this task "
+            f"({', '.join(touched)})? [y/N] ",
+            lines,
+            out,
+        )
+    except KeyboardInterrupt:
+        print(file=out)
+        print(f"         kept: {', '.join(touched)}", file=out)
+        agent.checkpoints.commit()
+        return True
+    if not undo:
+        agent.checkpoints.commit()
+        return False
+    try:
+        restored = agent.checkpoints.rollback()
+    except RollbackIncomplete as exc:
+        if exc.restored:
+            print(f"         restored: {', '.join(exc.restored)}", file=out)
+        print(f"         NOT restored: {', '.join(exc.unrestored)}", file=out)
+    else:
+        print(f"         restored: {', '.join(restored)}", file=out)
+    return False
