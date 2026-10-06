@@ -42,6 +42,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ..core.agent import AgentTaskContract, AuditRecord, Decision, ToolRequest
 from ..core.context import ContextAllocation
+from ..core.errors import ProviderError
 from ..core.contracts import (
     ContextBudgetPolicy,
     EventRepository,
@@ -607,9 +608,40 @@ class AgentLoop:
         Raises KeyError for a session `session_exists` does not know, before
         the model is called or anything is recorded: the same refusal, and the
         same exception, as ConversationService.send (F-2).
+
+        A run that ends by an exception -- the model server failing, an
+        interrupt, a store error -- still records its end (N3): AGENT_FINISHED
+        with `finished: false`, a classification of what ended it and the
+        files it touched, never the error's text. Then the exception is
+        raised again, unchanged, for the caller to explain and to offer the
+        undo. If that record cannot be written either, the original exception
+        is the one raised.
         """
         if self._session_exists is not None and not self._session_exists(session_id):
             raise KeyError(f"unknown session: {session_id}")
+        contract = task if isinstance(task, AgentTaskContract) else None
+        audited = len(self._executor.audit.records())
+        try:
+            return self._run(task, session_id=session_id, on_step=on_step,
+                             on_protocol_error=on_protocol_error)
+        except BaseException as exc:
+            try:
+                self._record_abnormal_end(
+                    exc, session_id, contract,
+                    steps=len(self._executor.audit.records()) - audited,
+                )
+            except Exception:  # noqa: BLE001 -- the original failure is the one to report
+                pass
+            raise
+
+    def _run(
+        self,
+        task: str | AgentTaskContract,
+        *,
+        session_id: str,
+        on_step: Callable[[Step], None] | None,
+        on_protocol_error: Callable[[str], None] | None,
+    ) -> AgentOutcome:
         if isinstance(task, AgentTaskContract):
             contract, task_text = task, task.task_text
         else:
@@ -987,6 +1019,45 @@ class AgentLoop:
                 type=EventType.AGENT_FINISHED,
                 actor="agent",
                 payload=payload,
+            )
+        )
+
+    def _record_abnormal_end(
+        self,
+        exc: BaseException,
+        session_id: str,
+        contract: AgentTaskContract | None,
+        *,
+        steps: int,
+    ) -> None:
+        """AGENT_FINISHED for a run an exception ended (N3).
+
+        A classification only: the provider's failure kind, "interrupted", or
+        the exception's type name -- never its message, which can quote a
+        host, a path or the workspace (the repository's rule, P1-8).
+        """
+        if self._events is None:
+            return
+        if isinstance(exc, ProviderError):
+            reason = f"provider_failure ({exc.kind})"
+        elif isinstance(exc, KeyboardInterrupt):
+            reason = "interrupted"
+        else:
+            reason = f"internal_error ({type(exc).__name__})"
+        self._events.append(
+            Event(
+                session_id=session_id,
+                type=EventType.AGENT_FINISHED,
+                actor="agent",
+                payload={
+                    "finished": False,
+                    "steps": steps,
+                    "stopped_reason": reason,
+                    "touched_files": list(self._touched()),
+                    "action_required": (
+                        contract.action_required if contract is not None else "no contract"
+                    ),
+                },
             )
         )
 
