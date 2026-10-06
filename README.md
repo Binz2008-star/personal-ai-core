@@ -43,14 +43,18 @@ like answers. It is read into every conversation and every agent task, in every 
 It stays a file you can open and edit. `pac --remember "I prefer answers in Arabic"` adds a
 line without opening it. A `projects.md` beside it -- one paragraph per project -- is read
 with it, so the Core knows what you mean by a project's name. Together they are capped at
-12000 characters, because they are sent with every turn.
+12000 characters, because they are sent with every turn. For the same reason they are no place
+for a key or a password: `--remember` refuses one, and one already in the file is withheld
+from the model, with a line saying where it is.
 
 Configuration is environment variables, all optional: `PAC_BOSS_MODEL`,
 `PAC_BOSS_CONTEXT_WINDOW`, `PAC_OLLAMA_HOST`, `PAC_REQUEST_TIMEOUT_SECONDS`, `PAC_DATABASE`,
 `PAC_PROFILE`, and `PAC_LANGUAGE_GUARD` (`0` turns off the reply-language check of ADR-019).
 
-**Backing up the database.** It is one SQLite file in WAL mode, so its latest writes can sit
-beside it in `core.db-wal` and `core.db-shm`. Copy all three together, with no `pac` running.
+**Backing up the database.** `pac --backup PATH` copies it, consistently and checked, safe
+while another `pac` runs; it never overwrites PATH, and `pac --database PATH` uses the copy.
+By hand: it is one SQLite file in WAL mode, so its latest writes can sit beside it in
+`core.db-wal` and `core.db-shm`. Copy all three together, with no `pac` running.
 If `pac` says the file cannot be read, copy those three before anything else, then keep working
 with `--database` and another path. If it says the file is busy, another `pac` is using it.
 

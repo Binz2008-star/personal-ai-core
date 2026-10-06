@@ -21,6 +21,7 @@ from personal_ai_core.agent.loop import (
     single_field_tools,
 )
 from personal_ai_core.agent.policy import RiskPolicy
+from personal_ai_core.context import ReserveBasedBudgetPolicy, ScriptAwareTokenEstimator
 from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import Workspace
 from personal_ai_core.agent.tools import Shell, default_tools
@@ -56,8 +57,9 @@ def ws(tmp_path):
 def _loop(ws, script, *, lenient, events=None):
     checkpoints = Checkpoints(ws)
     executor = ToolExecutor(default_tools(ws, checkpoints), RiskPolicy())
-    return AgentLoop(provider=script, model="boss", executor=executor, checkpoints=checkpoints,
-                     events=events, lenient_protocol=lenient)
+    return AgentLoop(provider=script, model="boss", executor=executor, context_window=8192, budget_policy=ReserveBasedBudgetPolicy(),
+                     estimator=ScriptAwareTokenEstimator(),
+                     checkpoints=checkpoints, events=events, lenient_protocol=lenient)
 
 
 SINGLE = {"read_file": "path", "run_command": "command", "delete_file": "path"}
@@ -134,7 +136,8 @@ def test_off_by_default_a_numeric_answer_is_still_a_protocol_error(ws):
     checkpoints = Checkpoints(ws)
     loop = AgentLoop(provider=Script('{"answer": 42}', '{"answer": "42"}'), model="boss",
                      executor=ToolExecutor(default_tools(ws, checkpoints), RiskPolicy()),
-                     checkpoints=checkpoints)
+                     context_window=8192, budget_policy=ReserveBasedBudgetPolicy(),
+                     estimator=ScriptAwareTokenEstimator(), checkpoints=checkpoints)
     outcome = loop.run("what is the answer?", session_id="s1")
     assert outcome.protocol_errors == 1 and outcome.lenient_parses == ()
     for function in (build_agent, run_agent_task):
