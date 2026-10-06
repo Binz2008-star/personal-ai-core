@@ -51,6 +51,7 @@ from ..core.contracts import (
     TokenEstimator,
     ToolCallingProvider,
 )
+from ..core.redaction import RedactionError
 from ..core.domain import (
     Event,
     EventType,
@@ -63,7 +64,7 @@ from ..core.domain import (
 from .environment import EnvironmentContext
 from .executor import ToolExecutor
 from .recovery import ActionBudget, Checkpoints
-from .verifier import Verifier
+from .verifier import SecretShapeRedactor, Verifier
 
 MAX_TASK_CHARS = 8_000
 RESULT_TOKEN_LENGTH = 16
@@ -449,6 +450,23 @@ def fence(label: str, content: str) -> str:
     return f"<<<result {token} {label}>>>\n{content}\n<<<end result {token}>>>"
 
 
+_OUTPUT_UNCHECKED = "[output withheld: it could not be checked for secrets]"
+
+
+def _withheld(text: str) -> str:
+    """`text` with each secret-shaped value replaced by the withheld marker.
+
+    Fail-closed, as everywhere a check guards what is shown (ADR-018 §3.8): a
+    check that could not run withholds the whole text, never passes it.
+    """
+    if not text:
+        return text
+    try:
+        return SecretShapeRedactor().redact(text).text
+    except RedactionError:
+        return _OUTPUT_UNCHECKED
+
+
 @dataclass(frozen=True, slots=True)
 class _Window:
     """`core.contracts.ModelSpecLike` for the model this loop calls."""
@@ -475,15 +493,25 @@ def _describe(step: Step, *, limit: int | None = None) -> str:
     result = record.result
     if result is None:
         return "no result"
-    status = "ok" if result.ok else f"failed ({result.error})"
+    status = "ok" if result.ok else f"failed ({_withheld(result.error or '')})"
     if record.decision.decision is Decision.ASK and not record.confirmed_by_user:
         status = "the user did not confirm; nothing ran"
-    body = result.output or "(no output)"
+    # N7: a secret-shaped value in what a tool returned -- a key in a file a
+    # command printed, a token in a page -- is withheld before the model reads
+    # it, as a chat reply's is before the owner does (P0-6). The verifier
+    # still fails the step on it; that only charged the budget, and the value
+    # went to the model whole.
+    # Withheld first, then cut (N2): a cut taken first could split a secret
+    # into a fragment the shape check no longer recognises.
+    body = _withheld(result.output) or "(no output)"
     if limit is not None:
         body = body[:limit] + FITTED_MARKER
     elif result.truncated:
         body += "\n[output truncated]"
-    verdict = "" if step.verified else "\nverification failed: " + "; ".join(step.failed_checks)
+    # The verifier quotes a failed tool's error in its checks, so they are
+    # withheld from the same way.
+    verdict = "" if step.verified else "\nverification failed: " + "; ".join(
+        _withheld(check) for check in step.failed_checks)
     return fence(f"{record.request.tool} -> {status}", body) + verdict
 
 
@@ -895,7 +923,10 @@ class AgentLoop:
             return whole
         if room < MIN_RESULT_TOKENS:
             return None
-        output = step.record.result.output if step.record.result is not None else ""
+        # Sized on the output as `_describe` cuts it: already withheld (N7).
+        output = (
+            _withheld(step.record.result.output) if step.record.result is not None else ""
+        )
         low, high = 0, len(output)  # the longest prefix whose rendering fits
         while low < high:
             middle = (low + high + 1) // 2
