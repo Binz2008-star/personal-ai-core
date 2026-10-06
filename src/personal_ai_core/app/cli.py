@@ -365,6 +365,22 @@ def _remember(path: Path | None, text: str, settings: Settings, out: TextIO) -> 
     if path is None:
         print(f"no profile to add to: pass --profile PATH or set ${PROFILE_ENV}", file=out)
         return 2
+    # The profile is sent to the model with every turn, conversation and
+    # agent alike, and to whatever host PAC_OLLAMA_HOST names. A key, token or
+    # password typed here would go with each one, so it is not written; the
+    # value is not repeated back either.
+    try:
+        shapes = build_reply_redactor().redact(text).counts
+    except RedactionError:
+        print("that could not be checked for secrets, so it was not remembered", file=out)
+        return 2
+    if shapes:
+        print(
+            f"that looks like a secret ({', '.join(sorted(shapes))}); the profile is sent "
+            "to the model with every turn, so it was not remembered",
+            file=out,
+        )
+        return 2
     existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
     if not existing.endswith("\n"):
         existing += "\n"
@@ -452,6 +468,25 @@ def _load_profile(path: Path | None, settings: Settings, out: TextIO) -> str | N
                 file=out,
             )
             return None
+    # A secret already in the file -- written by hand, or before --remember
+    # refused them -- is withheld from what the model reads, the way a reply's
+    # is withheld from what is printed. The file is not changed: it is the
+    # owner's, and the line says where to look.
+    if not text:
+        return text
+    try:
+        shown = build_reply_redactor().redact(text)
+    except RedactionError:
+        print("the profile could not be checked for secrets, so it is not used", file=out)
+        return None
+    if shown.counts:
+        print(
+            f"the profile holds something secret-shaped (looks like: "
+            f"{', '.join(sorted(shown.counts))}); it is withheld from the model. Remove it "
+            f"from {' or '.join(str(f) for f in _profile_files(path))}.",
+            file=out,
+        )
+        return shown.text
     return text
 
 
