@@ -193,7 +193,8 @@ def agent(answer: str, tmp_path) -> str:
     workspace = tmp_path / "ws"
     workspace.mkdir(exist_ok=True)
     out = io.StringIO()
-    code = main(["--ephemeral", "--agent", "--workspace", str(workspace)],
+    # A database, not --ephemeral: the agent refuses to run without its record (#220).
+    code = main(["--database", str(tmp_path / "core.db"), "--agent", "--workspace", str(workspace)],
                 transport=transport_saying(json.dumps({"answer": answer})),
                 stdin=iter(["[action_required=false] what did I tell you?"]),
                 stdout=out, env=NO_GUARD)

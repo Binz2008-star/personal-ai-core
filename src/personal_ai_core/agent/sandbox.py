@@ -105,9 +105,22 @@ class Workspace:
     contains it). Each is reserved together with its SQLite companion files,
     and a reserved file is refused by `resolve`, so for every tool and every
     purpose: read, search, write and delete. Listing hides it.
+
+    `owner_files` are the owner's profile and projects files (N4). They are
+    composed into every later turn's instructions, so an agent that could
+    write one -- MEDIUM risk, never asked -- could rewrite what every later
+    conversation obeys. They are reserved exactly as the database is, but
+    alone: they have no companion files. A path that does not exist yet is
+    reserved too, so the agent cannot create a profile where there was none.
     """
 
-    def __init__(self, root: Path, *, reserved: Iterable[Path] = ()) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        reserved: Iterable[Path] = (),
+        owner_files: Iterable[Path] = (),
+    ) -> None:
         resolved = Path(root).resolve()
         if not resolved.is_dir():
             raise ValueError(f"workspace is not a directory: {root}")
@@ -117,17 +130,23 @@ class Workspace:
             for path in reserved
             for companion in SQLITE_COMPANIONS
         )
+        self._owner_files = tuple(Path(path).resolve() for path in owner_files)
 
     def is_reserved(self, path: Path) -> bool:
-        """Whether `path` is, or is the same file as, a reserved one.
+        """Whether `path` is, or is the same file as, a reserved one -- the
+        database (with its companions) or one of the owner's files.
 
         Compared by resolved name (case-folded where the platform folds case)
         and, for files that exist, by identity: a hard link, or a spelling a
         case-insensitive filesystem maps to the same file, is the same file.
         """
+        return self._matches(path, self._reserved) or self._matches(path, self._owner_files)
+
+    @staticmethod
+    def _matches(path: Path, reserved_paths: tuple[Path, ...]) -> bool:
         candidate = Path(path).resolve()
         folded = os.path.normcase(str(candidate))
-        for reserved in self._reserved:
+        for reserved in reserved_paths:
             if folded == os.path.normcase(str(reserved)):
                 return True
             try:
@@ -170,9 +189,13 @@ class Workspace:
         # (`GIT~1`), or a link to the directory -- resolves to the real one.
         if any(part.lower() == ".git" for part in resolved.relative_to(self.root).parts):
             raise SandboxError(f".git is not reachable from the workspace: {path}")
-        if self.is_reserved(resolved):
+        if self._matches(resolved, self._reserved):
             raise SandboxError(
                 f"the Core's own database is not reachable from the workspace: {path}"
+            )
+        if self._matches(resolved, self._owner_files):
+            raise SandboxError(
+                f"the owner's profile is not reachable from the workspace: {path}"
             )
         return resolved
 

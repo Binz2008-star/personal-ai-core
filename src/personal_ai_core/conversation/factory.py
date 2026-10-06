@@ -10,10 +10,14 @@ by accident.
 """
 from __future__ import annotations
 
+import errno
+import os
 import sqlite3
+import stat
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 from ..agent import (
     Checkpoints,
@@ -29,7 +33,6 @@ from ..agent import (
 from ..agent.environment import EnvironmentContext
 from ..agent.executor import Confirm
 from ..agent.loop import AgentLoop
-from ..agent.recovery import atomic_write_text
 from ..agent.web import Fetch
 from ..context import (
     PatternSecretRedactor,
@@ -77,6 +80,13 @@ from ..persistence.sqlite import (
     SqliteUserRepository,
     connect,
 )
+from ..persistence.sqlite import SchemaVersionMismatch as SqliteSchemaVersionMismatch
+# Re-exported for `pac --sessions`: the entry point may not import persistence.
+from ..persistence.sqlite import SessionSummary as SessionSummary
+from ..persistence.sqlite import list_sessions as list_sessions
+# Re-exported for `pac --backup`: the entry point may not import persistence.
+from ..persistence.sqlite import BackupError as BackupError
+from ..persistence.sqlite import backup as backup_database  # noqa: F401 -- re-exported
 from ..persistence.postgres import (
     DatabaseIdentity,
     PostgresEventRepository,
@@ -119,6 +129,71 @@ def _budget_policy(identity: DefaultIdentityComposer, settings: Settings) -> Res
     return ReserveBasedBudgetPolicy(
         identity_reserve=identity.tokens(estimator),
         guard_reserve=estimator.estimate(GUARD_NOTE) if settings.language_guard else 0,
+    )
+
+
+# Kept free, beside the owner's profile, for the conversation's history and
+# its retrieved evidence: room for at least two retrieved passages, per the R3
+# budget math. A profile that leaves less than this is refused (F-A): with the
+# window spent on who the owner is, there is none left for what they asked.
+PROFILE_FREE_FLOOR = 2048
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileBudget:
+    """What the owner's profile costs every turn, against what it may cost.
+
+    `tokens` is what the profile adds to the identity message, measured as
+    the identity with it minus the identity without it, by the estimator the
+    budget uses. `allowed` is what is left of the active model's window after
+    the generation reserve, the overhead, the guard reserve, the identity
+    without a profile and `PROFILE_FREE_FLOOR`. `excess_chars` is how many
+    characters must come off the end of the profile for it to fit; 0 when it
+    fits.
+    """
+
+    tokens: int
+    allowed: int
+    window: int
+    excess_chars: int
+
+    @property
+    def fits(self) -> bool:
+        return self.tokens <= self.allowed
+
+
+def profile_budget(profile: str, settings: Settings) -> ProfileBudget:
+    """Measure `profile` against `settings.boss_context_window` (F-A).
+
+    The same composer, estimator, reserves and window the services use, so
+    a profile accepted here is one the turn's budget can hold with
+    `PROFILE_FREE_FLOOR` to spare. Nothing is cut: the caller refuses.
+    """
+    estimator = ScriptAwareTokenEstimator()
+    bare = DefaultIdentityComposer()
+    bare_tokens = bare.tokens(estimator)
+    model = ModelRegistry.from_settings(settings, provider="profile-check").active
+    allocation = _budget_policy(bare, settings).allocate(model=model, history_tokens=0)
+    allowed = allocation.context_window - allocation.spoken_for - PROFILE_FREE_FLOOR
+
+    def cost(text: str) -> int:
+        return DefaultIdentityComposer(profile=text).tokens(estimator) - bare_tokens
+
+    tokens = cost(profile)
+    excess = 0
+    if tokens > allowed:
+        # The fewest characters off the end that make it fit: the cost only
+        # grows with the text, so a binary search finds it.
+        low, high = 1, len(profile)
+        while low < high:
+            middle = (low + high) // 2
+            if cost(profile[: len(profile) - middle]) <= allowed:
+                high = middle
+            else:
+                low = middle + 1
+        excess = low
+    return ProfileBudget(
+        tokens=tokens, allowed=allowed, window=model.context_window, excess_chars=excess
     )
 
 
@@ -740,6 +815,7 @@ def build_agent(
     confirm: Confirm | None = None,
     events: EventRepository | None = None,
     database: str | Path | None = None,
+    owner_files: Sequence[str | Path] = (),
     session_exists: Callable[[str], bool] | None = None,
     web_fetch: Fetch | None = None,
     environment_context: bool = False,
@@ -760,6 +836,11 @@ def build_agent(
     `database` is the file the Core's own records live in. It is reserved
     from the workspace -- with its SQLite companions -- so no tool can read,
     overwrite or delete it even when the workspace contains it (F-1).
+
+    `owner_files` are the owner's profile and projects files, wherever the
+    entry point resolved them, existing or not (N4). They are reserved the
+    same way, without companions: the profile is composed into every later
+    turn's instructions, and `write_file` runs without asking.
 
     `session_exists` is REQUIRED whenever `events` is given -- pass the
     conversation service's `has_session`. Events recorded against a session
@@ -800,7 +881,9 @@ def build_agent(
     )
     registry = ModelRegistry.from_settings(settings, provider=provider.name)
     sandbox = Workspace(
-        Path(workspace), reserved=() if database is None else (Path(database),)
+        Path(workspace),
+        reserved=() if database is None else (Path(database),),
+        owner_files=tuple(Path(path) for path in owner_files),
     )
     checkpoints = Checkpoints(sandbox)
     # The workspace tools, then the reach beyond it: the owner's shell and the
@@ -813,16 +896,24 @@ def build_agent(
         FetchUrl(web_fetch),
     ]
     executor = ToolExecutor(tools, RiskPolicy(), confirm=confirm)
+    # N2: one composer and one estimator, so the identity reserve is funded
+    # from the very text the agent sends. No guard reserve: the agent has no
+    # language guard, and reserving for one would shrink every run for nothing.
+    estimator = ScriptAwareTokenEstimator()
+    identity = DefaultIdentityComposer(profile=settings.profile)
     loop = AgentLoop(
         provider=provider,
         model=registry.active.name,
         executor=executor,
+        context_window=registry.active.context_window,
+        budget_policy=ReserveBasedBudgetPolicy(identity_reserve=identity.tokens(estimator)),
+        estimator=estimator,
         checkpoints=checkpoints,
-        identity=DefaultIdentityComposer(profile=settings.profile),
+        identity=identity,
         events=events,
         session_exists=session_exists,
         environment=(
-            EnvironmentContext(sandbox.root, estimate=ScriptAwareTokenEstimator().estimate)
+            EnvironmentContext(sandbox.root, estimate=estimator.estimate)
             if environment_context
             else None
         ),
@@ -831,6 +922,41 @@ def build_agent(
         verify_completion=verify_completion,
     )
     return AgentSlice(loop=loop, executor=executor, checkpoints=checkpoints, workspace=sandbox)
+
+
+# What opening or writing the store can raise, for an entry point to catch.
+STORE_ERRORS: tuple[type[BaseException], ...] = (sqlite3.Error, SqliteSchemaVersionMismatch)
+
+
+def describe_store_failure(exc: BaseException, database: Path | None) -> str:
+    """One paragraph for the person at the terminal, from a STORE_ERRORS error.
+
+    Gap analysis P1-5: a second `pac` writing the same file, a damaged file
+    and a file from another schema version each ended in a traceback, which
+    says neither what happened nor what to do. Each now gets a sentence and
+    the safe next step. A damaged file is never repaired or replaced here:
+    the first step is a copy, with the `-wal` and `-shm` files that hold its
+    latest writes (ADR-010).
+    """
+    where = f"the database {database}" if database is not None else "the database"
+    text = str(exc)
+    if isinstance(exc, sqlite3.OperationalError) and ("locked" in text or "busy" in text):
+        return (f"{where} is busy: another pac, or another program, is writing to it. "
+                "Close the other one and try again.")
+    if isinstance(exc, SqliteSchemaVersionMismatch):
+        return f"{where} was written by a different version of pac: {text}"
+    if isinstance(exc, sqlite3.IntegrityError):
+        return f"{where} cannot be opened: {text}"
+    # sqlite's own words for a damaged file. Other DatabaseErrors (a disk I/O
+    # error, a read-only file) are not a sign of damage and are not called one.
+    if isinstance(exc, sqlite3.DatabaseError) and any(
+            words in text for words in ("not a database", "malformed", "corrupt")):
+        name = database.name if database is not None else "core.db"
+        return (f"{where} cannot be read ({text}); it may be damaged. Before anything "
+                f"else, copy it together with {name}-wal and {name}-shm if they exist: "
+                "they hold its latest writes. To keep working meanwhile, start a new one "
+                "with --database and another path.")
+    return f"{where} failed: {text}"
 
 
 def build_reply_redactor() -> SecretRedactor:
@@ -854,9 +980,35 @@ def save_owner_text(path: Path, text: str) -> None:
 
     Gap analysis P2-7: `--remember` rewrote profile.md in place, so a full
     disk or a crash mid-write left it truncated -- the owner's own text, sent
-    with every turn. This is the agent's atomic write (#214): a temporary
-    file beside it, fsynced, then renamed over it; on any failure the old
-    file stands. `app` may not import `agent`, so it is handed over here.
+    with every turn. Now a temporary file beside it is written, fsynced and
+    renamed over it; on any failure the old file stands byte for byte and the
+    temporary file is removed. It is written as `Path.write_text(text,
+    encoding="utf-8")` writes it (text mode). The file keeps its mode
+    (`mkstemp` makes 0600); a new one gets what `write_text` would give it.
+    A file the owner made read-only is not replaced: PermissionError, as an
+    in-place write would raise.
     """
-    atomic_write_text(path, text)
-
+    try:
+        mode: int | None = stat.S_IMODE(os.stat(path).st_mode)
+    except FileNotFoundError:
+        mode = None
+    if mode is not None and not os.access(path, os.W_OK):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+    if mode is None:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise

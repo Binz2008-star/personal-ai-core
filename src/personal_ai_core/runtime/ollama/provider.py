@@ -8,12 +8,14 @@ embedding calls were hard-wired in three files.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping, Sequence
 
 from ...core.domain import Message, ModelResponse, NativeToolCall, ToolDeclaration
 from ...core.errors import ProviderError
+from ..failures import transport_failure, with_one_retry
 
 # A transport takes (url, payload, timeout) and returns a decoded JSON object.
 Transport = Callable[[str, Mapping[str, Any], int], Mapping[str, Any]]
@@ -28,9 +30,11 @@ def http_transport(url: str, payload: Mapping[str, Any], timeout: int) -> Mappin
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise ProviderError(f"ollama request failed: {exc}") from exc
+        kind, status = transport_failure(exc)
+        raise ProviderError(f"ollama request failed: {exc}", kind=kind, status=status) from exc
     except json.JSONDecodeError as exc:
-        raise ProviderError(f"ollama returned invalid JSON: {exc}") from exc
+        raise ProviderError(f"ollama returned invalid JSON: {exc}",
+                            kind="invalid_response") from exc
 
 
 class OllamaProvider:
@@ -42,10 +46,12 @@ class OllamaProvider:
         *,
         timeout_seconds: int = 120,
         transport: Transport | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._host = host.rstrip("/")
         self._timeout = timeout_seconds
         self._transport: Transport = transport or http_transport
+        self._sleep = sleep
 
     @property
     def name(self) -> str:
@@ -59,12 +65,13 @@ class OllamaProvider:
         options: Mapping[str, Any] | None = None,
     ) -> ModelResponse:
         if not messages:
-            raise ProviderError("generate() requires at least one message")
+            raise ProviderError("generate() requires at least one message", kind="invalid_request")
         raw, message = self._chat(self._payload(model, messages, options))
         if "content" not in message:
             raise ProviderError(
                 "ollama response missing message.content; "
-                f"got keys: {sorted(raw)}"
+                f"got keys: {sorted(raw)}",
+                kind="invalid_response",
             )
         return self._response(raw, message, model, message["content"], ())
 
@@ -84,7 +91,8 @@ class OllamaProvider:
         shape is returned with no name, so the caller refuses it.
         """
         if not messages:
-            raise ProviderError("generate_with_tools() requires at least one message")
+            raise ProviderError("generate_with_tools() requires at least one message",
+                                kind="invalid_request")
         payload = self._payload(model, messages, options)
         payload["tools"] = [
             {"type": "function",
@@ -98,7 +106,8 @@ class OllamaProvider:
         if content is None and not calls:
             raise ProviderError(
                 "ollama response has neither message.content nor message.tool_calls; "
-                f"got keys: {sorted(raw)}"
+                f"got keys: {sorted(raw)}",
+                kind="invalid_response",
             )
         return self._response(raw, message, model, content if isinstance(content, str) else "", calls)
 
@@ -118,12 +127,14 @@ class OllamaProvider:
         return payload
 
     def _chat(self, payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
-        raw = self._transport(f"{self._host}/api/chat", payload, self._timeout)
+        raw = with_one_retry(lambda: self._transport(f"{self._host}/api/chat", payload, self._timeout),
+                             sleep=self._sleep)
         message = raw.get("message")
         if not isinstance(message, Mapping):
             raise ProviderError(
                 "ollama response missing message.content; "
-                f"got keys: {sorted(raw)}"
+                f"got keys: {sorted(raw)}",
+                kind="invalid_response",
             )
         return raw, message
 
