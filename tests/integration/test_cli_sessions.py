@@ -121,3 +121,12 @@ def test_it_does_not_combine_with_ephemeral_or_other_modes(tmp_path):
     assert code == 2 and "--ephemeral" in output
     code, output = pac(tmp_path, "--sessions", "--observations", transport=refuse_model)
     assert code == 2 and "--observations" in output
+
+
+def test_it_and_backup_refuse_each_other_and_nothing_is_copied(tmp_path):
+    start(tmp_path, "hello")
+    copy = tmp_path / "copy.db"
+    for argv in (("--sessions", "--backup", str(copy)), ("--backup", str(copy), "--sessions")):
+        code, output = pac(tmp_path, *argv, transport=refuse_model)
+        assert code == 2 and "--sessions" in output and "cannot be combined" in output
+        assert not copy.exists()
