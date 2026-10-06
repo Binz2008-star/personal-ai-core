@@ -34,8 +34,11 @@ from ..conversation.factory import (
     build_in_memory_service,
     build_persistent_service,
     build_reply_redactor,
+    BackupError,
+    backup_database,
     describe_loaded,
     describe_store_failure,
+    list_sessions,
     profile_budget,
     STORE_ERRORS,
 )
@@ -209,6 +212,25 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "show what the feedback recorded in --session amounts to, and exit. "
+            "Reads only; changes nothing and calls no model."
+        ),
+    )
+    parser.add_argument(
+        "--backup",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "copy the database to PATH, consistently and checked, and exit. Safe while "
+            "another pac runs; never overwrites PATH. Restore by using the copy with "
+            "--database, or by copying it back with no pac running."
+        ),
+    )
+    parser.add_argument(
+        "--sessions",
+        action="store_true",
+        help=(
+            "list the conversations stored in the database, newest first, and exit. "
             "Reads only; changes nothing and calls no model."
         ),
     )
@@ -657,6 +679,84 @@ def _observations(args, database: Path | None, settings: Settings, transport, ou
         slice_.close()
 
 
+def _sessions(args, database: Path | None, out: TextIO) -> int:
+    """List the stored conversations, newest first, and exit. Reads only.
+
+    A session id was printed once, when the conversation started; this is how
+    to find it again. Nothing is opened for writing and no model is called.
+    """
+    if database is None:
+        print("--sessions lists stored conversations; it cannot be used with --ephemeral",
+              file=out)
+        return 2
+    others = [flag for flag, given in (
+        ("--agent", args.agent), ("--documents", args.documents is not None),
+        ("--remember", args.remember is not None), ("--feedback", args.feedback is not None),
+        ("--correction", args.correction is not None), ("--observations", args.observations),
+        ("--session", args.session is not None), ("--backup", args.backup is not None)) if given]
+    if others:
+        print(f"--sessions lists and exits; it cannot be combined with {', '.join(others)}",
+              file=out)
+        return 2
+    if not database.is_file():
+        print(f"no stored conversations at {database}", file=out)
+        return 2
+    sessions = list_sessions(database)
+    if not sessions:
+        print(f"no conversations stored in {database} yet", file=out)
+        return 0
+    print(f"{len(sessions)} conversation(s) in {database}, newest first:", file=out)
+    for session in sessions:
+        started = session.started_at.strftime("%Y-%m-%d %H:%M")
+        last = (session.last_activity.strftime("%Y-%m-%d %H:%M")
+                if session.last_activity is not None else "-")
+        closed = "" if session.status == "active" else f"  ({session.status})"
+        print(f"  {session.id}  started {started}  last {last}  "
+              f"{session.messages} message(s){closed}", file=out)
+    print("continue one with --session ID (times are UTC)", file=out)
+    return 0
+
+
+def _backup(args, database: Path | None, out: TextIO) -> int:
+    """Copy the database to --backup PATH, check the copy, and exit.
+
+    The backup is SQLite's own, from a read-only connection: one consistent
+    snapshot, its latest writes included, safe while another pac runs. Nothing
+    is overwritten and no model is called.
+    """
+    if database is None:
+        print("--backup copies the stored conversations; it cannot be used with --ephemeral",
+              file=out)
+        return 2
+    others = [flag for flag, given in (
+        ("--agent", args.agent), ("--documents", args.documents is not None),
+        ("--remember", args.remember is not None), ("--feedback", args.feedback is not None),
+        ("--correction", args.correction is not None), ("--observations", args.observations),
+        ("--session", args.session is not None), ("--sessions", args.sessions)) if given]
+    if others:
+        print(f"--backup copies and exits; it cannot be combined with {', '.join(others)}",
+              file=out)
+        return 2
+    if not database.is_file():
+        print(f"no stored conversations at {database}", file=out)
+        return 2
+    destination = args.backup
+    if destination.resolve() == database.resolve():
+        print("--backup PATH must be another file than the database itself", file=out)
+        return 2
+    if not destination.parent.is_dir():
+        print(f"no such directory: {destination.parent}", file=out)
+        return 2
+    try:
+        size = backup_database(database, destination)
+    except BackupError as exc:
+        print(f"pac: {exc}", file=out)
+        return 2
+    print(f"backed up {database} to {destination} ({size} bytes), checked", file=out)
+    print(f"         to use it: pac --database {destination}", file=out)
+    return 0
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -717,6 +817,10 @@ def _main(
     lines = iter(stdin if stdin is not None else sys.stdin)
 
     database = None if args.ephemeral else _database_path(args.database, environment)
+    if args.backup is not None:
+        return _backup(args, database, out)
+    if args.sessions:
+        return _sessions(args, database, out)
     if args.observations:
         return _observations(args, database, settings, transport, out)
     if args.feedback is not None or args.correction is not None:
