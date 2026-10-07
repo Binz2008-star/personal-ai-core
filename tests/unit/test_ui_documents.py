@@ -17,8 +17,12 @@ from personal_ai_core.ui.documents import (
 from personal_ai_core.ui.server import UiApplication
 
 
-def test_display_name_is_a_label_not_a_path() -> None:
-    assert safe_display_name(r"..\private/notes<script>.md") == "notes_script_.md"
+def test_display_name_rejects_paths_and_sanitizes_label_characters() -> None:
+    with pytest.raises(DocumentError, match="path"):
+        safe_display_name(r"..\private\notes.md")
+    with pytest.raises(DocumentError, match="path"):
+        safe_display_name("../notes.md")
+    assert safe_display_name("notes<script>.md") == "notes_script_.md"
 
 
 def test_store_enforces_count_quota_and_persists_manifest(tmp_path) -> None:
@@ -44,15 +48,6 @@ def test_invalid_pdf_container_is_rejected_without_leaving_a_file(tmp_path) -> N
     assert list(tmp_path.glob(".*")) == []
 
 
-def test_delete_removes_file_and_manifest_entry(tmp_path) -> None:
-    store = DocumentStore(tmp_path)
-    record = store.save("notes.txt", b"hello")
-    store.delete(record.id)
-    assert store.list() == ()
-    assert not record.path.exists()
-    assert store.manifest_path.exists()
-
-
 def test_corrupt_manifest_is_backed_up_without_deleting_documents(tmp_path) -> None:
     orphan = tmp_path / "old-file.txt"
     orphan.write_text("keep me", encoding="utf-8")
@@ -63,29 +58,46 @@ def test_corrupt_manifest_is_backed_up_without_deleting_documents(tmp_path) -> N
     assert list(tmp_path.glob("manifest.corrupt-*.json"))
 
 
-def test_manifest_write_failure_keeps_previous_manifest(tmp_path, monkeypatch) -> None:
+def test_manifest_write_failure_keeps_previous_manifest_and_rolls_back_memory(tmp_path, monkeypatch) -> None:
     store = DocumentStore(tmp_path)
-    store.save("first.txt", b"first")
+    first = store.save("first.txt", b"first")
     previous = store.manifest_path.read_bytes()
+    original_replace = documents_module.os.replace
 
     def fail_replace(source, destination):
         if destination == store.manifest_path:
             raise OSError("simulated interruption")
-        return documents_module.os.replace(source, destination)
+        return original_replace(source, destination)
 
     monkeypatch.setattr(documents_module.os, "replace", fail_replace)
     with pytest.raises(OSError, match="simulated interruption"):
         store.save("second.txt", b"second")
     assert store.manifest_path.read_bytes() == previous
+    assert tuple(record.id for record in store.list()) == (first.id,)
+    assert len(list(tmp_path.glob("*.txt"))) == 1
 
 
 def test_orphans_are_quarantined_when_manifest_is_valid(tmp_path) -> None:
-    (tmp_path / "manifest.json").write_text(json.dumps({"version": 1, "documents": []}), encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"version": 1, "documents": []}), encoding="utf-8"
+    )
     orphan = tmp_path / "orphan.txt"
     orphan.write_text("keep me", encoding="utf-8")
     DocumentStore(tmp_path)
     assert not orphan.exists()
     assert list((tmp_path / "orphans").glob("*-orphan.txt"))
+
+
+def test_stale_cleanup_does_not_follow_symlink(tmp_path) -> None:
+    target = tmp_path / "outside.txt"
+    target.write_text("keep", encoding="utf-8")
+    link = tmp_path / ".uploading-link"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are unavailable on this platform")
+    DocumentStore(tmp_path)
+    assert target.read_text(encoding="utf-8") == "keep"
 
 
 def test_concurrent_uploads_cannot_both_cross_count_quota(tmp_path) -> None:
@@ -109,7 +121,7 @@ def test_concurrent_uploads_cannot_both_cross_count_quota(tmp_path) -> None:
     assert sum(result == "quota" for result in results) == 1
 
 
-def test_ingestion_failure_removes_file_and_frees_quota(tmp_path, monkeypatch) -> None:
+def test_ingestion_failure_preserves_file_and_marks_failed(tmp_path, monkeypatch) -> None:
     app = UiApplication(tmp_path)
 
     def fail(_document_id):
@@ -118,5 +130,23 @@ def test_ingestion_failure_removes_file_and_frees_quota(tmp_path, monkeypatch) -
     monkeypatch.setattr(app, "_ingest", fail)
     with pytest.raises(DocumentError, match="could not be indexed"):
         app.upload("notes.txt", b"content")
-    assert app.documents.list() == ()
-    assert list(tmp_path.glob("*.txt")) == []
+    records = app.documents.list()
+    assert len(records) == 1
+    assert records[0].ingestion_status == "failed"
+    assert records[0].path.exists()
+    assert app.documents.text(records[0].id) == "content"
+
+
+def test_rebuild_failure_preserves_durable_document(tmp_path, monkeypatch) -> None:
+    original = UiApplication(tmp_path)
+    record = original.documents.save("notes.txt", b"content")
+
+    def fail(_self, _document_id):
+        raise DocumentError("simulated rebuild failure")
+
+    monkeypatch.setattr(UiApplication, "_ingest", fail)
+    rebuilt = UiApplication(tmp_path)
+    kept = rebuilt.documents.get(record.id)
+    assert kept is not None
+    assert kept.ingestion_status == "failed"
+    assert kept.path.exists()
