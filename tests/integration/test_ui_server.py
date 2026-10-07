@@ -444,3 +444,107 @@ def test_index_failure_keeps_document_and_retry_can_recover(tmp_path, monkeypatc
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_server_binds_to_loopback_only(tmp_path) -> None:
+    server = build_server(UiApplication(tmp_path))
+    try:
+        assert server.server_address[0] == "127.0.0.1"
+    finally:
+        server.server_close()
+
+
+def test_static_page_has_browser_security_headers(tmp_path) -> None:
+    server, thread = _start(tmp_path)
+    try:
+        host, port = server.server_address
+        connection = http.client.HTTPConnection(host, port)
+        connection.request("GET", "/", headers={"Host": f"127.0.0.1:{port}"})
+        response = connection.getresponse()
+        response.read()
+        assert response.status == 200
+        assert "frame-ancestors 'none'" in response.getheader("Content-Security-Policy", "")
+        assert response.getheader("X-Content-Type-Options") == "nosniff"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_unexpected_host_missing_origin_and_bad_csrf_are_rejected(tmp_path) -> None:
+    server, thread = _start(tmp_path)
+    try:
+        host, port = server.server_address
+        origin = f"http://127.0.0.1:{port}"
+        token = server.csrf_token
+        cases = [
+            {"Host": "evil.example", "Origin": origin, "X-CSRF-Token": token},
+            {"Host": f"127.0.0.1:{port}", "X-CSRF-Token": token},
+            {"Host": f"127.0.0.1:{port}", "Origin": origin, "X-CSRF-Token": "wrong"},
+        ]
+        for headers in cases:
+            connection = http.client.HTTPConnection(host, port)
+            connection.request("POST", "/api/search", body=b"{}", headers={
+                **headers, "Content-Type": "application/json", "Content-Length": "2"
+            })
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            assert response.status == 403
+            assert payload == {"error": "request_not_allowed"}
+            connection.close()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_path_like_upload_name_is_rejected(tmp_path) -> None:
+    server, thread = _start(tmp_path)
+    try:
+        host, port = server.server_address
+        origin = f"http://127.0.0.1:{port}"
+        content_type, body = _multipart("../notes.md", b"content")
+        connection = http.client.HTTPConnection(host, port)
+        connection.request("POST", "/api/documents", body=body, headers={
+            "Host": f"127.0.0.1:{port}", "Origin": origin,
+            "X-CSRF-Token": server.csrf_token, "Content-Type": content_type,
+            "Content-Length": str(len(body)),
+        })
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 400
+        assert payload["error"] == "document_invalid"
+        assert server.application.documents.list() == ()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_indexing_failure_returns_durable_failed_document(tmp_path, monkeypatch) -> None:
+    app = UiApplication(tmp_path)
+
+    def boom(_document_id):
+        raise RuntimeError("secret internals")
+
+    monkeypatch.setattr(app, "_ingest", boom)
+    server = build_server(app)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address
+        origin = f"http://127.0.0.1:{port}"
+        content_type, body = _multipart("notes.md", b"budget")
+        connection = http.client.HTTPConnection(host, port)
+        connection.request("POST", "/api/documents", body=body, headers={
+            "Host": f"127.0.0.1:{port}", "Origin": origin,
+            "X-CSRF-Token": server.csrf_token, "Content-Type": content_type,
+            "Content-Length": str(len(body)),
+        })
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 201
+        assert payload["document"]["ingestion_status"] == "failed"
+        assert payload["document"]["failure_reason"] == "index_error"
+        assert "secret internals" not in response.reason
+        assert len(app.documents.list()) == 1
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
