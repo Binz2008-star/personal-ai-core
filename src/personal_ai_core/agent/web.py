@@ -16,7 +16,8 @@ Asking the owner, who sees the query or URL in full, closes both paths.
 Everything fetched is untrusted text. The loop hands it to the model fenced
 as data, as it does a file's contents.
 
-fetch_url reads public addresses only. A confirmation shows the owner a URL,
+fetch_url and web_search read public addresses only, through one fetch
+(`urllib_fetch_url`), and follow no redirect. A confirmation shows the owner a URL,
 not where its name leads: `http://notes.example/` can resolve to 127.0.0.1,
 and `http://169.254.169.254/` is a cloud machine's credentials. So the
 default fetch resolves the host once, refuses it if any address it resolves
@@ -50,13 +51,6 @@ USER_AGENT = "Mozilla/5.0 (personal-ai-core agent)"
 
 # (url, timeout) -> (final url, content type, body bytes)
 Fetch = Callable[[str, float], "tuple[str, str, bytes]"]
-
-
-def urllib_fetch(url: str, timeout: float) -> tuple[str, str, bytes]:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 -- scheme checked by the caller
-        body = response.read(MAX_PAGE_BYTES + 1)
-        return response.geturl(), response.headers.get("Content-Type", ""), body
 
 
 class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -115,7 +109,7 @@ def resolve_host(host: str, port: int) -> list[tuple[Any, ...]]:
 
 
 class NotPublicAddress(OSError):
-    """fetch_url was asked for an address that is not on the public internet."""
+    """A fetch was asked for an address that is not on the public internet."""
 
 
 class AddressGuard:
@@ -143,7 +137,7 @@ class AddressGuard:
             address = ipaddress.ip_address(str(sockaddr[0]).split("%")[0])
             if not self._allowed(address):
                 raise NotPublicAddress(
-                    f"{host} is {address}, which is not a public address: fetch_url "
+                    f"{host} is {address}, which is not a public address: the agent "
                     "does not read this machine, the local network or link-local "
                     "addresses"
                 )
@@ -366,7 +360,10 @@ def parse_results(html: str) -> list[dict[str, str]]:
 
 class WebSearch:
     def __init__(self, fetch: Fetch | None = None, *, timeout_seconds: int = 20) -> None:
-        self._fetch = fetch or urllib_fetch
+        # The same fetch as fetch_url: public addresses only, no redirect
+        # followed (gap analysis P2-8). The host is fixed, but a redirect from
+        # it is a URL nobody confirmed all the same.
+        self._fetch = fetch or urllib_fetch_url
         self.spec = ToolSpec(
             name="web_search",
             description=(
@@ -393,7 +390,9 @@ class WebSearch:
             _, content_type, body = self._fetch(url, self.spec.timeout_seconds)
         except OSError as exc:
             return ToolResult(ok=False, error=f"search failed: {getattr(exc, 'reason', exc)}")
-        results = parse_results(_decode(body, content_type))[:MAX_RESULTS]
+        # The results come first on the page; past the cap is not read (P2-8),
+        # however large the page the engine sent.
+        results = parse_results(_decode(body[:MAX_PAGE_BYTES], content_type))[:MAX_RESULTS]
         if not results:
             return ToolResult(
                 ok=True,
