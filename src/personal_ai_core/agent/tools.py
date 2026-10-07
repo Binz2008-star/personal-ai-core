@@ -148,14 +148,26 @@ def _drain_bounded(process: subprocess.Popen, timeout: int) -> tuple[str, str]:
     ]
     for thread in threads:
         thread.start()
+    deadline = time.monotonic() + timeout
     try:
-        process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        _kill_tree(process)
         try:
-            process.wait(timeout=10)
+            process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            pass  # something outside the tree holds the pipes; give up on its output
+            _kill_tree(process)
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass  # something outside the tree holds the pipes; give up on its output
+            raise
+        # The leader has exited, but a descendant may still hold a pipe: capture
+        # is complete only when both pipes read end-of-file, so the timeout
+        # covers the pipes too, not just the leader's exit.
+        for thread in threads:
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        if any(thread.is_alive() for thread in threads):
+            _kill_tree(process)
+            raise subprocess.TimeoutExpired(process.args, timeout)
+    except subprocess.TimeoutExpired:
         raise
     except BaseException:
         # N3: anything else that ends the wait -- a Ctrl-C above all -- ends
@@ -280,6 +292,8 @@ class SearchText:
         base = self._workspace.root if given in ("", ".") else self._workspace.resolve(given)
         wanted = needle if case_sensitive else needle.lower()
         matches: list[str] = []
+        match_chars = 0
+        file_truncated = False
         for directory, subdirectories, files in os.walk(base):
             subdirectories[:] = sorted(d for d in subdirectories if d.lower() != ".git")
             for name in sorted(files):
@@ -298,7 +312,9 @@ class SearchText:
                 if is_protected(resolved) or self._workspace.is_hard_link_to_protected(resolved):
                     continue
                 try:
-                    text, _ = _bounded_read_text(resolved, MAX_SEARCH_CHARS)
+                    text, truncated = _bounded_read_text(resolved, MAX_SEARCH_CHARS)
+                    if truncated:
+                        file_truncated = True
                     lines = text.splitlines()
                 except (UnicodeDecodeError, OSError):
                     continue
@@ -306,16 +322,18 @@ class SearchText:
                     haystack = line if case_sensitive else line.lower()
                     if wanted in haystack:
                         matches.append(f"{relative}:{number}: {line.strip()}")
-                        if len(matches) > MAX_SEARCH_MATCHES:
-                            # N2: the line count was bounded and each line
-                            # was not, so 200 lines of a minified file were
-                            # megabytes; the same cap as every other output.
+                        match_chars += len(matches[-1])
+                        # N2: the count was bounded and each line was not, and
+                        # the accumulated output was not either: many long lines
+                        # were megabytes held in memory before this check ran.
+                        # Bound the accumulated size as well as the count.
+                        if match_chars > MAX_OUTPUT_CHARS or len(matches) > MAX_SEARCH_MATCHES:
                             output, _ = _bounded("\n".join(matches[:MAX_SEARCH_MATCHES]))
                             return ToolResult(ok=True, output=output, truncated=True)
         if not matches:
-            return ToolResult(ok=True, output="no matches")
+            return ToolResult(ok=True, output="no matches", truncated=file_truncated)
         output, truncated = _bounded("\n".join(matches))
-        return ToolResult(ok=True, output=output, truncated=truncated)
+        return ToolResult(ok=True, output=output, truncated=truncated or file_truncated)
 
 
 class FindFiles:
