@@ -304,3 +304,143 @@ def test_pdf_without_extractable_text_is_reported_not_hidden(ui, pypdf_available
     doc = body_of(raw)["document"]
     assert status == 201 and doc["text_chars"] == 0
     assert doc["notice"] == "no_extractable_text"
+
+
+def _request(server, method: str, path: str, body: bytes = b"", **overrides):
+    host, port = server.server_address
+    headers = {
+        "Host": f"127.0.0.1:{port}",
+        "Origin": f"http://127.0.0.1:{port}",
+        "X-CSRF-Token": server.csrf_token,
+    }
+    headers.update(overrides)
+    connection = http.client.HTTPConnection(host, port, timeout=5)
+    connection.request(method, path, body=body, headers=headers)
+    response = connection.getresponse()
+    raw = response.read()
+    result = response.status, dict(response.getheaders()), raw
+    connection.close()
+    return result
+
+
+def test_server_binds_to_loopback_and_rejects_unexpected_host(tmp_path) -> None:
+    server, thread = _start(tmp_path)
+    try:
+        assert server.server_address[0] == "127.0.0.1"
+        status, _, _ = _request(server, "GET", "/api/health", Host="evil.example")
+        assert status == 400
+        status, _, _ = _request(server, "POST", "/api/search", b"{}", Host="evil.example")
+        assert status == 403
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_state_changes_require_origin_and_csrf(tmp_path) -> None:
+    server, thread = _start(tmp_path)
+    try:
+        host = f"127.0.0.1:{server.server_address[1]}"
+        cases = [
+            {"Host": host, "Origin": ""},
+            {"Host": host, "Origin": "http://evil.example"},
+            {"Host": host, "X-CSRF-Token": ""},
+            {"Host": host, "X-CSRF-Token": "wrong"},
+        ]
+        for overrides in cases:
+            status, _, raw = _request(server, "POST", "/api/search", b"{}", **overrides)
+            assert status == 403
+            assert json.loads(raw) == {"error": "request_not_allowed"}
+        status, _, _ = _request(server, "DELETE", "/api/documents/abc", b"{}", Origin="")
+        assert status == 403
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_static_page_has_csp_and_no_permissive_cors(tmp_path) -> None:
+    server, thread = _start(tmp_path)
+    try:
+        status, headers, _ = _request(server, "GET", "/")
+        lowered = {key.lower(): value for key, value in headers.items()}
+        assert status == 200
+        assert "frame-ancestors 'none'" in lowered["content-security-policy"]
+        assert lowered["x-content-type-options"] == "nosniff"
+        assert "access-control-allow-origin" not in lowered
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_path_like_filename_is_rejected(tmp_path) -> None:
+    server, thread = _start(tmp_path)
+    try:
+        content_type, body = _multipart("../notes.md", b"content")
+        status, _, raw = _request(
+            server, "POST", "/api/documents", body,
+            **{"Content-Type": content_type, "Content-Length": str(len(body))}
+        )
+        assert status == 400
+        assert json.loads(raw)["error"] == "document_invalid"
+        assert server.application.documents.list() == ()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_oversized_content_length_is_rejected_before_body_read(tmp_path) -> None:
+    server, thread = _start(tmp_path)
+    try:
+        host, port = server.server_address
+        connection = http.client.HTTPConnection(host, port, timeout=5)
+        connection.putrequest("POST", "/api/documents", skip_host=True)
+        connection.putheader("Host", f"127.0.0.1:{port}")
+        connection.putheader("Origin", f"http://127.0.0.1:{port}")
+        connection.putheader("X-CSRF-Token", server.csrf_token)
+        connection.putheader("Content-Type", "multipart/form-data; boundary=x")
+        connection.putheader("Content-Length", str(500 * 1024 * 1024))
+        connection.endheaders()
+        assert connection.getresponse().status == 413
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_index_failure_keeps_document_and_retry_can_recover(tmp_path, monkeypatch) -> None:
+    server, thread = _start(tmp_path)
+    try:
+        app = server.application
+        real_ingest = app._ingest
+        calls = {"count": 0}
+
+        def flaky(document_id):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("private failure")
+            return real_ingest(document_id)
+
+        monkeypatch.setattr(app, "_ingest", flaky)
+        content_type, body = _multipart("notes.md", b"budget")
+        status, _, raw = _request(
+            server, "POST", "/api/documents", body,
+            **{"Content-Type": content_type, "Content-Length": str(len(body))}
+        )
+        payload = json.loads(raw)
+        assert status == 201
+        assert payload["document"]["ingestion_status"] == "failed"
+        assert payload["document"]["failure_reason"] == "index_error"
+        assert "private failure" not in raw.decode()
+        document_id = payload["document"]["id"]
+
+        status, _, raw = _request(server, "POST", f"/api/documents/{document_id}/retry")
+        assert status == 200
+        assert json.loads(raw)["document"]["ingestion_status"] == "indexed"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
