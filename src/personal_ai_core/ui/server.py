@@ -101,17 +101,6 @@ class UiApplication:
         except Exception:
             return self.documents.mark_failed(document_id, reason="index_error")
 
-    def retry(self, document_id: str):
-        record = self.documents.get(document_id)
-        if record is None:
-            raise DocumentError("Document not found.")
-        try:
-            return self._ingest(document_id)
-        except PdfExtractorUnavailable:
-            return self.documents.mark_failed(document_id, failure_reason="pdf_unavailable")
-        except Exception:
-            return self.documents.mark_failed(document_id, failure_reason="index_error")
-
     def search(self, text: str, limit: int = 5) -> list[dict[str, object]]:
         results = self.retriever.retrieve(RetrievalQuery(text=text, limit=limit))
         return [
@@ -164,14 +153,6 @@ class UiHandler(BaseHTTPRequestHandler):
             return
         self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
-    def do_DELETE(self) -> None:  # noqa: N802
-        # Deletion is deliberately not implemented yet, but state-changing
-        # methods still pass through the same browser request protections.
-        if not self._valid_host() or not self._same_origin() or not self._csrf_valid():
-            self._json(HTTPStatus.FORBIDDEN, {"error": "request_not_allowed"})
-            return
-        self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
-
     def do_POST(self) -> None:  # noqa: N802
         if not self._valid_host() or not self._same_origin() or not self._csrf_valid():
             self._json(HTTPStatus.FORBIDDEN, {"error": "request_not_allowed"})
@@ -186,10 +167,6 @@ class UiHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/search":
             self._search()
-            return
-        if path.startswith("/api/documents/") and path.endswith("/retry"):
-            document_id = unquote(path[len("/api/documents/"):-len("/retry")]).strip("/")
-            self._retry(document_id)
             return
         self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
@@ -232,14 +209,6 @@ class UiHandler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.CREATED, {"document": record.public_dict()})
 
     def _retry(self, document_id: str) -> None:
-        try:
-            record = self.application.retry(document_id)
-        except DocumentError:
-            self._json(HTTPStatus.NOT_FOUND, {"error": "document_not_found"})
-            return
-        self._json(HTTPStatus.OK, {"document": record.public_dict()})
-
-    def _retry(self, document_id: str) -> None:
         if not re_full_document_id(document_id):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
@@ -249,19 +218,6 @@ class UiHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
         self._json(HTTPStatus.OK, {"document": record.public_dict()})
-
-    def _retry(self, document_id: str) -> None:
-        record = self.application.documents.get(document_id)
-        if record is None:
-            self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
-            return
-        try:
-            updated = self.application._ingest(document_id)
-        except PdfExtractorUnavailable:
-            updated = self.application.documents.mark_failed(document_id, reason="pdf_unavailable")
-        except Exception:
-            updated = self.application.documents.mark_failed(document_id, reason="index_error")
-        self._json(HTTPStatus.OK, {"document": updated.public_dict()})
 
     def _search(self) -> None:
         try:
