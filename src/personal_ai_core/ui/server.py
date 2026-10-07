@@ -164,6 +164,14 @@ class UiHandler(BaseHTTPRequestHandler):
             return
         self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
+    def do_DELETE(self) -> None:  # noqa: N802
+        # Deletion is deliberately not implemented yet, but state-changing
+        # methods still pass through the same browser request protections.
+        if not self._valid_host() or not self._same_origin() or not self._csrf_valid():
+            self._json(HTTPStatus.FORBIDDEN, {"error": "request_not_allowed"})
+            return
+        self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
     def do_POST(self) -> None:  # noqa: N802
         if not self._valid_host() or not self._same_origin() or not self._csrf_valid():
             self._json(HTTPStatus.FORBIDDEN, {"error": "request_not_allowed"})
