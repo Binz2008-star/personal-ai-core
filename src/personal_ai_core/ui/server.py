@@ -211,7 +211,10 @@ class UiHandler(BaseHTTPRequestHandler):
             probe.unlink()
             writable = True
         except OSError:
-            probe.unlink(missing_ok=True)
+            try:
+                probe.unlink(missing_ok=True)
+            except OSError:
+                pass
             writable = False
         try:
             from pypdf import PdfReader  # type: ignore[import-not-found]  # noqa: F401
