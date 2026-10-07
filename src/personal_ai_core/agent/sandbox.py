@@ -158,6 +158,37 @@ class Workspace:
                 continue
         return False
 
+    def is_hard_link_to_protected(self, path: Path) -> bool:
+        """Whether `path` is the same file as a protected-named file in the root.
+
+        Name protection alone misses a hard link: `alias.txt -> .env` carries an
+        ordinary name, so `is_protected("alias.txt")` is False and the link's
+        contents reach the model. A hard link IS the same file, so this compares
+        by identity instead of spelling -- but only for regular files that could
+        have a link (st_nlink > 1), so ordinary files pay no scan.
+        """
+        try:
+            info = path.stat()
+        except OSError:
+            return False
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink < 2:
+            return False
+        for protected in self._protected_files():
+            try:
+                if os.path.samefile(path, protected):
+                    return True
+            except OSError:
+                continue
+        return False
+
+    def _protected_files(self) -> Iterable[Path]:
+        """Protected-named files under the root, for identity comparison."""
+        for directory, subdirectories, files in os.walk(self.root):
+            subdirectories[:] = [d for d in subdirectories if d.lower() != ".git"]
+            for name in files:
+                if is_protected(Path(name)):
+                    yield Path(directory) / name
+
     def resolve(self, path: str) -> Path:
         """A path inside the workspace, or SandboxError. For reading."""
         if not path:
@@ -202,7 +233,7 @@ class Workspace:
     def resolve_for_write(self, path: str) -> Path:
         """As `resolve`, and the target is not a protected file."""
         resolved = self.resolve(path)
-        if is_protected(resolved):
+        if is_protected(resolved) or self.is_hard_link_to_protected(resolved):
             raise SandboxError(f"protected file, the agent may not write it: {path}")
         return resolved
 

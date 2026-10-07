@@ -105,6 +105,20 @@ MAX_NON_HARNESS_SKIPS = 57
 # skip is still a failure (test_environment_skips_never_happen_on_linux).
 ENVIRONMENT_SKIP_REASONS = ("cannot create a symlink here",)
 
+# Skips that a specific PLATFORM cannot run, not a test turned off. Windows has
+# no POSIX permission bits, so the file-mode cases in these two files skip with
+# "POSIX file modes" and RUN on Linux. They are allowed from exactly these
+# files -- a "POSIX file modes" skip from any other file is still unaccounted
+# for -- and kept out of the structural count. PR #250 adds the three
+# atomic-writes legs, PR #228 the two profile legs. On Linux they run, and a
+# skip there means the tests stopped running
+# (test_platform_skips_never_happen_on_linux).
+PLATFORM_SKIP_REASONS = ("POSIX file modes",)
+PLATFORM_SKIP_SOURCES = {
+    "tests/unit/test_atomic_writes_and_rollback.py",
+    "tests/integration/test_cli_profile_safety.py",
+}
+
 pytestmark = pytest.mark.skipif(
     os.environ.get(NESTED_MARKER) == "1",
     reason="nested run started by the skip audit itself; not re-entered",
@@ -147,12 +161,22 @@ def _environmental(line: str) -> bool:
     return any(reason in line for reason in ENVIRONMENT_SKIP_REASONS)
 
 
+def _platform(line: str) -> bool:
+    """A POSIX-only skip that the platform cannot run. Both the reason AND the
+    file must be named, so a "POSIX file modes" skip from an unknown file is
+    still caught as unaccounted for."""
+    return any(reason in line for reason in PLATFORM_SKIP_REASONS) and any(
+        source in _normalize(line) for source in PLATFORM_SKIP_SOURCES
+    )
+
+
 def _unaccounted_for(lines: list[str]) -> list[str]:
     return [
         line
         for line in lines
         if not any(source in _normalize(line) for source in ALLOWED_SKIP_SOURCES)
         and not _environmental(line)
+        and not _platform(line)
     ]
 
 
@@ -173,7 +197,9 @@ def test_the_number_of_structural_skips_has_not_grown(skips):
     """The tokenizer harness may grow samples; the exemptions may not grow."""
     structural = [
         line for line in skips
-        if "test_token_estimator_validation.py" not in line and not _environmental(line)
+        if "test_token_estimator_validation.py" not in line
+        and not _environmental(line)
+        and not _platform(line)
     ]
     total = sum(_count(line) for line in structural)
     assert total <= MAX_NON_HARNESS_SKIPS, (
@@ -187,6 +213,13 @@ def test_environment_skips_never_happen_on_linux(skips):
     """The symlink allowance is for machines that cannot create one. On Linux
     they always can, so a skip there means the tests stopped running."""
     assert not [line for line in skips if _environmental(line)]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the allowance below exists for Windows")
+def test_platform_skips_never_happen_on_linux(skips):
+    """The POSIX-mode allowance is for Windows, which has no permission bits.
+    On Linux those tests run, so a skip there means they stopped running."""
+    assert not [line for line in skips if _platform(line)]
 
 
 def test_every_skip_states_a_usable_reason(skips):

@@ -30,6 +30,8 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -42,6 +44,13 @@ MAX_OUTPUT_CHARS = 20_000
 MAX_LIST_ENTRIES = 500
 MAX_SEARCH_MATCHES = 200
 MAX_WRITE_CHARS = 1_000_000
+# How much of any one file a content search will read before it moves on. A
+# budget, so a single very large file cannot be loaded whole; large enough that
+# an ordinary file is searched in full.
+MAX_SEARCH_CHARS = 1_000_000
+# One character over the output budget, so a captured stream that exceeded it
+# still reads as truncated to `_bounded` rather than as an exact fit.
+MAX_CAPTURE_CHARS = MAX_OUTPUT_CHARS + 1
 
 _PATH = {"type": "string", "description": "a path relative to the workspace"}
 
@@ -52,10 +61,27 @@ def _bounded(text: str) -> tuple[str, bool]:
     return text[:MAX_OUTPUT_CHARS], True
 
 
+def _bounded_read_text(path: Path, max_chars: int = MAX_OUTPUT_CHARS) -> tuple[str, bool]:
+    """Read at most `max_chars` characters without loading the whole file.
+
+    `Path.read_text` buffers the entire file before it can be truncated, so a
+    very large file exhausts memory even though only a slice is kept. Reading
+    `max_chars + 1` characters bounds what is held at once; the extra character
+    only says whether there is more.
+    """
+    with path.open("r", encoding="utf-8") as handle:
+        text = handle.read(max_chars + 1)
+    truncated = len(text) > max_chars
+    if truncated:
+        text = text[:max_chars]
+    return text, truncated
+
+
 def run_bounded(
     args: str | list[str], *, cwd: Any, env: Mapping[str, str], timeout: int, shell: bool = False
 ) -> tuple[int, str, str]:
-    """Run a command with no input and a timeout that actually ends it.
+    """Run a command with no input, a timeout that actually ends it, and a
+    bounded output capture.
 
     Found on the rig, 2026-10-02 (ADR-022 baseline): the model ran
     `python -m pytest --pdb`; the failing test opened the debugger, which waited
@@ -64,6 +90,10 @@ def run_bounded(
     minutes. So: stdin is closed (a debugger or prompt reads end-of-file and
     exits), and on timeout the whole process tree is killed, not only the
     direct child. Raises subprocess.TimeoutExpired after the kill.
+
+    Output is drained and only a bounded prefix is kept (`_drain_bounded`), so a
+    command that floods its output -- `cat` on a 64 MiB file, say -- cannot
+    exhaust the agent's memory before the caller truncates what it keeps.
     """
     extra: dict[str, Any] = {}
     if sys.platform != "win32":
@@ -73,12 +103,57 @@ def run_bounded(
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
         errors="replace", **extra,
     )
+    stdout, stderr = _drain_bounded(process, timeout)
+    return process.returncode, stdout, stderr
+
+
+def _drain_bounded(process: subprocess.Popen, timeout: int) -> tuple[str, str]:
+    """Read stdout and stderr concurrently, keeping only a bounded prefix.
+
+    Both pipes are read to end-of-file so a command that prints a lot still
+    finishes and its exit status stays real, while no more than
+    `MAX_CAPTURE_CHARS` characters are held in memory -- one over the output
+    budget, so an oversized stream still reads as truncated to `_bounded`.
+    """
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    kept = 0
+    lock = threading.Lock()
+
+    def drain(stream: Any, parts: list[str]) -> None:
+        nonlocal kept
+        try:
+            while True:
+                chunk = stream.read(8192)
+                if not chunk:
+                    return
+                with lock:
+                    if kept >= MAX_CAPTURE_CHARS:
+                        continue  # past the budget: keep reading, keep nothing
+                    take = min(len(chunk), MAX_CAPTURE_CHARS - kept)
+                    parts.append(chunk[:take])
+                    kept += take
+        except (OSError, ValueError):
+            return
+        finally:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+    threads = [
+        threading.Thread(target=drain, args=(pipe, parts), daemon=True)
+        for pipe, parts in ((process.stdout, stdout_parts), (process.stderr, stderr_parts))
+        if pipe is not None
+    ]
+    for thread in threads:
+        thread.start()
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
+        process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         _kill_tree(process)
         try:
-            process.communicate(timeout=10)
+            process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             pass  # something outside the tree holds the pipes; give up on its output
         raise
@@ -89,7 +164,10 @@ def run_bounded(
         # writing, after pac had exited.
         _kill_tree(process)
         raise
-    return process.returncode, stdout, stderr
+    finally:
+        for thread in threads:
+            thread.join(timeout=5)
+    return "".join(stdout_parts), "".join(stderr_parts)
 
 
 def _kill_tree(process: subprocess.Popen[str]) -> None:
@@ -128,16 +206,15 @@ class ReadFile:
         path = self._workspace.resolve(arguments["path"])
         # Whether a secret may be READ is this tool's call, and the answer is
         # no: a secret read into the model's context is a secret disclosed.
-        if is_protected(path):
+        if is_protected(path) or self._workspace.is_hard_link_to_protected(path):
             raise SandboxError(f"protected file, the agent may not read it: {arguments['path']}")
         if not path.is_file():
             return ToolResult(ok=False, error=f"not a file: {arguments['path']}")
         try:
-            text = path.read_text(encoding="utf-8")
+            text, truncated = _bounded_read_text(path)
         except UnicodeDecodeError:
             return ToolResult(ok=False, error=f"not UTF-8 text: {arguments['path']}")
-        output, truncated = _bounded(text)
-        return ToolResult(ok=True, output=output, truncated=truncated)
+        return ToolResult(ok=True, output=text, truncated=truncated)
 
 
 class ListDirectory:
@@ -214,10 +291,15 @@ class SearchText:
                     resolved = self._workspace.resolve(relative)
                 except SandboxError:
                     continue
-                if is_protected(resolved):
+                if not resolved.is_file():
+                    # A FIFO, socket or device: opening it can block forever,
+                    # so it is skipped, never read.
+                    continue
+                if is_protected(resolved) or self._workspace.is_hard_link_to_protected(resolved):
                     continue
                 try:
-                    lines = resolved.read_text(encoding="utf-8").splitlines()
+                    text, _ = _bounded_read_text(resolved, MAX_SEARCH_CHARS)
+                    lines = text.splitlines()
                 except (UnicodeDecodeError, OSError):
                     continue
                 for number, line in enumerate(lines, start=1):

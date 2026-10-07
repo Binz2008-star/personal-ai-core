@@ -231,16 +231,19 @@ def test_an_interrupt_while_a_command_runs_ends_the_command(tmp_path, monkeypatc
     class Recording(real_popen):  # type: ignore[misc, valid-type]
         """Interrupts the wait on the command under test, and on nothing else:
         on Windows the kill itself runs `taskkill` through Popen, and its wait
-        must go through untouched."""
+        must go through untouched. The wait is interrupted once, so the
+        assertion afterwards can still reap the process."""
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             started.append(self)
+            self._interrupted = False
 
-        def communicate(self, *args, **kwargs):
-            if self.args == command:
+        def wait(self, timeout=None):
+            if self.args == command and not self._interrupted:
+                self._interrupted = True
                 raise KeyboardInterrupt
-            return super().communicate(*args, **kwargs)
+            return super().wait(timeout)
 
     monkeypatch.setattr(subprocess, "Popen", Recording)
     # Windows' Python does not start without SYSTEMROOT; elsewhere nothing is needed.
