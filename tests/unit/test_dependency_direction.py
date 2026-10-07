@@ -66,6 +66,8 @@ LAYER_MAY_IMPORT = {
     # which concrete class satisfies which contract is factory.py's job and
     # duplicating it here would give the system two composition roots.
     "app": {"core", "conversation"},                # the entry point
+    # Native client integrations own their protocol, never PAC's tool loop.
+    "integrations": {"core"},
 }
 COMPOSITION_ROOTS = {"conversation/factory.py"}
 
@@ -124,10 +126,11 @@ def test_application_layer_imports_no_http_or_driver(path):
     assert not offenders, f"{path.name} reaches infrastructure: {sorted(offenders)}"
 
 
-def test_only_the_llamacpp_adapter_knows_llama_servers_endpoints():
+def test_model_server_endpoints_stay_in_their_adapters():
     """ARCHITECTURE.md section 4, as narrowed after review: a server's
     endpoints live in its adapter. llama-server's are /v1/chat/completions
-    and /props."""
+    and /props. The OpenCode integration exposes the shared OpenAI chat
+    route as an inbound endpoint; it does not speak to llama-server."""
     allowed = SRC / "runtime" / "llamacpp"
     offenders = []
     for path in SRC.rglob("*.py"):
@@ -137,7 +140,8 @@ def test_only_the_llamacpp_adapter_knows_llama_servers_endpoints():
             stripped = line.strip()
             if stripped.startswith("#") or stripped.startswith('"'):
                 continue
-            if "/props" in line or "/v1/chat/completions" in line:
+            shared_inbound = path == SRC / "integrations" / "opencode" / "http.py"
+            if "/props" in line or ("/v1/chat/completions" in line and not shared_inbound):
                 offenders.append(f"{path.relative_to(SRC)}: {stripped[:60]}")
     assert not offenders, f"llama-server detail leaked outside its adapter: {offenders}"
 
@@ -197,6 +201,11 @@ def test_internal_layering_is_respected(path):
     module importing a concrete infrastructure or runtime module.
     """
     rel = str(path.relative_to(SRC)).replace("\\", "/")
+    if rel == "integrations/opencode/factory.py":
+        # This separate root composes the native-client boundary without
+        # widening the RC conversation root or adding a structural skip.
+        assert internal_imports(path) <= {"core", "integrations", "context", "conversation", "identity", "runtime"}
+        return
     if rel in COMPOSITION_ROOTS:
         pytest.skip("composition root may wire concrete adapters")
 
