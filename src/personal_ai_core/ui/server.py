@@ -153,6 +153,12 @@ class UiHandler(BaseHTTPRequestHandler):
             return
         self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
+    def do_DELETE(self) -> None:  # noqa: N802
+        if not self._valid_host() or not self._same_origin() or not self._csrf_valid():
+            self._json(HTTPStatus.FORBIDDEN, {"error": "request_not_allowed"})
+            return
+        self._json(HTTPStatus.METHOD_NOT_ALLOWED, {"error": "document_deletion_deferred"})
+
     def _upload(self) -> None:
         length = self._content_length()
         if length is None or length > MAX_REQUEST_BYTES:
@@ -278,6 +284,7 @@ class UiHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self._security_headers()
         self.end_headers()
         self.wfile.write(body)
 
