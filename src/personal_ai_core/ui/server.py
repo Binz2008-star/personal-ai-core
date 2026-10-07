@@ -242,6 +242,19 @@ class UiHandler(BaseHTTPRequestHandler):
             return
         self._json(HTTPStatus.OK, {"document": record.public_dict()})
 
+    def _retry(self, document_id: str) -> None:
+        record = self.application.documents.get(document_id)
+        if record is None:
+            self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+            return
+        try:
+            updated = self.application._ingest(document_id)
+        except PdfExtractorUnavailable:
+            updated = self.application.documents.mark_failed(document_id, reason="pdf_unavailable")
+        except Exception:
+            updated = self.application.documents.mark_failed(document_id, reason="index_error")
+        self._json(HTTPStatus.OK, {"document": updated.public_dict()})
+
     def _search(self) -> None:
         try:
             payload = self._json_body()
