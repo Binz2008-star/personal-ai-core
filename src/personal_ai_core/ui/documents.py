@@ -49,6 +49,8 @@ class StoredDocument:
     indexed_at: datetime | None
     ingestion_status: Literal["pending", "indexed", "failed"]
     chunk_count: int | None
+    failure_reason: str | None
+    notice: str | None
     path: Path
 
     def public_dict(self) -> dict[str, object]:
@@ -62,6 +64,8 @@ class StoredDocument:
             "indexed_at": self.indexed_at.isoformat() if self.indexed_at else None,
             "ingestion_status": self.ingestion_status,
             "chunk_count": self.chunk_count,
+            "failure_reason": self.failure_reason,
+            "notice": self.notice,
         }
 
     def to_manifest_dict(self) -> dict[str, object]:
@@ -75,6 +79,8 @@ class StoredDocument:
             "indexed_at": self.indexed_at.isoformat() if self.indexed_at else None,
             "ingestion_status": self.ingestion_status,
             "chunk_count": self.chunk_count,
+            "failure_reason": self.failure_reason,
+            "notice": self.notice,
         }
 
     @classmethod
@@ -98,6 +104,8 @@ class StoredDocument:
             indexed_at=(datetime.fromisoformat(str(data["indexed_at"])) if data.get("indexed_at") else None),
             ingestion_status="pending",
             chunk_count=None,
+            failure_reason=None,
+            notice=(str(data["notice"]) if data.get("notice") else None),
             path=base_path / f"{document_id}{suffix}",
         )
 
@@ -272,6 +280,8 @@ class DocumentStore:
                     size_bytes=len(content), text_chars=len(text),
                     uploaded_at=now, indexed_at=None,
                     ingestion_status="pending", chunk_count=None,
+                    failure_reason=None,
+                    notice=("no_extractable_text" if not text.strip() else None),
                     path=final_path,
                 )
                 self._documents[document_id] = record
@@ -307,13 +317,14 @@ class DocumentStore:
                 id=record.id, display_name=record.display_name, suffix=record.suffix,
                 size_bytes=record.size_bytes, text_chars=record.text_chars,
                 uploaded_at=record.uploaded_at, indexed_at=datetime.now(timezone.utc),
-                ingestion_status="indexed", chunk_count=chunk_count, path=record.path,
+                ingestion_status="indexed", chunk_count=chunk_count,
+                failure_reason=None, notice=record.notice, path=record.path,
             )
             self._documents[document_id] = updated
             self._save_manifest()
             return updated
 
-    def mark_failed(self, document_id: str) -> StoredDocument:
+    def mark_failed(self, document_id: str, *, reason: str = "index_error") -> StoredDocument:
         """Keep durable user bytes while marking derived indexing as unavailable."""
         with self._lock:
             record = self._documents.get(document_id)
@@ -323,7 +334,8 @@ class DocumentStore:
                 id=record.id, display_name=record.display_name, suffix=record.suffix,
                 size_bytes=record.size_bytes, text_chars=record.text_chars,
                 uploaded_at=record.uploaded_at, indexed_at=None,
-                ingestion_status="failed", chunk_count=None, path=record.path,
+                ingestion_status="failed", chunk_count=None,
+                failure_reason=reason, notice=record.notice, path=record.path,
             )
             self._documents[document_id] = updated
             self._save_manifest()
