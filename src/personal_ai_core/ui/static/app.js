@@ -17,6 +17,10 @@
   const attachmentPreview = $("#attachment-preview");
   let toastTimer;
 
+  function csrfToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.content || "";
+  }
+
   function showToast(message) {
     toast.textContent = message;
     toast.classList.add("visible");
@@ -68,8 +72,30 @@
     }
     $("#attachment-name").textContent = file.name;
     attachmentPreview.hidden = false;
-    showToast("تم اختيار المستند — سيُرفع بعد ربط API");
+    uploadDocument(file);
   });
+
+  async function uploadDocument(file) {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    showToast("جارٍ فحص المستند وقراءته...");
+    try {
+      const response = await fetch("/api/documents", {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrfToken() },
+        body: form,
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || payload.error || "تعذر رفع المستند");
+      }
+      showToast(`تمت إضافة ${payload.document.display_name} (${payload.document.chunk_count} مقاطع)`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "تعذر رفع المستند");
+      attachmentPreview.hidden = true;
+      fileInput.value = "";
+    }
+  }
   $("#remove-attachment").addEventListener("click", () => {
     fileInput.value = "";
     attachmentPreview.hidden = true;
@@ -82,7 +108,7 @@
       showToast("اكتب سؤالًا أو أرفق مستندًا أولًا");
       return;
     }
-    showToast("النموذج الأولي لا يرسل رسائل بعد — API قيد التصميم");
+    showToast("تم استلام السؤال — مسار المحادثة سيُربط بالخدمة التالية");
   });
 
   $("#message-input").addEventListener("keydown", (event) => {

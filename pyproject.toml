@@ -11,6 +11,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
+pdf = ["pypdf>=5.0"]
 # The server backend (ADR-016): psycopg 3, the PostgreSQL driver. Kept out of
 # `dependencies` so a SQLite-only install never pulls it; `persistence/postgres.py`
 # imports it lazily for the same reason.
@@ -23,6 +24,9 @@ pac = "personal_ai_core.app.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+personal_ai_core = ["ui/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
