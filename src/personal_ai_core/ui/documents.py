@@ -47,7 +47,7 @@ class StoredDocument:
     text_chars: int
     uploaded_at: datetime
     indexed_at: datetime | None
-    ingestion_status: Literal["pending", "indexed"]
+    ingestion_status: Literal["pending", "indexed", "failed"]
     chunk_count: int | None
     path: Path
 
@@ -85,25 +85,36 @@ class StoredDocument:
         suffix = str(data["suffix"])
         if suffix not in ALLOWED_SUFFIXES:
             raise DocumentError("The document manifest contains an unsupported type.")
+        document_id = str(data["id"])
+        if not re.fullmatch(r"[0-9a-f]{32}", document_id):
+            raise DocumentError("The document manifest contains an invalid identifier.")
         return cls(
-            id=str(data["id"]),
-            display_name=safe_display_name(str(data["display_name"])),
+            id=document_id,
+            display_name=_clean_display_name(str(data["display_name"])),
             suffix=suffix,
             size_bytes=int(data["size_bytes"]),
             text_chars=int(data["text_chars"]),
             uploaded_at=datetime.fromisoformat(str(data["uploaded_at"])),
             indexed_at=(datetime.fromisoformat(str(data["indexed_at"])) if data.get("indexed_at") else None),
-            # Indexes are derived state and are rebuilt at application start.
             ingestion_status="pending",
-            chunk_count=(int(data["chunk_count"]) if data.get("chunk_count") is not None else None),
-            path=base_path / f"{data['id']}{suffix}",
+            chunk_count=None,
+            path=base_path / f"{document_id}{suffix}",
         )
 
 
-def safe_display_name(name: str) -> str:
-    base = Path(name.replace("\\", "/")).name.strip() or "document"
-    cleaned = _SAFE_DISPLAY.sub("_", base).strip(" .")
+def _clean_display_name(name: str) -> str:
+    cleaned = _SAFE_DISPLAY.sub("_", name.strip()).strip(" .")
     return (cleaned or "document")[:160]
+
+
+def safe_display_name(name: str) -> str:
+    """Validate a browser-provided label and return a display-only filename."""
+    stripped = name.strip()
+    if not stripped or "/" in stripped or "\\" in stripped:
+        raise DocumentError("The file name must not contain a path.")
+    if stripped in {".", ".."} or any(part in {".", ".."} for part in stripped.split("/")):
+        raise DocumentError("The file name must not contain dot segments.")
+    return _clean_display_name(stripped)
 
 
 def extract_text(path: Path, suffix: str) -> str:
@@ -135,7 +146,7 @@ def _extract_pdf(path: Path) -> str:
         text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
     except DocumentError:
         raise
-    except Exception as exc:  # parser details never reach the UI
+    except Exception as exc:
         raise DocumentError("The PDF could not be read.") from exc
     return text
 
@@ -161,7 +172,7 @@ class DocumentStore:
         self._documents: dict[str, StoredDocument] = {}
         self._load_manifest()
         self.cleanup_stale_uploads()
-        self._remove_orphaned_files()
+        self._quarantine_orphaned_files()
 
     def _load_manifest(self) -> None:
         if not self.manifest_path.exists():
@@ -175,12 +186,10 @@ class DocumentStore:
                 if not isinstance(raw, dict):
                     raise DocumentError("The document manifest is invalid.")
                 doc = StoredDocument.from_manifest_dict(raw, self.root)
-                if doc.path.exists() and doc.path.is_file():
+                if doc.path.exists() and doc.path.is_file() and not doc.path.is_symlink():
                     self._documents[doc.id] = doc
         except Exception as exc:
-            backup = self.manifest_path.with_name(
-                f"manifest.corrupt-{int(time.time())}.json"
-            )
+            backup = self.manifest_path.with_name(f"manifest.corrupt-{int(time.time())}.json")
             try:
                 os.replace(self.manifest_path, backup)
             except OSError:
@@ -190,29 +199,28 @@ class DocumentStore:
             ) from exc
 
     def _save_manifest(self) -> None:
-        with self._lock:
-            data = {"version": 1, "documents": [doc.to_manifest_dict() for doc in self._documents.values()]}
-            temp = self.root / f".manifest-{secrets.token_hex(8)}.tmp"
-            try:
-                with temp.open("w", encoding="utf-8") as handle:
-                    json.dump(data, handle, ensure_ascii=False, indent=2)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temp, self.manifest_path)
-            finally:
-                temp.unlink(missing_ok=True)
+        data = {"version": 1, "documents": [doc.to_manifest_dict() for doc in self._documents.values()]}
+        temp = self.root / f".manifest-{secrets.token_hex(8)}.tmp"
+        try:
+            with temp.open("w", encoding="utf-8") as handle:
+                json.dump(data, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp, self.manifest_path)
+        finally:
+            temp.unlink(missing_ok=True)
 
     def cleanup_stale_uploads(self) -> None:
         threshold = time.time() - (STALE_UPLOAD_HOURS * 3600)
         for path in self.root.glob(".uploading-*"):
             try:
-                if path.is_file() and path.stat().st_mtime < threshold:
+                if path.is_file() and not path.is_symlink() and path.stat().st_mtime < threshold:
                     path.unlink(missing_ok=True)
             except OSError:
                 continue
 
-    def _remove_orphaned_files(self) -> None:
-        """Move unlisted files aside; never delete user data during recovery."""
+    def _quarantine_orphaned_files(self) -> None:
+        """Move unlisted regular files aside; never delete user data during recovery."""
         known = {record.path.name for record in self._documents.values()}
         quarantine = self.root / "orphans"
         for path in self.root.iterdir():
@@ -220,7 +228,7 @@ class DocumentStore:
                 continue
             if path.name.startswith(".uploading-") or path.name.startswith(".manifest-"):
                 continue
-            if path.is_file() and path.name not in known:
+            if path.is_file() and not path.is_symlink() and path.name not in known:
                 quarantine.mkdir(exist_ok=True)
                 target = quarantine / f"{int(time.time())}-{path.name}"
                 path.replace(target)
@@ -254,6 +262,7 @@ class DocumentStore:
             final_path = self.root / f"{document_id}{suffix}"
             temp_path = self.root / f".uploading-{document_id}{suffix}"
             temp_path.write_bytes(content)
+            record: StoredDocument | None = None
             try:
                 text = extract_text(temp_path, suffix)
                 temp_path.rename(final_path)
@@ -269,42 +278,53 @@ class DocumentStore:
                 self._save_manifest()
                 return record
             except Exception:
+                self._documents.pop(document_id, None)
                 temp_path.unlink(missing_ok=True)
                 final_path.unlink(missing_ok=True)
                 raise
 
     def get(self, document_id: str) -> StoredDocument | None:
-        return self._documents.get(document_id)
+        with self._lock:
+            return self._documents.get(document_id)
 
     def list(self) -> tuple[StoredDocument, ...]:
-        return tuple(self._documents.values())
+        with self._lock:
+            return tuple(self._documents.values())
 
     def text(self, document_id: str) -> str:
-        record = self._documents.get(document_id)
-        if record is None or not record.path.exists():
-            raise DocumentError("Document not found.")
-        return extract_text(record.path, record.suffix)
+        with self._lock:
+            record = self._documents.get(document_id)
+            if record is None or not record.path.exists() or record.path.is_symlink():
+                raise DocumentError("Document not found.")
+            return extract_text(record.path, record.suffix)
 
-    def delete(self, document_id: str) -> None:
+    def mark_indexed(self, document_id: str, chunk_count: int) -> StoredDocument:
         with self._lock:
             record = self._documents.get(document_id)
             if record is None:
                 raise DocumentError("Document not found.")
-            record.path.unlink(missing_ok=True)
-            del self._documents[document_id]
-            self._save_manifest()
-
-    def mark_indexed(self, document_id: str, chunk_count: int) -> StoredDocument:
-        record = self._documents.get(document_id)
-        if record is None:
-            raise DocumentError("Document not found.")
-        updated = StoredDocument(
-            id=record.id, display_name=record.display_name, suffix=record.suffix,
-            size_bytes=record.size_bytes, text_chars=record.text_chars,
-            uploaded_at=record.uploaded_at, indexed_at=datetime.now(timezone.utc),
-            ingestion_status="indexed", chunk_count=chunk_count, path=record.path,
-        )
-        with self._lock:
+            updated = StoredDocument(
+                id=record.id, display_name=record.display_name, suffix=record.suffix,
+                size_bytes=record.size_bytes, text_chars=record.text_chars,
+                uploaded_at=record.uploaded_at, indexed_at=datetime.now(timezone.utc),
+                ingestion_status="indexed", chunk_count=chunk_count, path=record.path,
+            )
             self._documents[document_id] = updated
             self._save_manifest()
-        return updated
+            return updated
+
+    def mark_failed(self, document_id: str) -> StoredDocument:
+        """Keep durable user bytes while marking derived indexing as unavailable."""
+        with self._lock:
+            record = self._documents.get(document_id)
+            if record is None:
+                raise DocumentError("Document not found.")
+            updated = StoredDocument(
+                id=record.id, display_name=record.display_name, suffix=record.suffix,
+                size_bytes=record.size_bytes, text_chars=record.text_chars,
+                uploaded_at=record.uploaded_at, indexed_at=None,
+                ingestion_status="failed", chunk_count=None, path=record.path,
+            )
+            self._documents[document_id] = updated
+            self._save_manifest()
+            return updated
