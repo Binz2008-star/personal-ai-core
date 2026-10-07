@@ -61,10 +61,12 @@ class UiApplication:
         for record in self.documents.list():
             try:
                 self._ingest(record.id)
+            except PdfExtractorUnavailable:
+                self.documents.mark_failed(record.id, reason="pdf_unavailable")
             except Exception:
                 # Indexes are derived state. Never destroy durable user bytes
                 # because reconstruction failed.
-                self.documents.mark_failed(record.id)
+                self.documents.mark_failed(record.id, reason="index_error")
 
     def _ingest(self, document_id: str):
         record = self.documents.get(document_id)
@@ -84,9 +86,20 @@ class UiApplication:
         record = self.documents.save(display_name, content)
         try:
             return self._ingest(record.id)
-        except Exception as exc:
-            self.documents.mark_failed(record.id)
-            raise DocumentError("The document was saved but could not be indexed.") from exc
+        except PdfExtractorUnavailable:
+            return self.documents.mark_failed(record.id, reason="pdf_unavailable")
+        except Exception:
+            return self.documents.mark_failed(record.id, reason="index_error")
+
+    def retry(self, document_id: str):
+        if self.documents.get(document_id) is None:
+            raise DocumentError("Document not found.")
+        try:
+            return self._ingest(document_id)
+        except PdfExtractorUnavailable:
+            return self.documents.mark_failed(document_id, reason="pdf_unavailable")
+        except Exception:
+            return self.documents.mark_failed(document_id, reason="index_error")
 
     def search(self, text: str, limit: int = 5) -> list[dict[str, object]]:
         results = self.retriever.retrieve(RetrievalQuery(text=text, limit=limit))
@@ -148,6 +161,10 @@ class UiHandler(BaseHTTPRequestHandler):
         if path == "/api/documents":
             self._upload()
             return
+        if path.startswith("/api/documents/") and path.endswith("/retry"):
+            document_id = path[len("/api/documents/"):-len("/retry")].strip("/")
+            self._retry(document_id)
+            return
         if path == "/api/search":
             self._search()
             return
@@ -190,6 +207,14 @@ class UiHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.BAD_REQUEST, {"error": "document_invalid", "message": message})
             return
         self._json(HTTPStatus.CREATED, {"document": record.public_dict()})
+
+    def _retry(self, document_id: str) -> None:
+        try:
+            record = self.application.retry(document_id)
+        except DocumentError:
+            self._json(HTTPStatus.NOT_FOUND, {"error": "document_not_found"})
+            return
+        self._json(HTTPStatus.OK, {"document": record.public_dict()})
 
     def _search(self) -> None:
         try:
