@@ -94,6 +94,16 @@ class StoredDocument:
         document_id = str(data["id"])
         if not re.fullmatch(r"[0-9a-f]{32}", document_id):
             raise DocumentError("The document manifest contains an invalid identifier.")
+        status = str(data["ingestion_status"])
+        if status not in {"pending", "indexed", "failed"}:
+            raise DocumentError("The document manifest contains an invalid status.")
+        failure_reason_raw = data.get("failure_reason")
+        if failure_reason_raw not in {None, "index_error", "pdf_unavailable"}:
+            raise DocumentError("The document manifest contains an invalid failure classification.")
+        notice_raw = data.get("notice")
+        if notice_raw not in {None, "no_extractable_text"}:
+            raise DocumentError("The document manifest contains an invalid notice.")
+
         return cls(
             id=document_id,
             display_name=_clean_display_name(str(data["display_name"])),
