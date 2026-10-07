@@ -361,6 +361,17 @@ class DeleteFile:
 
     def run(self, arguments: Mapping[str, Any]) -> ToolResult:
         path = self._workspace.resolve_for_write(arguments["path"])
+        # `resolve` follows a link to its target, so unlinking the resolved
+        # path would delete the file the link points to, not the link named.
+        named = self._workspace.root.joinpath(*arguments["path"].replace("\\", "/").split("/"))
+        if named.is_symlink():
+            return ToolResult(
+                ok=False,
+                error=(
+                    f"is a symlink: {arguments['path']}; delete_file deletes regular "
+                    "files only, and would delete the file it points to"
+                ),
+            )
         if not path.is_file():
             return ToolResult(ok=False, error=f"not a file: {arguments['path']}")
         self._checkpoints.before_mutation(path)
