@@ -61,10 +61,10 @@ class UiApplication:
         for record in self.documents.list():
             try:
                 self._ingest(record.id)
-            except DocumentError:
-                # Derived state is rebuilt on every start. A document that can
-                # no longer be read is removed rather than left in quota.
-                self.documents.delete(record.id)
+            except Exception:
+                # Indexes are derived state. Never destroy durable user bytes
+                # because reconstruction failed.
+                self.documents.mark_failed(record.id)
 
     def _ingest(self, document_id: str):
         record = self.documents.get(document_id)
@@ -84,20 +84,9 @@ class UiApplication:
         record = self.documents.save(display_name, content)
         try:
             return self._ingest(record.id)
-        except Exception:
-            self.documents.delete(record.id)
-            raise DocumentError("The document was saved but could not be indexed.")
-
-    def delete(self, document_id: str) -> None:
-        record = self.documents.get(document_id)
-        if record is None:
-            raise DocumentError("Document not found.")
-        # Remove the old document from the in-memory retrieval structures before
-        # deleting its durable bytes and manifest record.
-        self.ingestion._vector_index.remove_document(document_id)  # type: ignore[attr-defined]
-        self.ingestion._lexical_index.remove_document(document_id)  # type: ignore[attr-defined]
-        self.ingestion._catalog.remove_document(document_id)  # type: ignore[attr-defined]
-        self.documents.delete(document_id)
+        except Exception as exc:
+            self.documents.mark_failed(record.id)
+            raise DocumentError("The document was saved but could not be indexed.") from exc
 
     def search(self, text: str, limit: int = 5) -> list[dict[str, object]]:
         results = self.retriever.retrieve(RetrievalQuery(text=text, limit=limit))
@@ -164,21 +153,6 @@ class UiHandler(BaseHTTPRequestHandler):
             return
         self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
-    def do_DELETE(self) -> None:  # noqa: N802
-        if not self._valid_host() or not self._same_origin() or not self._csrf_valid():
-            self._json(HTTPStatus.FORBIDDEN, {"error": "request_not_allowed"})
-            return
-        prefix = "/api/documents/"
-        path = urlsplit(self.path).path
-        if not path.startswith(prefix):
-            self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
-            return
-        try:
-            self.application.delete(unquote(path[len(prefix):]))
-            self._json(HTTPStatus.OK, {"deleted": True})
-        except DocumentError:
-            self._json(HTTPStatus.NOT_FOUND, {"error": "document_not_found"})
-
     def _upload(self) -> None:
         length = self._content_length()
         if length is None or length > MAX_REQUEST_BYTES:
@@ -224,14 +198,25 @@ class UiHandler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.OK, {"state": "grounded" if results else "no_match", "passages": results})
 
     def _health(self) -> dict[str, object]:
+        root = self.application.documents.root
+        probe = root / f".health-{secrets.token_hex(8)}"
         try:
-            writable = self.application.documents.root.is_dir()
+            probe.write_bytes(b"")
+            probe.unlink()
+            writable = True
+        except OSError:
+            probe.unlink(missing_ok=True)
+            writable = False
+        try:
             from pypdf import PdfReader  # type: ignore[import-not-found]  # noqa: F401
             pdf_available = True
-        except (ImportError, OSError):
+        except ImportError:
             pdf_available = False
-            writable = False if not self.application.documents.root.is_dir() else writable
-        return {"status": "ready" if writable else "degraded", "storage_writable": writable, "pdf_available": pdf_available}
+        return {
+            "status": "ready" if writable else "degraded",
+            "storage_writable": writable,
+            "pdf_available": pdf_available,
+        }
 
     def _static(self, path: str) -> None:
         relative = "index.html" if path == "/" else path.lstrip("/")
@@ -248,8 +233,19 @@ class UiHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_types[relative])
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
+        self._security_headers()
         self.end_headers()
         self.wfile.write(content)
+
+    def _security_headers(self) -> None:
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
+            "base-uri 'none'; frame-ancestors 'none'",
+        )
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
 
     def _valid_host(self) -> bool:
         return self.headers.get("Host", "") == f"127.0.0.1:{self.server.server_address[1]}"  # type: ignore[attr-defined]
