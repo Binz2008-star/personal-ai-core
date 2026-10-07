@@ -101,6 +101,17 @@ class UiApplication:
         except Exception:
             return self.documents.mark_failed(document_id, reason="index_error")
 
+    def retry(self, document_id: str):
+        record = self.documents.get(document_id)
+        if record is None:
+            raise DocumentError("Document not found.")
+        try:
+            return self._ingest(document_id)
+        except PdfExtractorUnavailable:
+            return self.documents.mark_failed(document_id, failure_reason="pdf_unavailable")
+        except Exception:
+            return self.documents.mark_failed(document_id, failure_reason="index_error")
+
     def search(self, text: str, limit: int = 5) -> list[dict[str, object]]:
         results = self.retriever.retrieve(RetrievalQuery(text=text, limit=limit))
         return [
@@ -168,6 +179,10 @@ class UiHandler(BaseHTTPRequestHandler):
         if path == "/api/search":
             self._search()
             return
+        if path.startswith("/api/documents/") and path.endswith("/retry"):
+            document_id = unquote(path[len("/api/documents/"):-len("/retry")]).strip("/")
+            self._retry(document_id)
+            return
         self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def do_DELETE(self) -> None:  # noqa: N802
@@ -213,6 +228,17 @@ class UiHandler(BaseHTTPRequestHandler):
             record = self.application.retry(document_id)
         except DocumentError:
             self._json(HTTPStatus.NOT_FOUND, {"error": "document_not_found"})
+            return
+        self._json(HTTPStatus.OK, {"document": record.public_dict()})
+
+    def _retry(self, document_id: str) -> None:
+        if not re_full_document_id(document_id):
+            self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+            return
+        try:
+            record = self.application.retry(document_id)
+        except DocumentError:
+            self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
         self._json(HTTPStatus.OK, {"document": record.public_dict()})
 
@@ -332,6 +358,10 @@ def _multipart_file(content_type: str, body: bytes) -> tuple[str, bytes]:
                 raise DocumentError("The uploaded file is empty or invalid.")
             return str(part.get_filename()), payload
     raise DocumentError("No file was included in the upload.")
+
+
+def re_full_document_id(value: str) -> bool:
+    return len(value) == 32 and all(ch in "0123456789abcdef" for ch in value)
 
 
 def build_server(application: UiApplication | None = None, *, port: int = 0) -> ThreadingHTTPServer:
