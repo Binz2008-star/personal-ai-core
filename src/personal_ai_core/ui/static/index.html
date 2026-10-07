@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Personal AI Core — مساحة محلية خاصة للمحادثة مع ملفاتك">
+  <title>Personal AI Core</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="session-rail" aria-label="الجلسات">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">◎</div>
+        <div><strong>Personal AI</strong><span>مساحة محلية خاصة</span></div>
+      </div>
+      <button class="button button-primary new-chat" id="new-chat" type="button"><span>＋</span> محادثة جديدة</button>
+      <div class="rail-label"><span>الجلسات</span><button class="icon-button" type="button" aria-label="بحث في الجلسات">⌕</button></div>
+      <nav class="session-list" id="session-list" aria-label="قائمة المحادثات"></nav>
+      <div class="rail-footer">
+        <div class="local-card"><span class="status-dot"></span><div><strong>يعمل محليًا</strong><span>127.0.0.1 · خاص</span></div></div>
+        <button class="settings-link" id="settings-link" type="button">⚙ الإعدادات</button>
+      </div>
+    </aside>
+
+    <main class="main-column">
+      <header class="topbar">
+        <div class="breadcrumb"><span>المحادثات</span><b>/</b><strong id="active-session-title">ميزانية المشروع</strong></div>
+        <div class="topbar-actions"><button class="mode-toggle" id="mode-toggle" type="button"><span class="mode-dot"></span> الوضع البسيط <span class="chevron">⌄</span></button><div class="avatar">م</div></div>
+      </header>
+
+      <section class="conversation" aria-label="المحادثة">
+        <div class="conversation-intro"><span class="eyebrow">الثلاثاء، ٧ أكتوبر</span><h1>مرحبًا، ماذا تريد أن تعرف؟</h1><p>اسأل عن ملفاتك وملاحظاتك. ستظهر المصادر أسفل كل إجابة عندما تكون متاحة.</p></div>
+        <div class="message user-message"><div class="message-meta"><span class="avatar small">م</span><span>أنت · 10:42</span></div><p>ما الذي قررناه بخصوص ميزانية المشروع؟</p></div>
+        <div class="message assistant-message"><div class="message-meta"><div class="assistant-avatar">◎</div><span>Personal AI · 10:42</span><span class="response-state grounded">موثّقة</span></div><p>قررنا أن تكون ميزانية المرحلة الأولى <strong>18,000 ريال</strong>، مع تخصيص 20% احتياطيًا للتغييرات غير المتوقعة. المراجعة التالية مقررة في نهاية الشهر.</p><div class="answer-footer"><button class="evidence-trigger" id="evidence-trigger" type="button">⌕ عرض الأدلة <span>2</span></button><span class="answer-note">من مستند واحد</span></div></div>
+        <div class="message user-message compact"><div class="message-meta"><span class="avatar small">م</span><span>أنت · 10:44</span></div><p>هل هناك مهام مرتبطة بهذا القرار؟</p></div>
+        <div class="message assistant-message pending-message"><div class="message-meta"><div class="assistant-avatar">◎</div><span>Personal AI</span></div><div class="typing"><i></i><i></i><i></i></div></div>
+
+        <div class="composer-wrap"><div class="attachment-preview" id="attachment-preview" hidden><span>📄</span><span id="attachment-name"></span><button id="remove-attachment" type="button" aria-label="إزالة الملف">×</button></div><form class="composer" id="composer"><button class="attach-button" type="button" id="attach-button" aria-label="إرفاق مستند">＋</button><input id="file-input" type="file" accept=".md,.txt,.pdf" hidden><label for="message-input" class="sr-only">رسالتك</label><textarea id="message-input" rows="1" placeholder="اكتب سؤالك هنا..." autocomplete="off"></textarea><button class="send-button" type="submit" aria-label="إرسال">↑</button></form><div class="composer-hint"><span>Enter للإرسال · Shift + Enter لسطر جديد</span><span>المستندات تبقى على جهازك</span></div></div>
+      </section>
+    </main>
+
+    <aside class="evidence-drawer" id="evidence-drawer" aria-label="الأدلة" aria-hidden="true">
+      <div class="drawer-header"><div><span class="eyebrow">تفاصيل الإجابة</span><h2>الأدلة</h2></div><button class="close-button" id="close-evidence" type="button" aria-label="إغلاق الأدلة">×</button></div>
+      <div class="evidence-status"><div class="status-icon">✓</div><div><strong>إجابة موثّقة</strong><p>استُخدمت فقرتان من مستند واحد.</p></div></div>
+      <div class="evidence-section"><div class="section-heading"><span>المصادر المستخدمة</span><span class="count">1</span></div><article class="source-card"><div class="source-icon">▤</div><div class="source-copy"><strong>خطة المشروع.md</strong><span>مستند نصي · تم تحديثه منذ يومين</span></div><button class="more-button" type="button" aria-label="خيارات المصدر">•••</button><div class="passage"><span>المقطع 01 · الأحرف 1,248–1,436</span><p>تم اعتماد ميزانية المرحلة الأولى بمبلغ 18,000 ريال، مع احتياطي بنسبة 20% للتغييرات غير المتوقعة.</p></div><div class="passage"><span>المقطع 02 · الأحرف 1,902–2,014</span><p>تتم مراجعة الميزانية والاحتياطي في نهاية كل شهر.</p></div></article></div>
+      <div class="evidence-section method-section"><div class="section-heading"><span>طريقة الاسترجاع</span></div><div class="method-row"><span>Lexical + hashing</span><span class="method-ok">مكتمل</span></div><div class="method-row"><span>حالة المستندات</span><span>3 ملفات · 8 مقاطع</span></div></div>
+      <div class="drawer-footer"><p>لا تتطابق الأدلة دائمًا مع الإجابة بالكامل. راجع المصدر قبل اتخاذ قرار مهم.</p></div>
+    </aside>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>
