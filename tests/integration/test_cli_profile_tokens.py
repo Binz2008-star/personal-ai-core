@@ -25,7 +25,7 @@ ENGLISH = "I build a job-search platform for the UAE, and I prefer short, clear 
 
 GENERATION = 1024  # context/budget.py DEFAULT_GENERATION_RESERVE
 OVERHEAD = 256  # context/budget.py DEFAULT_OVERHEAD
-FREE_FLOOR = 2048  # history + evidence, kept free beside the profile
+FREE_FLOOR = 2560  # history + evidence, kept free beside the profile
 
 _ESTIMATOR = ScriptAwareTokenEstimator()
 _BARE = DefaultIdentityComposer().tokens(_ESTIMATOR)
