@@ -121,7 +121,7 @@ def test_ruff_inline_configuration_is_refused(command):
         "mypy --strict src",
         "mypy -v .",
         "grep -o needle notes.md",  # grep's -o is --only-matching
-        "grep -r @decorator src",  # for grep, "@" is part of a pattern
+        "grep @decorator notes.py",  # for grep, "@" is part of a pattern
     ],
 )
 def test_the_plain_checks_are_still_admitted(command):
