@@ -1,6 +1,7 @@
 """The agent's tools, run directly -- the executor is tested separately."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -21,6 +22,7 @@ from personal_ai_core.agent.tools import (
     SearchText,
     WriteFile,
     default_tools,
+    run_bounded,
 )
 from personal_ai_core.core.agent import RiskLevel
 from personal_ai_core.core.contracts import Tool
@@ -347,3 +349,33 @@ def test_a_timeout_kills_the_grandchild_too(ws):
     while _alive(pid) and time.monotonic() < deadline:
         time.sleep(0.2)
     assert not _alive(pid), "the grandchild outlived the timeout"
+
+
+def test_a_timeout_kills_a_descendant_after_the_leader_exits(ws):
+    """The leader can exit while a descendant still holds the inherited pipes.
+
+    `taskkill /T` walks the tree from the named process, so once the leader is
+    gone it cannot reach the descendant: on Windows the descendant outlived the
+    timeout and the two reader threads stayed blocked on its pipes (owner's
+    machine, 2026-10-08). The grandchild test above keeps the leader alive with
+    `child.wait()`, so it never covered this case. A job object kills the whole
+    tree from the job handle instead, so the descendant must be gone.
+    """
+    metadata = ws.root / "descendant.pid"
+    leader = (
+        "import subprocess, sys\n"
+        "from pathlib import Path\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+        "Path(sys.argv[1]).write_text(str(child.pid))\n"
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_bounded([sys.executable, "-c", leader, str(metadata)],
+                    cwd=ws.root, env=dict(os.environ), timeout=2)
+    deadline = time.monotonic() + 10
+    while not metadata.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    pid = int(metadata.read_text())
+    deadline = time.monotonic() + 10
+    while _alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert not _alive(pid), "a descendant outlived the leader's timeout"
