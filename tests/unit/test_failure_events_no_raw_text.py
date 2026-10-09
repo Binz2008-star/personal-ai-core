@@ -76,7 +76,7 @@ def _failed(events, session_id, kind: EventType) -> list[dict]:
 
 
 def test_a_failed_generation_keeps_its_kind_and_the_terminal_keeps_the_message():
-    failure = ProviderError(f"ollama request failed: {SENSITIVE}", kind="unreachable")
+    failure = ProviderError(f"ollama request failed: {SENSITIVE}", kind="timeout")
     service, events = build_in_memory_service(transport=Scripted(failure))
     session = service.start_session(service.create_user().id)
 
@@ -86,7 +86,7 @@ def test_a_failed_generation_keeps_its_kind_and_the_terminal_keeps_the_message()
     assert SENSITIVE in str(caught.value)
     [payload] = _failed(events, session.id, EventType.GENERATION_FAILED)
     assert payload == {"model": payload["model"], "error_type": "ProviderError",
-                       "error_kind": "unreachable", "status": None}
+                       "error_kind": "timeout", "status": None}
     stored = _all_payloads(events, session.id)
     assert HOST not in stored and PATH not in stored and TOKEN not in stored
 

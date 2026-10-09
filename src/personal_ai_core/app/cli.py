@@ -34,8 +34,13 @@ from ..conversation.factory import (
     build_in_memory_service,
     build_persistent_service,
     build_reply_redactor,
+    BackupError,
+    backup_database,
     describe_loaded,
     describe_store_failure,
+    list_sessions,
+    profile_budget,
+    save_owner_text,
     STORE_ERRORS,
 )
 from ..core.agent import AgentTaskContract
@@ -74,12 +79,14 @@ PROFILE_FILENAME = "profile.md"
 # so it can be rewritten as projects change without touching what the owner
 # wrote about themselves.
 PROJECTS_FILENAME = "projects.md"
-# Every character is paid for in every turn's context window. A profile
-# (with its projects) that outgrows this is refused with a message rather
-# than cut: a silently truncated profile is one the model reads differently
-# from the one written. 12000 characters of mixed Arabic and English is
-# roughly 3000 tokens of an 8192-token window.
-MAX_PROFILE_CHARS = 12_000
+# Every token of the profile (with its projects) is paid for in every turn's
+# context window, so it is capped by estimated TOKENS against the active
+# model's window, by `profile_budget` in the composition root -- not by
+# characters: an Arabic character costs about 2.5 times a Latin one, and the
+# 12000-character cap this replaces let an Arabic profile alone outgrow the
+# default 8192-token window (F-A). A profile over the cap is refused with a
+# message rather than cut: a silently truncated profile is one the model
+# reads differently from the one written.
 
 PROMPT = "you> "
 REPLY = "core> "
@@ -206,6 +213,25 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "show what the feedback recorded in --session amounts to, and exit. "
+            "Reads only; changes nothing and calls no model."
+        ),
+    )
+    parser.add_argument(
+        "--backup",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "copy the database to PATH, consistently and checked, and exit. Safe while "
+            "another pac runs; never overwrites PATH. Restore by using the copy with "
+            "--database, or by copying it back with no pac running."
+        ),
+    )
+    parser.add_argument(
+        "--sessions",
+        action="store_true",
+        help=(
+            "list the conversations stored in the database, newest first, and exit. "
             "Reads only; changes nothing and calls no model."
         ),
     )
@@ -354,7 +380,7 @@ def _profile_path(
     return database.parent / PROFILE_FILENAME if database is not None else None
 
 
-def _remember(path: Path | None, text: str, out: TextIO) -> int:
+def _remember(path: Path | None, text: str, settings: Settings, out: TextIO) -> int:
     text = " ".join(text.split())
     if not text:
         print("--remember needs something to remember", file=out)
@@ -362,13 +388,76 @@ def _remember(path: Path | None, text: str, out: TextIO) -> int:
     if path is None:
         print(f"no profile to add to: pass --profile PATH or set ${PROFILE_ENV}", file=out)
         return 2
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
+    # The profile is sent to the model with every turn, conversation and
+    # agent alike, and to whatever host PAC_OLLAMA_HOST names. A key, token or
+    # password typed here would go with each one, so it is not written; the
+    # value is not repeated back either.
+    try:
+        shapes = build_reply_redactor().redact(text).counts
+    except RedactionError:
+        print("that could not be checked for secrets, so it was not remembered", file=out)
+        return 2
+    if shapes:
+        print(
+            f"that looks like a secret ({', '.join(sorted(shapes))}); the profile is sent "
+            "to the model with every turn, so it was not remembered",
+            file=out,
+        )
+        return 2
+    # Gap analysis P2-7: a profile that cannot be read is a sentence, not a
+    # traceback, and nothing is written.
+    if path.exists() and not path.is_file():
+        print(f"the profile is not a file: {path}", file=out)
+        return 2
+    try:
+        existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
+    except UnicodeDecodeError:
+        print(f"the profile is not UTF-8 text: {path}", file=out)
+        return 2
+    except OSError as exc:
+        print(f"the profile cannot be read: {path} ({exc.strerror or exc})", file=out)
+        return 2
     if not existing.endswith("\n"):
         existing += "\n"
-    path.write_text(existing + f"- {text}\n", encoding="utf-8")
+    updated = existing + f"- {text}\n"
+    # Measured as the next run will load it, projects and all, so a line
+    # that fits here is never refused at the next start (F-A).
+    joined = _joined_profile(path, out, profile_text=updated)
+    if joined is None:
+        return 2
+    budget = profile_budget(joined, settings)
+    if not budget.fits:
+        print(
+            f"not remembered: with this line the profile would be about "
+            f"{budget.tokens} tokens; the limit is {budget.allowed} for the model's "
+            f"{budget.window}-token window, because it is sent with every turn. "
+            f"Shorten {' or '.join(str(f) for f in _profile_files(path)) or path} "
+            f"by about {budget.excess_chars} characters first.",
+            file=out,
+        )
+        return 2
+    # Gap analysis P2-7: written whole or not at all. The profile is the
+    # owner's own text and is sent with every turn; it is never left torn.
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        save_owner_text(path, updated)
+    except OSError as exc:
+        print(f"nothing added to {path}: {exc.strerror or exc}. The profile is as it was.",
+              file=out)
+        return 2
     print(f"remembered, in {path}", file=out)
     return 0
+
+
+def _owner_files(path: Path | None) -> list[Path]:
+    """The profile and the projects file beside it, existing or not.
+
+    Unlike `_profile_files` this does not ask whether they exist: a file the
+    agent could create would be read as the profile on the next run.
+    """
+    if path is None:
+        return []
+    return [path, path.parent / PROJECTS_FILENAME]
 
 
 def _profile_files(path: Path | None) -> list[Path]:
@@ -378,26 +467,73 @@ def _profile_files(path: Path | None) -> list[Path]:
     return [p for p in (path, path.parent / PROJECTS_FILENAME) if p.is_file()]
 
 
-def _load_profile(path: Path | None, out: TextIO) -> str | None:
-    """The profile text; "" when there is none; None when it cannot be used."""
+def _joined_profile(
+    path: Path | None, out: TextIO, *, profile_text: str | None = None
+) -> str | None:
+    """The profile and its projects as one text; None when one is not UTF-8.
+
+    `profile_text` stands in for the profile file's content, so --remember
+    can measure the profile it is about to write.
+    """
+    files = _profile_files(path)
+    if profile_text is not None and path is not None and path not in files:
+        files.insert(0, path)
     parts = []
-    for file in _profile_files(path):
+    for file in files:
         try:
-            text = file.read_text(encoding="utf-8").strip()
+            text = (
+                profile_text if profile_text is not None and file == path
+                else file.read_text(encoding="utf-8")
+            ).strip()
         except UnicodeDecodeError:
             print(f"the profile is not UTF-8 text: {file}", file=out)
             return None
+        except OSError as exc:
+            # Unreadable (permissions, a directory by that name): a sentence,
+            # not a traceback (gap analysis P2-7).
+            print(f"the profile cannot be read: {file} ({exc.strerror or exc})", file=out)
+            return None
         if text:
             parts.append(text)
-    text = "\n\n".join(parts)
-    if len(text) > MAX_PROFILE_CHARS:
+    return "\n\n".join(parts)
+
+
+def _load_profile(path: Path | None, settings: Settings, out: TextIO) -> str | None:
+    """The profile text; "" when there is none; None when it cannot be used."""
+    text = _joined_profile(path, out)
+    if text is None:
+        return None
+    if text:
+        budget = profile_budget(text, settings)
+        if not budget.fits:
+            print(
+                f"the profile is about {budget.tokens} tokens; the limit is "
+                f"{budget.allowed} for the model's {budget.window}-token window, "
+                f"because it is sent with every turn. Shorten "
+                f"{' or '.join(str(f) for f in _profile_files(path))} "
+                f"by about {budget.excess_chars} characters.",
+                file=out,
+            )
+            return None
+    # A secret already in the file -- written by hand, or before --remember
+    # refused them -- is withheld from what the model reads, the way a reply's
+    # is withheld from what is printed. The file is not changed: it is the
+    # owner's, and the line says where to look.
+    if not text:
+        return text
+    try:
+        shown = build_reply_redactor().redact(text)
+    except RedactionError:
+        print("the profile could not be checked for secrets, so it is not used", file=out)
+        return None
+    if shown.counts:
         print(
-            f"the profile is {len(text)} characters; the limit is {MAX_PROFILE_CHARS}, "
-            f"because it is sent with every turn. Shorten "
-            f"{' or '.join(str(f) for f in _profile_files(path))}.",
+            f"the profile holds something secret-shaped (looks like: "
+            f"{', '.join(sorted(shown.counts))}); it is withheld from the model. Remove it "
+            f"from {' or '.join(str(f) for f in _profile_files(path))}.",
             file=out,
         )
-        return None
+        return shown.text
     return text
 
 
@@ -568,6 +704,103 @@ def _observations(args, database: Path | None, settings: Settings, transport, ou
         slice_.close()
 
 
+def _sessions(args, database: Path | None, out: TextIO) -> int:
+    """List the stored conversations, newest first, and exit. Reads only.
+
+    A session id was printed once, when the conversation started; this is how
+    to find it again. Nothing is opened for writing and no model is called.
+    """
+    if database is None:
+        print("--sessions lists stored conversations; it cannot be used with --ephemeral",
+              file=out)
+        return 2
+    others = [flag for flag, given in (
+        ("--agent", args.agent), ("--documents", args.documents is not None),
+        ("--remember", args.remember is not None), ("--feedback", args.feedback is not None),
+        ("--correction", args.correction is not None), ("--observations", args.observations),
+        ("--session", args.session is not None), ("--backup", args.backup is not None)) if given]
+    if others:
+        print(f"--sessions lists and exits; it cannot be combined with {', '.join(others)}",
+              file=out)
+        return 2
+    if not database.is_file():
+        print(f"no stored conversations at {database}", file=out)
+        return 2
+    sessions = list_sessions(database)
+    if not sessions:
+        print(f"no conversations stored in {database} yet", file=out)
+        return 0
+    print(f"{len(sessions)} conversation(s) in {database}, newest first:", file=out)
+    for session in sessions:
+        started = session.started_at.strftime("%Y-%m-%d %H:%M")
+        last = (session.last_activity.strftime("%Y-%m-%d %H:%M")
+                if session.last_activity is not None else "-")
+        closed = "" if session.status == "active" else f"  ({session.status})"
+        print(f"  {session.id}  started {started}  last {last}  "
+              f"{session.messages} message(s){closed}", file=out)
+    print("continue one with --session ID (times are UTC)", file=out)
+    return 0
+
+
+def _backup(args, database: Path | None, out: TextIO) -> int:
+    """Copy the database to --backup PATH, check the copy, and exit.
+
+    The backup is SQLite's own, from a read-only connection: one consistent
+    snapshot, its latest writes included, safe while another pac runs. Nothing
+    is overwritten and no model is called.
+    """
+    if database is None:
+        print("--backup copies the stored conversations; it cannot be used with --ephemeral",
+              file=out)
+        return 2
+    others = [flag for flag, given in (
+        ("--agent", args.agent), ("--documents", args.documents is not None),
+        ("--remember", args.remember is not None), ("--feedback", args.feedback is not None),
+        ("--correction", args.correction is not None), ("--observations", args.observations),
+        ("--session", args.session is not None), ("--sessions", args.sessions)) if given]
+    if others:
+        print(f"--backup copies and exits; it cannot be combined with {', '.join(others)}",
+              file=out)
+        return 2
+    if not database.is_file():
+        print(f"no stored conversations at {database}", file=out)
+        return 2
+    destination = args.backup
+    if destination.resolve() == database.resolve():
+        print("--backup PATH must be another file than the database itself", file=out)
+        return 2
+    if not destination.parent.is_dir():
+        print(f"no such directory: {destination.parent}", file=out)
+        return 2
+    try:
+        size = backup_database(database, destination)
+    except BackupError as exc:
+        print(f"pac: {exc}", file=out)
+        return 2
+    print(f"backed up {database} to {destination} ({size} bytes), checked", file=out)
+    print(f"         to use it: pac --database {destination}", file=out)
+    return 0
+
+
+def _speak_utf8(*, stdin: object, stdout: object, stderr: object) -> None:
+    """Read and write the process's own streams as UTF-8, whatever the locale.
+
+    On Windows, a stream that is not the console -- piped, redirected, through
+    `Tee-Object`, in Git Bash -- takes the ANSI code page (cp1252, cp1256), and
+    an Arabic reply then failed to print: a traceback, the reply stored but
+    never shown. Only the process's own streams are changed; a stream a caller
+    passes in is the caller's. `errors="replace"` so a byte the pipe cannot
+    carry costs one character, never the turn.
+    """
+    for given, stream in ((stdin, sys.stdin), (stdout, sys.stdout), (stderr, sys.stderr)):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if given is None and reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass  # a stream that cannot be changed is left as it is
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -584,6 +817,7 @@ def main(
     sentence and exit 1 rather than a traceback (gap analysis P1-5):
     `describe_store_failure` says what happened and what to do first.
     """
+    _speak_utf8(stdin=stdin, stdout=stdout, stderr=stderr)
     try:
         return _main(argv, transport=transport, stdin=stdin, stdout=stdout,
                      stderr=stderr, env=env, probe=probe)
@@ -628,14 +862,18 @@ def _main(
     lines = iter(stdin if stdin is not None else sys.stdin)
 
     database = None if args.ephemeral else _database_path(args.database, environment)
+    if args.backup is not None:
+        return _backup(args, database, out)
+    if args.sessions:
+        return _sessions(args, database, out)
     if args.observations:
         return _observations(args, database, settings, transport, out)
     if args.feedback is not None or args.correction is not None:
         return _feedback(args, database, settings, transport, out)
     profile_path = _profile_path(args.profile, environment, database)
     if args.remember is not None:
-        return _remember(profile_path, args.remember, out)
-    profile = _load_profile(profile_path, out)
+        return _remember(profile_path, args.remember, settings, out)
+    profile = _load_profile(profile_path, settings, out)
     if profile is None:
         return 2
     settings = dataclasses.replace(settings, profile=profile)
@@ -708,6 +946,16 @@ def _main(
                 print(passed_over, file=out)
             _ingest(ingestion, files, out)
 
+        if not args.agent:
+            # R1, case b: when the profile and the fixed reserves fill the
+            # window, every turn would be refused. Said before a session is
+            # created for it, not after the first message is stored.
+            try:
+                service.check_room()
+            except ContextOverflowError as exc:
+                print(f"pac: no turn can be sent: {exc}.", file=out)
+                return 1
+
         if args.session:
             # Not verified here. `send` raises KeyError for an unknown
             # session and that is the contract; the agent loop raises the same
@@ -748,6 +996,10 @@ def _main(
                 confirm=_confirmer(lines, out),
                 events=events,
                 database=database,
+                # N4: the profile pac reads, and projects.md beside it, whether
+                # or not they exist -- the agent may neither change nor create
+                # what every later turn is told about the owner.
+                owner_files=_owner_files(profile_path),
                 session_exists=service.has_session,
             )
             print(f"agent:   workspace {agent.workspace.root}", file=out)
@@ -758,7 +1010,9 @@ def _main(
             )
             print(file=out)
             return _agent_session(agent=agent, session_id=session_id, lines=lines, out=out,
-                                  err=err, settings=settings)
+                                  err=err, settings=settings,
+                                  confirm_window=lambda: _confirm_window(
+                                      settings, probe=probe, live=transport is None, out=out))
 
         print(file=out)
 
@@ -770,6 +1024,8 @@ def _main(
             out=out,
             redactor=build_reply_redactor(),
             settings=settings,
+            confirm_window=lambda: _confirm_window(
+                settings, probe=probe, live=transport is None, out=out),
         )
     finally:
         if slice_ is not None:
@@ -788,9 +1044,48 @@ def _say_if_the_model_must_load(settings: Settings, *, probe, live: bool, out: T
     """
     loaded = describe_loaded("ollama", ollama_host=settings.ollama_host, llamacpp_host="",
                              model=settings.boss_model, probe=probe, live=live)
+    window = loaded.get("context_length")
     if loaded.get("probed") and loaded.get("reason") == "model not loaded":
         print("         not loaded yet: the first reply loads it, which can take "
               "a minute or more", file=out)
+    elif (loaded.get("probed") and isinstance(window, int)
+          and window != settings.boss_context_window):
+        # N1: every request names the window the Core budgets against, and a
+        # server running another reloads the model for it -- as slow as a
+        # cold start, and just as worth announcing.
+        print(f"         loaded with a {window}-token window: the first reply reloads it at "
+              f"{settings.boss_context_window}, which can take a minute or more", file=out)
+
+
+def _confirm_window(settings: Settings, *, probe, live: bool, out: TextIO) -> int | None:
+    """N1: once, after the first reply, check the server runs the window the
+    Core budgets against. An exit code when it does not; None otherwise.
+
+    The request names the window (`num_ctx`), so the server should report it.
+    A smaller one means the window was not honoured -- the server caps
+    `num_ctx` at the model's trained context, for one -- and every turn would
+    be budgeted for room the server does not have: the run stops, with the fix.
+    A server that cannot say is not taken for a mismatch: the request still
+    named the window, and pac says only that it could not confirm it.
+    """
+    if probe is None and not live:
+        return None  # a test transport: there is no server to ask
+    loaded = describe_loaded("ollama", ollama_host=settings.ollama_host, llamacpp_host="",
+                             model=settings.boss_model, probe=probe, live=live)
+    window = loaded.get("context_length")
+    if not loaded.get("probed") or not isinstance(window, int):
+        print("         window not confirmed: the model server did not report the context "
+              "it loaded", file=out)
+        return None
+    if window < settings.boss_context_window:
+        print(f"pac: the model server runs {settings.boss_model} with a {window}-token window, "
+              f"but pac budgets every turn for {settings.boss_context_window} "
+              "(PAC_BOSS_CONTEXT_WINDOW); longer turns would be cut by the server without a "
+              "word.", file=out)
+        print(f"set PAC_BOSS_CONTEXT_WINDOW={window}, or give the model a larger window.",
+              file=out)
+        return 2
+    return None
 
 
 def _explain_provider_failure(exc: ProviderError, settings: Settings, out: TextIO) -> None:
@@ -819,7 +1114,8 @@ def _explain_provider_failure(exc: ProviderError, settings: Settings, out: TextI
 
 
 def _converse(*, service, session_id, language, lines, out, redactor: SecretRedactor,
-              settings: Settings | None = None) -> int:
+              settings: Settings | None = None,
+              confirm_window: Callable[[], int | None] | None = None) -> int:
     """The chat loop. Every reply passes `redactor` before it is printed.
 
     Gap analysis P0-6: a secret the model repeats -- from the history, the
@@ -828,6 +1124,9 @@ def _converse(*, service, session_id, language, lines, out, redactor: SecretReda
     says so, in the agent's words for the same event ("it contained something
     secret-shaped"). `redactor` has no default (ADR-018 I1): a caller that
     wants raw text must say so. What is stored is not changed here.
+
+    `confirm_window` runs once, after the first reply has loaded the model
+    (N1); an exit code from it ends the session.
     """
     for line in lines:
         content = line.strip()
@@ -844,18 +1143,38 @@ def _converse(*, service, session_id, language, lines, out, redactor: SecretReda
             return 2
         except ContextOverflowError as exc:
             # ADR-005: refused rather than sent and silently cut by the server.
-            print(f"this conversation no longer fits the model: {exc}.", file=out)
-            print("start a new session (run pac without --session) to continue.", file=out)
+            # Older messages are left out of the prompt to make room (P1-3),
+            # so the cause is the message or the profile, and the error says
+            # which (R1): a new session would be refused the same way.
+            print(f"the turn was not sent: {exc}.", file=out)
             return 1
         except ProviderError as exc:
             _explain_provider_failure(exc, settings or Settings(), out)
             return 1
         _print_reply(reply.content, redactor, out)
+        # R2: said once, on the turn that first leaves messages out -- not on
+        # every turn after it. The count of every turn is in its
+        # CONTEXT_ASSEMBLED event.
+        started = getattr(service, "left_out_started", None)
+        left_out = started(session_id) if started is not None else None
+        if left_out:
+            print(f"{_NOTE}{LEFT_OUT_NOTE.format(count=left_out)}", file=out)
+        if confirm_window is not None:
+            code, confirm_window = confirm_window(), None
+            if code is not None:
+                return code
     return 0
 
 
 # Under the reply, aligned with the other continuation lines ("changed:").
 _NOTE = "         "
+
+# R2 (P1-3): the one line a session gets when its oldest messages stop being
+# sent to the model.
+LEFT_OUT_NOTE = (
+    "[older messages are no longer sent to the model (they are kept); "
+    "{count} left out so far]"
+)
 
 
 def _print_reply(content: str, redactor: SecretRedactor, out: TextIO) -> None:
@@ -918,9 +1237,24 @@ def _describe_step(step) -> str:
 
 
 def _agent_session(*, agent, session_id, lines, out, err,
-                   settings: Settings | None = None) -> int:
+                   settings: Settings | None = None,
+                   confirm_window: Callable[[], int | None] | None = None) -> int:
     invalid_tasks = False
+    # N1: the window is checked once, after the first task has loaded the
+    # model and its outcome has been shown -- and before a second task runs.
+    window_due = False
+
+    def window_verdict() -> int | None:
+        nonlocal confirm_window, window_due
+        if not window_due or confirm_window is None:
+            return None
+        check, confirm_window, window_due = confirm_window, None, False
+        return check()
+
     for line in lines:
+        code = window_verdict()
+        if code is not None:
+            return code
         if not line.strip():
             continue
         try:
@@ -939,16 +1273,39 @@ def _agent_session(*, agent, session_id, lines, out, err,
                 ),
             )
         except KeyError:
+            # Raised before anything ran: there is nothing to undo.
             print(f"no such session: {session_id}", file=out)
             return 2
+        # N3: however a task ends early, the owner hears what it changed and
+        # is offered the undo. Before this, only a budget stop asked; a model
+        # server that failed mid-task, or a Ctrl-C, left the files changed and
+        # the rollback points in memory, gone at exit.
         except ContextOverflowError as exc:
             # ADR-005: refused rather than sent and silently cut by the server.
             print(f"this conversation no longer fits the model: {exc}.", file=out)
             print("start a new session (run pac without --session) to continue.", file=out)
-            return 1
+            return 130 if _offer_undo(agent, lines, out) else 1
         except ProviderError as exc:
             _explain_provider_failure(exc, settings or Settings(), out)
-            return 1
+            return 130 if _offer_undo(agent, lines, out) else 1
+        except KeyboardInterrupt:
+            print(file=out)
+            print("interrupted: the task was stopped before it finished.", file=out)
+            _offer_undo(agent, lines, out)
+            return 130
+        except STORE_ERRORS:
+            # The store's own sentence is printed by `main`; the files are not
+            # in the store, so their undo is offered first.
+            _offer_undo(agent, lines, out)
+            raise
+        except Exception:
+            # A defect, not a failure pac knows how to name: the loop has
+            # already recorded it as internal_error, and it still propagates.
+            # The files the task changed are offered back first, so a crash
+            # does not cost the owner the undo.
+            _offer_undo(agent, lines, out)
+            raise
+        window_due = True
         if outcome.finished:
             print(f"{REPLY}{outcome.answer}", file=out)
             if outcome.touched_files:
@@ -956,20 +1313,46 @@ def _agent_session(*, agent, session_id, lines, out, err,
             agent.checkpoints.commit()
             continue
         print(f"{outcome.stopped_reason}", file=out)
-        if outcome.touched_files and _ask(
-            f"  ? undo {len(outcome.touched_files)} file change(s) from this task "
-            f"({', '.join(outcome.touched_files)})? [y/N] ",
+        if _offer_undo(agent, lines, out):
+            return 130
+    code = window_verdict()
+    if code is not None:
+        return code
+    return 2 if invalid_tasks else 0
+
+
+def _offer_undo(agent, lines, out) -> bool:
+    """Offer to undo what this task's file tools changed. True if interrupted.
+
+    Nothing touched: nothing is asked. End of input keeps the changes, as does
+    a Ctrl-C at the question (N3, decisions A and B: keep is the default
+    everywhere). Kept or not, the owner is told which files.
+    """
+    touched = agent.checkpoints.touched()
+    if not touched:
+        agent.checkpoints.commit()
+        return False
+    try:
+        undo = _ask(
+            f"  ? undo {len(touched)} file change(s) from this task "
+            f"({', '.join(touched)})? [y/N] ",
             lines,
             out,
-        ):
-            try:
-                restored = agent.checkpoints.rollback()
-            except RollbackIncomplete as exc:
-                if exc.restored:
-                    print(f"         restored: {', '.join(exc.restored)}", file=out)
-                print(f"         NOT restored: {', '.join(exc.unrestored)}", file=out)
-            else:
-                print(f"         restored: {', '.join(restored)}", file=out)
-        else:
-            agent.checkpoints.commit()
-    return 2 if invalid_tasks else 0
+        )
+    except KeyboardInterrupt:
+        print(file=out)
+        print(f"         kept: {', '.join(touched)}", file=out)
+        agent.checkpoints.commit()
+        return True
+    if not undo:
+        agent.checkpoints.commit()
+        return False
+    try:
+        restored = agent.checkpoints.rollback()
+    except RollbackIncomplete as exc:
+        if exc.restored:
+            print(f"         restored: {', '.join(exc.restored)}", file=out)
+        print(f"         NOT restored: {', '.join(exc.unrestored)}", file=out)
+    else:
+        print(f"         restored: {', '.join(restored)}", file=out)
+    return False

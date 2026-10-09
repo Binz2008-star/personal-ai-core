@@ -1,0 +1,10 @@
+{
+  "plugins": [
+    {
+      "package": "file:///C:/Users/loyal/personal-ai-core/tools/opencode-pac-observer"
+    },
+    {
+      "package": "file:///C:/Users/loyal/personal-ai-core/tools/opencode-pac-compaction"
+    }
+  ]
+}
