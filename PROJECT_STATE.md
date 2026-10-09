@@ -2040,3 +2040,11 @@ Architecture docs:
 - docs/MEMORY_ARCHITECTURE.md — Event != Memory, promotion, provenance
 - docs/MODEL_ARCHITECTURE.md — registry, Boss model huihui_ai/qwen2.5-abliterate:7b
 - docs/AGENT_ARCHITECTURE.md — agent loop, tool contracts
+
+
+Exact file-read completion — PROPOSED OPT-IN CONTROL (2026-10-10)
+- Code commit: e8cfc7cba280e37c7e484e05c0bc99cadd5b2427
+- Reviewed base: a43c6f4443f8ed8ea4aac39570060ecedd2a5591
+- Scope: caller-owned exact_read_path and --exact-read; matching complete verified file evidence, read-only task denials and failure exit code. Off by default, no task-intent inference or model/context change.
+- Local verification: 3448 passed / 80 skipped; Ruff 0.15.8 and Pyright 1.1.408 clean; four bad verification/denial variants caught.
+- Status: draft for owner review and a preregistered live Boss pilot. Not merged, no default enabled, no general grounding or coding improvement claimed.
