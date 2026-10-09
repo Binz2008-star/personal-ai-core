@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..core.agent import RiskLevel, ToolResult, ToolSpec
-from .commands import CommandRejected, validate_command
+from .commands import RECURSIVE_READ, SEARCH_TEXT_INSTEAD, CommandRejected, validate_command
 from .recovery import Checkpoints, atomic_write_text
 from .sandbox import SandboxError, Workspace, is_protected
 
@@ -361,6 +361,17 @@ class DeleteFile:
 
     def run(self, arguments: Mapping[str, Any]) -> ToolResult:
         path = self._workspace.resolve_for_write(arguments["path"])
+        # `resolve` follows a link to its target, so unlinking the resolved
+        # path would delete the file the link points to, not the link named.
+        named = self._workspace.root.joinpath(*arguments["path"].replace("\\", "/").split("/"))
+        if named.is_symlink():
+            return ToolResult(
+                ok=False,
+                error=(
+                    f"is a symlink: {arguments['path']}; delete_file deletes regular "
+                    "files only, and would delete the file it points to"
+                ),
+            )
         if not path.is_file():
             return ToolResult(ok=False, error=f"not a file: {arguments['path']}")
         self._checkpoints.before_mutation(path)
@@ -398,6 +409,34 @@ def _refuse_protected_arguments(workspace: Workspace, args: list[str]) -> None:
                 raise CommandRejected(
                     f"command touches a file the agent may not use: {token} ({exc})"
                 ) from None
+
+
+def _refuse_diff_outside_a_repository(
+    workspace: Workspace, args: list[str], env: Mapping[str, str]
+) -> None:
+    """Refuse `git diff` where git would read it as `git diff --no-index`.
+
+    Outside a git work tree, `git diff a b` compares the two paths themselves,
+    a directory file by file, so `git diff empty .` printed every file in the
+    workspace, the database and the owner's profile among them (fix 9 in
+    commands.py refuses the explicit `--no-index`). Git is asked, with the
+    environment and directory the command would run with, rather than the
+    answer guessed from a `.git` on disk; if it cannot say, the diff is refused.
+    """
+    if args[:2] != ["git", "diff"]:
+        return
+    try:
+        code, stdout, _ = run_bounded(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=workspace.root, env=env, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        code, stdout = 1, ""
+    if code != 0 or stdout.strip() != "true":
+        raise CommandRejected(
+            f"git diff outside a git work tree compares files directly and "
+            f"{RECURSIVE_READ}; {SEARCH_TEXT_INSTEAD}"
+        )
 
 
 def _refuse_shadowed_executable(workspace: Workspace, name: str) -> None:
@@ -465,6 +504,7 @@ class RunCommand:
         }
         if os.name == "nt":
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
+        _refuse_diff_outside_a_repository(self._workspace, args, env)
         try:
             returncode, stdout, stderr = run_bounded(
                 args, cwd=self._workspace.root, env=env, timeout=self.spec.timeout_seconds

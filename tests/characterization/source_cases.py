@@ -33,4 +33,6 @@ SOURCE_LETS_THROUGH = [
     ("cat /etc/passwd", 7),
     ("grep -r key ~", 7),
     ("git remote add origin url", 8),
+    ("grep -r needle .", 9),
+    ("grep -Rli needle src", 9),
 ]
