@@ -99,6 +99,16 @@ def test_a_rejection_says_why():
         validate_command("git commit -m x")
 
 
+@pytest.mark.parametrize("command", ["git status | head", "pytest && git status", "git status > status.txt"])
+def test_shell_syntax_refusal_explains_the_supported_recovery(command):
+    with pytest.raises(CommandRejected) as rejected:
+        validate_command(command)
+    message = str(rejected.value)
+    assert "shell metacharacter" in message
+    assert "one command per tool call" in message
+    assert "read the returned output directly" in message
+
+
 def test_an_option_before_the_subcommand_is_named_as_such():
     """Fix 5. Fix 3 would refuse it too -- `-c` is never read-only -- but the
     user should be told the real reason, not "not a read-only subcommand: -c"."""

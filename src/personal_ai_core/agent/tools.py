@@ -37,7 +37,13 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..core.agent import RiskLevel, ToolResult, ToolSpec
-from .commands import RECURSIVE_READ, SEARCH_TEXT_INSTEAD, CommandRejected, validate_command
+from .commands import (
+    COMMAND_SYNTAX_GUIDANCE,
+    RECURSIVE_READ,
+    SEARCH_TEXT_INSTEAD,
+    CommandRejected,
+    validate_command,
+)
 from .recovery import Checkpoints, atomic_write_text
 from .sandbox import SandboxError, Workspace, is_protected
 
@@ -849,7 +855,8 @@ class RunCommand:
             name="run_command",
             description=(
                 "Run one allowlisted command in the workspace, without a shell: a "
-                "read-only one, or a check (pytest, ruff, mypy). A check is not "
+                "read-only one, or a check (pytest, ruff, mypy). "
+                f"{COMMAND_SYNTAX_GUIDANCE} A check is not "
                 "read-only: pytest runs the project's own code, and the project's "
                 "configuration can make any check write files, so the owner is asked "
                 "before every run. Options that write files, such as ruff --fix, are "

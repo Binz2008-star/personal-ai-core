@@ -134,6 +134,10 @@ RECURSIVE_READ = (
     "profile among them"
 )
 SHELL_METACHARACTERS = frozenset("|;&$`!{}()[]<>")
+COMMAND_SYNTAX_GUIDANCE = (
+    "run_command has no shell. Use one command per tool call, without pipes, "
+    "chaining or redirection, and read the returned output directly."
+)
 
 # Options that make a checking command write files, refused alone or as
 # `--option=value`. `ruff format` is refused already: "format" is a blocked
@@ -195,7 +199,7 @@ def validate_command(command: str) -> list[str]:
 
     for part in parts:
         if any(character in SHELL_METACHARACTERS for character in part):
-            raise CommandRejected(f"shell metacharacter in: {part}")
+            raise CommandRejected(f"shell metacharacter in: {part}. {COMMAND_SYNTAX_GUIDANCE}")
 
     arguments = parts[1:]
     for argument in arguments:
