@@ -13,6 +13,9 @@ Every secret here is obviously fake.
 """
 from __future__ import annotations
 
+import os
+import shutil
+
 import pytest
 
 from personal_ai_core.agent.executor import ToolExecutor
@@ -62,6 +65,64 @@ def shown_after(script) -> str:
     return script.calls[1][-1].content
 
 
+def _cat_directory() -> str | None:
+    """A directory holding a `cat` this platform can execute, or None.
+
+    POSIX ships cat on PATH. Windows does not, but Git for Windows bundles one
+    under its own tree, off PATH. The candidates start from git's own location
+    and the usual install roots rather than from one hard-coded path.
+    """
+    found = shutil.which("cat")
+    if found:
+        return os.path.dirname(found)
+    if os.name != "nt":
+        return None
+    candidates: list[str] = []
+    git = shutil.which("git")
+    if git:
+        git_root = os.path.dirname(os.path.dirname(os.path.realpath(git)))
+        candidates += [
+            os.path.join(git_root, "usr", "bin"),
+            os.path.join(git_root, "mingw64", "bin"),
+            os.path.join(git_root, "bin"),
+        ]
+    for variable in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LocalAppData"):
+        root = os.environ.get(variable)
+        if not root:
+            continue
+        for relative in (
+            ("Git", "usr", "bin"),
+            ("Git", "mingw64", "bin"),
+            ("Programs", "Git", "usr", "bin"),
+            ("Programs", "Git", "mingw64", "bin"),
+        ):
+            candidates.append(os.path.join(root, *relative))
+    for directory in candidates:
+        if os.path.isfile(os.path.join(directory, "cat.exe")):
+            return directory
+    return None
+
+
+@pytest.fixture
+def cat_on_path(monkeypatch):
+    """Put a runnable `cat` on PATH for this test only.
+
+    `cat` is not on PATH on Windows, so the command case failed for want of a
+    binary rather than on behaviour. The command under test stays exactly
+    `cat settings.ini` and every assertion is unchanged; the directory is added
+    to this test's environment only -- never process-wide -- and a machine with
+    no cat at all is reported rather than silently skipped.
+    """
+    directory = _cat_directory()
+    if directory is None:
+        pytest.fail(
+            "missing prerequisite: no `cat` on PATH and none found under the "
+            "Git for Windows install locations; install git or cat to run the "
+            "tool-output case"
+        )
+    monkeypatch.setenv("PATH", directory + os.pathsep + os.environ.get("PATH", ""))
+
+
 def test_a_token_in_a_file_the_agent_reads_never_reaches_the_model(tmp_path):
     script = Script('{"tool": "read_file", "arguments": {"path": "deploy.md"}}',
                     '{"answer": "done"}')
@@ -77,7 +138,7 @@ def test_a_token_in_a_file_the_agent_reads_never_reaches_the_model(tmp_path):
     assert any("no secret in output" in check for check in outcome.steps[0].failed_checks)
 
 
-def test_a_key_a_command_prints_is_withheld_too(tmp_path):
+def test_a_key_a_command_prints_is_withheld_too(tmp_path, cat_on_path):
     script = Script('{"tool": "run_command", "arguments": {"command": "cat settings.ini"}}',
                     '{"answer": "done"}')
     agent = loop(tmp_path, script, files={"settings.ini": f"[aws]\nkey = {AWS}\nregion = me\n"})
