@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -368,9 +369,15 @@ def test_a_timeout_kills_a_descendant_after_the_leader_exits(ws):
         "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
         "Path(sys.argv[1]).write_text(str(child.pid))\n"
     )
+    before = set(threading.enumerate())
+    started = time.monotonic()
     with pytest.raises(subprocess.TimeoutExpired):
         run_bounded([sys.executable, "-c", leader, str(metadata)],
                     cwd=ws.root, env=dict(os.environ), timeout=2)
+    assert time.monotonic() - started < 8, "leader exit left capture waiting beyond its deadline"
+    assert not [thread for thread in threading.enumerate() if thread not in before], (
+        "capture left live pipe readers after returning"
+    )
     deadline = time.monotonic() + 10
     while not metadata.exists() and time.monotonic() < deadline:
         time.sleep(0.05)

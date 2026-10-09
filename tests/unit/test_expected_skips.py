@@ -107,19 +107,23 @@ MAX_NON_HARNESS_SKIPS = 57
 ENVIRONMENT_SKIP_REASONS = ("cannot create a symlink here",)
 
 # Skips that a specific PLATFORM cannot run, not a test turned off. Windows has
-# no POSIX permission bits, so the file-mode cases in these two files skip with
-# "POSIX file modes" and RUN on Linux. They are allowed from exactly these
-# files -- a "POSIX file modes" skip from any other file is still unaccounted
-# for -- and kept out of the structural count. The value is the exact number of
-# skip legs that file contributes: PR #250 adds the three atomic-writes legs,
-# PR #228 the two profile legs. A different count is a test added or removed
+# no POSIX permission bits or FIFOs. The mode cases and the actual named-pipe
+# probe RUN on Linux. Each allowed source is bound to its exact reason and
+# exact count, outside the structural budget: PR #250 adds three atomic mode
+# legs, PR #228 two profile mode legs, and the boundary regression adds one
+# named-pipe leg. A different count is a test added or removed
 # without recording the decision, so it is part of the allowance, not a loose
 # ceiling (test_platform_skip_counts_are_exact). On Linux they run, and a skip
 # there means the tests stopped running (test_platform_skips_never_happen_on_linux).
-PLATFORM_SKIP_REASONS = ("POSIX file modes",)
 PLATFORM_SKIP_SOURCES = {
     "tests/unit/test_atomic_writes_and_rollback.py": 3,
     "tests/integration/test_cli_profile_safety.py": 2,
+    "tests/unit/test_agent_io_boundaries.py": 1,
+}
+PLATFORM_SKIP_REASON_BY_SOURCE = {
+    "tests/unit/test_atomic_writes_and_rollback.py": "POSIX file modes",
+    "tests/integration/test_cli_profile_safety.py": "POSIX file modes",
+    "tests/unit/test_agent_io_boundaries.py": "POSIX named pipes",
 }
 
 # A `-rs` skip line: `SKIPPED [3] tests/unit/foo.py:133: reason`. Parsed rather
@@ -170,14 +174,12 @@ def _environmental(line: str) -> bool:
 
 
 def _platform(line: str) -> bool:
-    """A POSIX-only skip that the platform cannot run, from an exactly-named
-    source and the exact reason. A "POSIX file modes" skip from a file that
-    merely resembles an allowed one, or with a different reason, is not."""
+    """A platform-only skip from its exactly-named source and exact reason."""
     match = _SKIP_LINE.match(_normalize(line))
     if match is None:
         return False
     _, source, reason = match.groups()
-    return reason in PLATFORM_SKIP_REASONS and source in PLATFORM_SKIP_SOURCES
+    return reason == PLATFORM_SKIP_REASON_BY_SOURCE.get(source)
 
 
 def _platform_counts(lines: list[str]) -> dict[str, int]:
@@ -189,7 +191,7 @@ def _platform_counts(lines: list[str]) -> dict[str, int]:
         if match is None:
             continue
         count, source, reason = match.groups()
-        if reason in PLATFORM_SKIP_REASONS and source in PLATFORM_SKIP_SOURCES:
+        if reason == PLATFORM_SKIP_REASON_BY_SOURCE.get(source):
             counted[source] = counted.get(source, 0) + int(count)
     return counted
 
@@ -241,7 +243,7 @@ def test_environment_skips_never_happen_on_linux(skips):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the allowance below exists for Windows")
 def test_platform_skips_never_happen_on_linux(skips):
-    """The POSIX-mode allowance is for Windows, which has no permission bits.
+    """The POSIX allowance is for Windows, which has no modes or FIFOs.
     On Linux those tests run, so a skip there means they stopped running."""
     assert not [line for line in skips if _platform(line)]
 
@@ -398,19 +400,28 @@ def test_a_platform_skip_rejects_a_resembling_filename_or_other_reason():
 
 
 def test_platform_counts_match_exactly_and_reject_drift():
-    """The allowance is an exact count, not a ceiling: an extra or missing leg
-    must not read as the recorded three and two."""
+    """An extra or missing leg must not read as the recorded three, two and one."""
     recorded = [
         "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:133: POSIX file modes",
         "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:147: POSIX file modes",
         "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:155: POSIX file modes",
         "SKIPPED [1] tests/integration/test_cli_profile_safety.py:176: POSIX file modes",
         "SKIPPED [1] tests/integration/test_cli_profile_safety.py:186: POSIX file modes",
+        "SKIPPED [1] tests/unit/test_agent_io_boundaries.py:175: POSIX named pipes",
     ]
     assert _platform_counts(recorded) == PLATFORM_SKIP_SOURCES
     extra_atomic = recorded + [
         "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:999: POSIX file modes"
     ]
     assert _platform_counts(extra_atomic) != PLATFORM_SKIP_SOURCES
-    missing_profile = recorded[:-1]
+    missing_profile = [line for line in recorded if "test_cli_profile_safety.py:186:" not in line]
     assert _platform_counts(missing_profile) != PLATFORM_SKIP_SOURCES
+
+
+def test_fifo_allowance_is_bound_to_its_source_and_its_reason():
+    allowed = "SKIPPED [1] tests/unit/test_agent_io_boundaries.py:175: POSIX named pipes"
+    assert _platform(allowed)
+    assert _platform(allowed.replace("/", "\\"))
+    assert not _platform(allowed.replace("POSIX named pipes", "POSIX file modes"))
+    assert not _platform(ATOMIC_POSIX.replace("POSIX file modes", "POSIX named pipes"))
+    assert not _platform(allowed.replace(".py:175:", ".py_extra.py:175:"))
