@@ -129,10 +129,13 @@ def _budget_policy(identity: DefaultIdentityComposer, settings: Settings) -> Res
 
 
 # Kept free, beside the owner's profile, for the conversation's history and
-# its retrieved evidence: room for at least two retrieved passages, per the R3
-# budget math. A profile that leaves less than this is refused (F-A): with the
-# window spent on who the owner is, there is none left for what they asked.
-PROFILE_FREE_FLOOR = 2048
+# its retrieved evidence. A profile that leaves less than this is refused
+# (F-A): with the window spent on who the owner is, there is none left for
+# what they asked. 2560 holds two full-size Arabic passages with their
+# section preamble (about 2,215 tokens as rendered, the evidence a grounded
+# turn reserves, P1-3 R3) and a short question; 2048 held only one.
+# tests/unit/test_profile_free_floor.py measures it with the real renderer.
+PROFILE_FREE_FLOOR = 2560
 
 
 @dataclass(frozen=True, slots=True)

@@ -43,7 +43,7 @@ like answers. It is read into every conversation and every agent task, in every 
 It stays a file you can open and edit. `pac --remember "I prefer answers in Arabic"` adds a
 line without opening it. A `projects.md` beside it -- one paragraph per project -- is read
 with it, so the Core knows what you mean by a project's name. Together they are capped in
-tokens against the model's window -- about 4300 of an 8192-token window, leaving the rest for
+tokens against the model's window -- about 3800 of an 8192-token window, leaving the rest for
 the conversation and its evidence -- because they are sent with every turn; Arabic costs about
 twice the tokens of English per character. `pac` and `--remember` refuse a profile over the cap
 and say how much to shorten it. For the same reason they are no place
