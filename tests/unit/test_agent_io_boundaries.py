@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from personal_ai_core.agent import tools as tools_module
+from personal_ai_core.agent import recovery as recovery_module
 from personal_ai_core.agent.commands import CommandRejected
 from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import SandboxError, Workspace
@@ -75,14 +76,30 @@ PROBE = r'''
 import json, os, sys, tracemalloc
 from pathlib import Path
 from personal_ai_core.agent.sandbox import Workspace
-from personal_ai_core.agent.tools import ReadFile, SearchText, run_bounded
+from personal_ai_core.agent.tools import ReadFile, SearchText, WriteFile, DeleteFile, run_bounded
+from personal_ai_core.agent.recovery import Checkpoints
+from personal_ai_core.agent.sandbox import SandboxError
 if sys.platform == 'linux':
     import resource
     resource.setrlimit(resource.RLIMIT_AS, (128 * 1024 * 1024, 128 * 1024 * 1024))
 mode, directory = sys.argv[1:]
 workspace = Workspace(Path(directory))
 tracemalloc.start()
-if mode == 'read':
+if mode.startswith('checkpoint-'):
+    checkpoint = Checkpoints(workspace)
+    target = Path(directory) / 'large.txt'
+    try:
+        if mode == 'checkpoint-write':
+            WriteFile(workspace, checkpoint).run({'path': 'large.txt', 'content': 'replacement'})
+        else:
+            DeleteFile(workspace, checkpoint).run({'path': 'large.txt'})
+    except SandboxError as error:
+        data = {'refused': True, 'error': str(error)}
+    else:
+        data = {'refused': False}
+    data['original_size'] = target.stat().st_size if target.exists() else None
+    data['touched'] = checkpoint.touched()
+elif mode == 'read':
     result = ReadFile(workspace).run({'path': 'large.txt'})
     data = {'ok': result.ok, 'size': len(result.output), 'truncated': result.truncated}
 elif mode in ('search', 'matches', 'fifo'):
@@ -145,3 +162,91 @@ def test_search_skips_a_fifo_before_opening_it(tmp_path):
     (tmp_path / "ordinary.txt").write_text("needle in a regular file\n", encoding="utf-8")
     result = _probe("fifo", tmp_path, timeout=5)
     assert result["ok"] and "needle in a regular file" in result["output"]
+
+
+@pytest.mark.parametrize("mode", ["checkpoint-write", "checkpoint-delete"])
+def test_large_originals_are_refused_before_checkpoint_allocation_or_mutation(tmp_path, mode):
+    with (tmp_path / "large.txt").open("wb") as handle:
+        block = b"x" * (1024 * 1024)
+        for _ in range(96):
+            handle.write(block)
+    result = _probe(mode, tmp_path)
+    assert result["refused"], "a large original was loaded into the rollback snapshot"
+    assert "checkpoint" in result["error"] and "budget" in result["error"]
+    assert result["original_size"] == 96 * 1024 * 1024
+    assert not result["touched"], "refusal must not keep a partial snapshot"
+    assert result["peak_bytes"] < 32 * 1024 * 1024
+
+
+@pytest.mark.parametrize("release", ["commit", "rollback"])
+def test_checkpoint_budget_is_shared_and_released_between_tasks(tmp_path, monkeypatch, release):
+    monkeypatch.setattr(recovery_module, "MAX_CHECKPOINT_BYTES", 16, raising=False)
+    original = tmp_path / "first.txt"
+    original.write_bytes(b"a" * 12)
+    second = tmp_path / "second.txt"
+    second.write_bytes(b"b" * 12)
+    checkpoint = Checkpoints(Workspace(tmp_path))
+    checkpoint.before_mutation(original)
+    original.write_bytes(b"edited")
+    with pytest.raises(SandboxError, match="checkpoint.*budget"):
+        checkpoint.before_mutation(second)
+    assert second.read_bytes() == b"b" * 12
+    assert checkpoint.touched() == ("first.txt",)
+    getattr(checkpoint, release)()
+    assert original.read_bytes() == (b"edited" if release == "commit" else b"a" * 12)
+    checkpoint.before_mutation(second)
+    second.unlink()
+    checkpoint.rollback()
+    assert second.read_bytes() == b"b" * 12
+
+
+def test_an_unrestored_checkpoint_still_spends_the_budget(tmp_path, monkeypatch):
+    from personal_ai_core.core.errors import RollbackIncomplete
+
+    monkeypatch.setattr(recovery_module, "MAX_CHECKPOINT_BYTES", 16, raising=False)
+    original = tmp_path / "first.txt"
+    original.write_bytes(b"a" * 12)
+    second = tmp_path / "second.txt"
+    second.write_bytes(b"b" * 12)
+    checkpoint = Checkpoints(Workspace(tmp_path))
+    checkpoint.before_mutation(original)
+    original.write_bytes(b"edited")
+    write = recovery_module.atomic_write_bytes
+
+    def fail(*args, **kwargs):
+        raise PermissionError("temporary refusal")
+
+    monkeypatch.setattr(recovery_module, "atomic_write_bytes", fail)
+    with pytest.raises(RollbackIncomplete):
+        checkpoint.rollback()
+    with pytest.raises(SandboxError, match="checkpoint.*budget"):
+        checkpoint.before_mutation(second)
+    assert checkpoint.touched() == ("first.txt",)
+    monkeypatch.setattr(recovery_module, "atomic_write_bytes", write)
+    checkpoint.rollback()
+    assert original.read_bytes() == b"a" * 12
+
+
+def test_checkpoint_read_remains_bounded_if_a_file_grows_after_stat(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(recovery_module, "MAX_CHECKPOINT_BYTES", 16, raising=False)
+    target = tmp_path / "growing.txt"
+    target.write_bytes(b"x" * 1024)
+    checkpoint = Checkpoints(Workspace(tmp_path))
+    real_stat = Path.stat
+
+    def stale_stat(path, *args, **kwargs):
+        actual = real_stat(path, *args, **kwargs)
+        if path == target:
+            snapshot = Mock(wraps=actual)
+            snapshot.st_size = 0
+            snapshot.st_mode = actual.st_mode
+            return snapshot
+        return actual
+
+    monkeypatch.setattr(Path, "stat", stale_stat)
+    with pytest.raises(SandboxError, match="checkpoint.*budget"):
+        checkpoint.before_mutation(target)
+    assert not checkpoint.touched()
+    assert target.read_bytes() == b"x" * 1024
