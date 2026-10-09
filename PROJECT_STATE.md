@@ -741,6 +741,7 @@ claim written in one place with nothing that notices it going stale.
                which one and exits 2 (P1-4, P1-7)
   #225 9270025  fix(app): a failing store ends in a sentence and the safe next step, not a
                traceback (P1-5)
+  #226 5fc9828  fix(agent): web_search uses the guarded, bounded fetch transport
   #229 02b79f4  fix(app): pac says when the first reply will load the model, and which
                failure a failed turn was (P1-6)
   #230 ac6f5ae  fix(runtime): a model server that did not answer is asked once more, after
@@ -1239,7 +1240,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-09, main at d5e7206)
+NEXT SESSION HANDOFF (updated 2026-10-09, main at 5fc9828)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
