@@ -10,7 +10,11 @@ by accident.
 """
 from __future__ import annotations
 
+import errno
+import os
 import sqlite3
+import stat
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
@@ -129,10 +133,13 @@ def _budget_policy(identity: DefaultIdentityComposer, settings: Settings) -> Res
 
 
 # Kept free, beside the owner's profile, for the conversation's history and
-# its retrieved evidence: room for at least two retrieved passages, per the R3
-# budget math. A profile that leaves less than this is refused (F-A): with the
-# window spent on who the owner is, there is none left for what they asked.
-PROFILE_FREE_FLOOR = 2048
+# its retrieved evidence. A profile that leaves less than this is refused
+# (F-A): with the window spent on who the owner is, there is none left for
+# what they asked. 2560 holds two full-size Arabic passages with their
+# section preamble (about 2,215 tokens as rendered, the evidence a grounded
+# turn reserves, P1-3 R3) and a short question; 2048 held only one.
+# tests/unit/test_profile_free_floor.py measures it with the real renderer.
+PROFILE_FREE_FLOOR = 2560
 
 
 @dataclass(frozen=True, slots=True)
@@ -969,3 +976,42 @@ def build_reply_redactor() -> SecretRedactor:
     what is stored is unchanged. It withholds at the terminal only.
     """
     return SecretShapeRedactor()
+
+
+def save_owner_text(path: Path, text: str) -> None:
+    """Write a file the owner wrote (their profile) so it is never left torn.
+
+    Gap analysis P2-7: `--remember` rewrote profile.md in place, so a full
+    disk or a crash mid-write left it truncated -- the owner's own text, sent
+    with every turn. Now a temporary file beside it is written, fsynced and
+    renamed over it; on any failure the old file stands byte for byte and the
+    temporary file is removed. It is written as `Path.write_text(text,
+    encoding="utf-8")` writes it (text mode). The file keeps its mode
+    (`mkstemp` makes 0600); a new one gets what `write_text` would give it.
+    A file the owner made read-only is not replaced: PermissionError, as an
+    in-place write would raise.
+    """
+    try:
+        mode: int | None = stat.S_IMODE(os.stat(path).st_mode)
+    except FileNotFoundError:
+        mode = None
+    if mode is not None and not os.access(path, os.W_OK):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+    if mode is None:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise

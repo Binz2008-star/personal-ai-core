@@ -40,6 +40,7 @@ from ..conversation.factory import (
     describe_store_failure,
     list_sessions,
     profile_budget,
+    save_owner_text,
     STORE_ERRORS,
 )
 from ..core.agent import AgentTaskContract
@@ -403,7 +404,19 @@ def _remember(path: Path | None, text: str, settings: Settings, out: TextIO) -> 
             file=out,
         )
         return 2
-    existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
+    # Gap analysis P2-7: a profile that cannot be read is a sentence, not a
+    # traceback, and nothing is written.
+    if path.exists() and not path.is_file():
+        print(f"the profile is not a file: {path}", file=out)
+        return 2
+    try:
+        existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
+    except UnicodeDecodeError:
+        print(f"the profile is not UTF-8 text: {path}", file=out)
+        return 2
+    except OSError as exc:
+        print(f"the profile cannot be read: {path} ({exc.strerror or exc})", file=out)
+        return 2
     if not existing.endswith("\n"):
         existing += "\n"
     updated = existing + f"- {text}\n"
@@ -423,8 +436,15 @@ def _remember(path: Path | None, text: str, settings: Settings, out: TextIO) -> 
             file=out,
         )
         return 2
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(updated, encoding="utf-8")
+    # Gap analysis P2-7: written whole or not at all. The profile is the
+    # owner's own text and is sent with every turn; it is never left torn.
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        save_owner_text(path, updated)
+    except OSError as exc:
+        print(f"nothing added to {path}: {exc.strerror or exc}. The profile is as it was.",
+              file=out)
+        return 2
     print(f"remembered, in {path}", file=out)
     return 0
 
@@ -467,6 +487,11 @@ def _joined_profile(
             ).strip()
         except UnicodeDecodeError:
             print(f"the profile is not UTF-8 text: {file}", file=out)
+            return None
+        except OSError as exc:
+            # Unreadable (permissions, a directory by that name): a sentence,
+            # not a traceback (gap analysis P2-7).
+            print(f"the profile cannot be read: {file} ({exc.strerror or exc})", file=out)
             return None
         if text:
             parts.append(text)
@@ -921,6 +946,16 @@ def _main(
                 print(passed_over, file=out)
             _ingest(ingestion, files, out)
 
+        if not args.agent:
+            # R1, case b: when the profile and the fixed reserves fill the
+            # window, every turn would be refused. Said before a session is
+            # created for it, not after the first message is stored.
+            try:
+                service.check_room()
+            except ContextOverflowError as exc:
+                print(f"pac: no turn can be sent: {exc}.", file=out)
+                return 1
+
         if args.session:
             # Not verified here. `send` raises KeyError for an unknown
             # session and that is the contract; the agent loop raises the same
@@ -1108,13 +1143,22 @@ def _converse(*, service, session_id, language, lines, out, redactor: SecretReda
             return 2
         except ContextOverflowError as exc:
             # ADR-005: refused rather than sent and silently cut by the server.
-            print(f"this conversation no longer fits the model: {exc}.", file=out)
-            print("start a new session (run pac without --session) to continue.", file=out)
+            # Older messages are left out of the prompt to make room (P1-3),
+            # so the cause is the message or the profile, and the error says
+            # which (R1): a new session would be refused the same way.
+            print(f"the turn was not sent: {exc}.", file=out)
             return 1
         except ProviderError as exc:
             _explain_provider_failure(exc, settings or Settings(), out)
             return 1
         _print_reply(reply.content, redactor, out)
+        # R2: said once, on the turn that first leaves messages out -- not on
+        # every turn after it. The count of every turn is in its
+        # CONTEXT_ASSEMBLED event.
+        started = getattr(service, "left_out_started", None)
+        left_out = started(session_id) if started is not None else None
+        if left_out:
+            print(f"{_NOTE}{LEFT_OUT_NOTE.format(count=left_out)}", file=out)
         if confirm_window is not None:
             code, confirm_window = confirm_window(), None
             if code is not None:
@@ -1124,6 +1168,13 @@ def _converse(*, service, session_id, language, lines, out, redactor: SecretReda
 
 # Under the reply, aligned with the other continuation lines ("changed:").
 _NOTE = "         "
+
+# R2 (P1-3): the one line a session gets when its oldest messages stop being
+# sent to the model.
+LEFT_OUT_NOTE = (
+    "[older messages are no longer sent to the model (they are kept); "
+    "{count} left out so far]"
+)
 
 
 def _print_reply(content: str, redactor: SecretRedactor, out: TextIO) -> None:
@@ -1245,6 +1296,13 @@ def _agent_session(*, agent, session_id, lines, out, err,
         except STORE_ERRORS:
             # The store's own sentence is printed by `main`; the files are not
             # in the store, so their undo is offered first.
+            _offer_undo(agent, lines, out)
+            raise
+        except Exception:
+            # A defect, not a failure pac knows how to name: the loop has
+            # already recorded it as internal_error, and it still propagates.
+            # The files the task changed are offered back first, so a crash
+            # does not cost the owner the undo.
             _offer_undo(agent, lines, out)
             raise
         window_due = True
