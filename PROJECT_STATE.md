@@ -771,6 +771,7 @@ claim written in one place with nothing that notices it going stale.
                bench checks alike
   #246 c4311f9  fix(app): the owner's profile is capped by tokens against the model's
                window, at load and at --remember (F-A)
+  #247 72077bd  test(knowledge): gate English and Arabic reference-document retrieval
   #248 fd02696  fix(app): reserve room beside the profile for two Arabic passages (F-A)
   #249 d21569f  fix(app): read and print Arabic on Windows through UTF-8 console streams
   #250 f440057  fix(agent): write_file keeps a file's mode, and undo removes the directories a task created
@@ -1247,7 +1248,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-09, main at d21569f)
+NEXT SESSION HANDOFF (updated 2026-10-09, main at 72077bd)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
