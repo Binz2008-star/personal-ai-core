@@ -753,6 +753,7 @@ claim written in one place with nothing that notices it going stale.
   #232 66953bf  fix(agent): run_command says a check runs the project's own code (P1-10)
   #233 fbccb7a  fix(app): the profile carries no secret to the model -- --remember
                refuses one, and one already in the file is withheld
+  #234 1f92d33  docs: reconcile the already-fixed failure-event exception-text gap
   #235 46da221  test: the skip audit's child run gets the time a Windows runner needs
   #236 2ab639f  fix(runtime): the model server is told the window the Core budgets
                against (N1)
@@ -1249,7 +1250,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-09, main at bd3090c)
+NEXT SESSION HANDOFF (updated 2026-10-09, main at 1f92d33)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
