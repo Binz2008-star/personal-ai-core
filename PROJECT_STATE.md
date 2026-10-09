@@ -769,6 +769,9 @@ claim written in one place with nothing that notices it going stale.
                bench checks alike
   #246 c4311f9  fix(app): the owner's profile is capped by tokens against the model's
                window, at load and at --remember (F-A)
+  #248 fd02696  fix(app): reserve room beside the profile for two Arabic passages (F-A)
+  #252 fa83f73  fix(agent): refuse recursive grep and directory diff past workspace guards
+  #253 0e9a979  feat(opencode): add the PAC provider integration
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1235,7 +1238,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-05, main at dae5df7)
+NEXT SESSION HANDOFF (updated 2026-10-09, main at fa83f73)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1244,6 +1247,17 @@ unrecorded ledger rows, and how far this section is behind main. This section
 holds only what git cannot know. tests/unit/test_handoff_freshness.py fails CI
 when the header above is more than 3 merges behind main: update it in the next
 PR, as with the ledger.
+
+CURRENT ENGINEERING HANDOFF (2026-10-09)
+  - Main includes #248, #252 and #253. The remaining production fixes must be
+    reviewed and landed individually with fresh suite, static and suite-windows
+    checks on each current head. No full-bundle merge of verification-boundaries.
+  - Windows and the existing Boss model remain the target. Native tool calls
+    and experimental completion controls retain their existing opt-in defaults.
+  - #250 and #228 require scoped accounting for their POSIX-only mode tests.
+    Windows process ownership and executable discovery are separate #254-#256.
+  - Live model smoke/contract/bench results are agent-reported; this handoff
+    does not assert a completed native Windows run of a newly merged tree.
 
 WHERE THINGS STAND (2026-10-04)
   - MEASURED (#208, ADR-025 §12): the native tool-call channel against the text

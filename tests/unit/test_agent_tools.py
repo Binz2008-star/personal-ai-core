@@ -379,3 +379,45 @@ def test_a_timeout_kills_a_descendant_after_the_leader_exits(ws):
     while _alive(pid) and time.monotonic() < deadline:
         time.sleep(0.2)
     assert not _alive(pid), "a descendant outlived the leader's timeout"
+
+
+def test_failed_process_creation_closes_the_prepared_job(ws, monkeypatch):
+    closed = []
+    monkeypatch.setattr(tools_module.sys, "platform", "win32")
+    monkeypatch.setattr(tools_module, "_start_suspended_in_job", lambda: (101, 4))
+    monkeypatch.setattr(tools_module, "_close_job", closed.append)
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("missing executable")
+
+    monkeypatch.setattr(tools_module.subprocess, "Popen", missing)
+    with pytest.raises(FileNotFoundError, match="missing executable"):
+        run_bounded(["missing"], cwd=ws.root, env={}, timeout=1)
+    assert closed == [101]
+    assert not tools_module._jobs
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("assignment failed"), KeyboardInterrupt()])
+def test_interrupted_containment_kills_and_reaps_the_frozen_child(ws, monkeypatch, failure):
+    actions = []
+
+    class FrozenChild:
+        def kill(self):
+            actions.append("kill")
+
+        def wait(self):
+            actions.append("wait")
+
+    monkeypatch.setattr(tools_module.sys, "platform", "win32")
+    monkeypatch.setattr(tools_module, "_start_suspended_in_job", lambda: (101, 4))
+    monkeypatch.setattr(tools_module.subprocess, "Popen", lambda *args, **kwargs: FrozenChild())
+    monkeypatch.setattr(tools_module, "_close_job", lambda job: actions.append(("close", job)))
+
+    def interrupted(job, process):
+        raise failure
+
+    monkeypatch.setattr(tools_module, "_contain_and_release", interrupted)
+    with pytest.raises(type(failure)):
+        run_bounded(["command"], cwd=ws.root, env={}, timeout=1)
+    assert actions == ["kill", "wait", ("close", 101)]
+    assert not tools_module._jobs

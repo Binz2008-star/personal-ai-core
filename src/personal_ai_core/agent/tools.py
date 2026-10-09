@@ -319,13 +319,27 @@ def run_bounded(
         # Create the child frozen so it is inside the job before it can fork;
         # `_contain_and_release` resumes it, or reports the command failed.
         job, creationflags = _start_suspended_in_job()
-    process = subprocess.Popen(  # noqa: S603 -- callers validate or confirm the command
-        args, shell=shell, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
-        errors="replace", creationflags=creationflags, **extra,
-    )
-    if job is not None:
-        job = _contain_and_release(job, process)
+    process: subprocess.Popen[str] | None = None
+    try:
+        process = subprocess.Popen(  # noqa: S603 -- callers validate or confirm the command
+            args, shell=shell, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+            errors="replace", creationflags=creationflags, **extra,
+        )
+        if job is not None:
+            job = _contain_and_release(job, process)
+    except BaseException:
+        # Creation can fail before Popen returns. Assignment/resume can also be
+        # interrupted while the child is frozen: release our handle and reap
+        # that child before propagating the original failure.
+        try:
+            if process is not None:
+                process.kill()
+                process.wait()
+        finally:
+            if job is not None:
+                _close_job(job)
+        raise
     if job is not None:
         with _jobs_lock:
             _jobs[id(process)] = job
