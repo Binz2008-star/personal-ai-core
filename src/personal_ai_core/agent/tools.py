@@ -24,12 +24,14 @@ command, and only with the owner's yes for each one.
 """
 from __future__ import annotations
 
+import ctypes
 import fnmatch
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -52,6 +54,245 @@ def _bounded(text: str) -> tuple[str, bool]:
     return text[:MAX_OUTPUT_CHARS], True
 
 
+# --- Windows process-tree ownership -----------------------------------------
+#
+# POSIX gets a killable group for free: `start_new_session` makes the child its
+# own session/group leader and `os.killpg` kills every member of it, including
+# after the leader itself has exited. Windows has no such group. `taskkill /T
+# /PID` walks the tree from the named process, so once the leader is gone it
+# cannot reach a descendant that is still holding the inherited output pipes:
+# the descendant survives the timeout and the two reader threads stay blocked
+# on it (observed on the owner's Windows machine, 2026-10-08, with the leader
+# exiting before the kill). A Job Object closes that hole. The child is assigned
+# to a job whose last handle closing terminates every member, so the whole tree
+# dies from the job handle even when the leader is already gone.
+#
+# THE RACE THAT MAKES SUSPENSION NECESSARY. A process inherits its parent's job
+# at the moment it is created, so a descendant is contained only if its parent
+# was already in the job when it forked. Assigning the leader just after
+# `Popen` returns leaves a window in which a fast, native command can spawn a
+# grandchild that escaped the job -- and `taskkill /T` cannot reach it once the
+# leader exits, which is the whole failure being fixed. So the child is created
+# SUSPENDED (it cannot run, and cannot fork, until told to), assigned to the job
+# while it is frozen, and only then resumed. Containment is then by
+# construction rather than a race we hope to win. These are Windows-only APIs,
+# reached through `getattr` so the Linux type gate -- which runs pyright on a
+# platform where `WinDLL` does not exist -- stays quiet.
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9  # JobObjectExtendedLimitInformation
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+_CREATE_SUSPENDED = 0x00000004
+_TH32CS_SNAPTHREAD = 0x00000004
+_THREAD_SUSPEND_RESUME = 0x0002
+
+_jobs: dict[int, int] = {}
+_jobs_lock = threading.Lock()
+
+
+class _IoCounters(ctypes.Structure):
+    _fields_ = [
+        ("ReadOperationCount", ctypes.c_ulonglong),
+        ("WriteOperationCount", ctypes.c_ulonglong),
+        ("OtherOperationCount", ctypes.c_ulonglong),
+        ("ReadTransferCount", ctypes.c_ulonglong),
+        ("WriteTransferCount", ctypes.c_ulonglong),
+        ("OtherTransferCount", ctypes.c_ulonglong),
+    ]
+
+
+class _JobBasicLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_int64),
+        ("PerJobUserTimeLimit", ctypes.c_int64),
+        ("LimitFlags", ctypes.c_uint32),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", ctypes.c_uint32),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", ctypes.c_uint32),
+        ("SchedulingClass", ctypes.c_uint32),
+    ]
+
+
+class _JobExtendedLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", _JobBasicLimitInformation),
+        ("IoInfo", _IoCounters),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+class _ThreadEntry32(ctypes.Structure):
+    """THREADENTRY32 -- one row of a system thread snapshot, filtered by owner."""
+
+    _fields_ = [
+        ("dwSize", ctypes.c_uint32),
+        ("cntUsage", ctypes.c_uint32),
+        ("th32ThreadID", ctypes.c_uint32),
+        ("th32OwnerProcessID", ctypes.c_uint32),
+        ("tpBasePri", ctypes.c_int32),
+        ("tpDeltaPri", ctypes.c_int32),
+        ("dwFlags", ctypes.c_uint32),
+    ]
+
+
+def _job_kernel32() -> Any:
+    """A configured kernel32, or None when not on Windows / no WinDLL.
+
+    Every prototype is stated: without them ctypes truncates a 64-bit HANDLE to
+    a C int and `TerminateJobObject` silently targets the wrong object.
+    """
+    win_dll = getattr(ctypes, "WinDLL", None)
+    if sys.platform != "win32" or win_dll is None:
+        return None
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+    kernel32.SetInformationJobObject.restype = ctypes.c_int
+    kernel32.SetInformationJobObject.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32,
+    ]
+    kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+    kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.TerminateJobObject.restype = ctypes.c_int
+    kernel32.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    kernel32.CloseHandle.restype = ctypes.c_int
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    # Suspended-start resume path: find the child's one thread and release it.
+    kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+    kernel32.CreateToolhelp32Snapshot.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+    kernel32.Thread32First.restype = ctypes.c_int
+    kernel32.Thread32First.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.Thread32Next.restype = ctypes.c_int
+    kernel32.Thread32Next.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.OpenThread.restype = ctypes.c_void_p
+    kernel32.OpenThread.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.ResumeThread.restype = ctypes.c_uint32
+    kernel32.ResumeThread.argtypes = [ctypes.c_void_p]
+    return kernel32
+
+
+def _create_kill_on_close_job() -> int | None:
+    """A private job that terminates its members when its last handle closes.
+
+    The job is unnamed and private, so it contains only what is explicitly
+    assigned to it -- closing it can never reach an unrelated process.
+    """
+    kernel32 = _job_kernel32()
+    if kernel32 is None:
+        return None
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    limits = _JobExtendedLimitInformation()
+    limits.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not kernel32.SetInformationJobObject(
+        ctypes.c_void_p(job), _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+        ctypes.byref(limits), ctypes.sizeof(limits),
+    ):
+        kernel32.CloseHandle(ctypes.c_void_p(job))
+        return None
+    return int(job)
+
+
+def _assign_process_to_job(job: int, process: subprocess.Popen[str]) -> bool:
+    kernel32 = _job_kernel32()
+    if kernel32 is None:
+        return False
+    # `_handle` is subprocess' own process handle; CreateProcess grants it the
+    # PROCESS_SET_QUOTA|PROCESS_TERMINATE that AssignProcessToJobObject needs.
+    # That handle is owned by subprocess and must NOT be closed here.
+    return bool(kernel32.AssignProcessToJobObject(
+        ctypes.c_void_p(job), ctypes.c_void_p(int(getattr(process, "_handle")))
+    ))
+
+
+def _resume_process(process: subprocess.Popen[str]) -> bool:
+    """Release the single thread of a `CREATE_SUSPENDED` child. True on success.
+
+    CPython closes the primary thread handle immediately after `CreateProcess`,
+    so the child's one thread is found here through a system thread snapshot and
+    resumed by its thread id. Both the snapshot and the thread handle are ours
+    and are closed before returning.
+    """
+    kernel32 = _job_kernel32()
+    if kernel32 is None:
+        return False
+    snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
+    if not snapshot or snapshot == ctypes.c_void_p(-1).value:
+        return False
+    entry = _ThreadEntry32()
+    entry.dwSize = ctypes.sizeof(_ThreadEntry32)
+    resumed = False
+    try:
+        more = kernel32.Thread32First(snapshot, ctypes.byref(entry))
+        while more:
+            if entry.th32OwnerProcessID == process.pid:
+                thread = kernel32.OpenThread(
+                    _THREAD_SUSPEND_RESUME, False, entry.th32ThreadID)
+                if thread:
+                    try:
+                        # ResumeThread returns the prior suspend count, or
+                        # (DWORD)-1 on failure; the child was suspended exactly
+                        # once, so any value but -1 is the release we want.
+                        resumed = kernel32.ResumeThread(ctypes.c_void_p(thread)) != 0xFFFFFFFF
+                    finally:
+                        kernel32.CloseHandle(ctypes.c_void_p(thread))
+                break
+            more = kernel32.Thread32Next(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(ctypes.c_void_p(snapshot))
+    return resumed
+
+
+def _start_suspended_in_job() -> tuple[int | None, int]:
+    """A job handle and the `creationflags` to start its child suspended.
+
+    Returns `(None, 0)` off Windows or when the job cannot be created; the
+    caller then runs the command normally and still has `taskkill`.
+    """
+    job = _create_kill_on_close_job()
+    if job is None:
+        return None, 0
+    return job, _CREATE_SUSPENDED
+
+
+def _contain_and_release(job: int, process: subprocess.Popen[str]) -> int | None:
+    """Assign a suspended child to `job`, resume it, and return the job to track.
+
+    Never returns with the child still suspended: a frozen child would hang the
+    caller with no output and no timeout if it never ran. When the job cannot
+    hold the child -- for example PAC is itself in a job that forbids nesting --
+    the command is resumed anyway and `None` is returned, so the caller keeps
+    the `taskkill` fallback. When the child is contained but cannot be resumed,
+    the job is terminated so the process does not linger frozen, and `None` is
+    returned: the call reports a failed command rather than hanging.
+    """
+    if _assign_process_to_job(job, process):
+        if _resume_process(process):
+            return job
+        _terminate_job(job)  # kills the contained, still-frozen child
+        _close_job(job)
+        return None
+    if not _resume_process(process):
+        process.kill()  # could not run it; never leave it suspended
+    _close_job(job)
+    return None
+
+
+def _terminate_job(job: int) -> bool:
+    kernel32 = _job_kernel32()
+    return bool(kernel32 and kernel32.TerminateJobObject(ctypes.c_void_p(job), 1))
+
+
+def _close_job(job: int) -> None:
+    kernel32 = _job_kernel32()
+    if kernel32 is not None:
+        kernel32.CloseHandle(ctypes.c_void_p(job))
+
+
 def run_bounded(
     args: str | list[str], *, cwd: Any, env: Mapping[str, str], timeout: int, shell: bool = False
 ) -> tuple[int, str, str]:
@@ -64,15 +305,44 @@ def run_bounded(
     minutes. So: stdin is closed (a debugger or prompt reads end-of-file and
     exits), and on timeout the whole process tree is killed, not only the
     direct child. Raises subprocess.TimeoutExpired after the kill.
+
+    On Windows the tree is contained in a job object rather than reached with
+    `taskkill /T`, which cannot find a descendant once its leader has exited
+    (see the block above).
     """
     extra: dict[str, Any] = {}
+    job: int | None = None
+    creationflags = 0
     if sys.platform != "win32":
         extra["start_new_session"] = True  # its own process group, killed as one
-    process = subprocess.Popen(  # noqa: S603 -- callers validate or confirm the command
-        args, shell=shell, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
-        errors="replace", **extra,
-    )
+    else:
+        # Create the child frozen so it is inside the job before it can fork;
+        # `_contain_and_release` resumes it, or reports the command failed.
+        job, creationflags = _start_suspended_in_job()
+    process: subprocess.Popen[str] | None = None
+    try:
+        process = subprocess.Popen(  # noqa: S603 -- callers validate or confirm the command
+            args, shell=shell, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+            errors="replace", creationflags=creationflags, **extra,
+        )
+        if job is not None:
+            job = _contain_and_release(job, process)
+    except BaseException:
+        # Creation can fail before Popen returns. Assignment/resume can also be
+        # interrupted while the child is frozen: release our handle and reap
+        # that child before propagating the original failure.
+        try:
+            if process is not None:
+                process.kill()
+                process.wait()
+        finally:
+            if job is not None:
+                _close_job(job)
+        raise
+    if job is not None:
+        with _jobs_lock:
+            _jobs[id(process)] = job
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -89,13 +359,26 @@ def run_bounded(
         # writing, after pac had exited.
         _kill_tree(process)
         raise
+    finally:
+        if job is not None:
+            with _jobs_lock:
+                _jobs.pop(id(process), None)
+            # Closing the job (KILL_ON_JOB_CLOSE) ends any member that survived
+            # the kill above, so a command's tree cannot outlive the call.
+            _close_job(job)
     return process.returncode, stdout, stderr
 
 
 def _kill_tree(process: subprocess.Popen[str]) -> None:
     if sys.platform == "win32":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                       capture_output=True, timeout=30, check=False)
+        with _jobs_lock:
+            job = _jobs.get(id(process))
+        # The job handle reaches descendants after the leader has exited, which
+        # `taskkill /T` cannot; keep taskkill as the fallback for the cases
+        # where the job was never created or assignment was refused.
+        if job is None or not _terminate_job(job):
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                           capture_output=True, timeout=30, check=False)
     else:
         try:
             os.killpg(process.pid, signal.SIGKILL)
@@ -361,6 +644,17 @@ class DeleteFile:
 
     def run(self, arguments: Mapping[str, Any]) -> ToolResult:
         path = self._workspace.resolve_for_write(arguments["path"])
+        # `resolve` follows a link to its target, so unlinking the resolved
+        # path would delete the file the link points to, not the link named.
+        named = self._workspace.root.joinpath(*arguments["path"].replace("\\", "/").split("/"))
+        if named.is_symlink():
+            return ToolResult(
+                ok=False,
+                error=(
+                    f"is a symlink: {arguments['path']}; delete_file deletes regular "
+                    "files only, and would delete the file it points to"
+                ),
+            )
         if not path.is_file():
             return ToolResult(ok=False, error=f"not a file: {arguments['path']}")
         self._checkpoints.before_mutation(path)
