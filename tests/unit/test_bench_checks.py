@@ -140,6 +140,7 @@ def test_tool_used_counts_only_executed_calls(tmp_path):
     ([_call("run_command", command="pytest -q"), _call("write_file", path="a.py")], FAIL,
      "no test run"),
     ([_call("write_file", path="a.py"), _call("run_command", command="pytest -q")], PASS, ""),
+    ([_call("edit_file", path="a.py"), _call("run_command", command="pytest -q")], PASS, ""),
     ([_call("write_file", path="a.py"), _call("shell", command="python -m pytest -q")], PASS, ""),
     ([_call("write_file", path="a.py"), _call("run_command", ok=False, command="pytest")], FAIL,
      "failed"),

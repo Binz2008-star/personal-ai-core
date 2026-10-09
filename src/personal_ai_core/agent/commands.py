@@ -38,10 +38,31 @@ fails if it reopens:
      on the read-only list. `<` and `>` join the refused metacharacters:
      harmless without a shell, but a command containing them was written for
      one, and it should be refused as written rather than run as something else.
+  9. Recursive reading. The workspace-aware check in tools.py tries each
+     argument as a FILE, so a DIRECTORY argument passed it, and `grep -r x .`
+     read every file under it: the Core's database, the owner's profile and
+     `.env`, all of which the file tools refuse or skip. grep's recursive
+     spellings are refused (`-r`, `-R`, inside a cluster such as `-rn`,
+     `--recursive`, `--dereference-recursive` and their abbreviations,
+     `-d`/`--directories` `recurse`), pointing the model to search_text. So is
+     `git diff --no-index`, which diffs two directories file by file; outside
+     a git work tree `git diff` does the same without the option, and that
+     case is refused in tools.py, where the workspace is known. Listings that
+     show names and not contents (`ls -R`, `find`) are left alone.
 
 `pytest`, `ruff` and `mypy` stay. pytest runs the project's own test code; a
 command tool is HIGH risk, so every run is ASKed first (AGENT_ARCHITECTURE.md
 section 3) and the allowlist is the second gate, not the only one.
+
+They stay CHECKING commands. A rollback restores what the file tools wrote
+and nothing else (recovery.py), so a file a command rewrote stays rewritten
+after the task is undone. The options that make one of them write files by
+design are refused (WRITING_OPTIONS, read from ruff 0.15, pytest 9.1 and
+mypy 1.20, most of them run and seen writing), and so are two ways past that
+list: an argument file, `@args.txt`, which all three read, and ruff's inline
+`--config "fix = true"`. Not covered, and said in run_command's description:
+the project's own configuration (`fix = true` in pyproject.toml, pytest's
+`addopts`) and the code pytest runs can still write. ASK is the gate there.
 """
 from __future__ import annotations
 
@@ -101,7 +122,52 @@ FIND_ACTIONS = frozenset(
     {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
 )
 GIT_WRITING_OPTIONS = ("--output", "--ext-diff")
+# grep's short options that take a value: the rest of the argument, or the
+# next argument, is that value, not more options.
+GREP_VALUE_OPTIONS = frozenset("ABCDdefm")
+SEARCH_TEXT_INSTEAD = (
+    "use search_text, which searches the workspace's files and leaves out the "
+    "ones the agent may not read"
+)
+RECURSIVE_READ = (
+    "reads every file under a directory, the Core's database and the owner's "
+    "profile among them"
+)
 SHELL_METACHARACTERS = frozenset("|;&$`!{}()[]<>")
+
+# Options that make a checking command write files, refused alone or as
+# `--option=value`. `ruff format` is refused already: "format" is a blocked
+# argument.
+WRITING_OPTIONS = {
+    # --fix and --fix-only apply fixes in place, and --unsafe-fixes widens
+    # what is applied (alone, once `fix = true` is configured); --add-noqa
+    # writes noqa comments into the source; -o/--output-file writes the report.
+    "ruff": frozenset(
+        {"--fix", "--fix-only", "--unsafe-fixes", "--add-noqa", "--output-file", "-o"}
+    ),
+    # --basetemp empties the directory it names; --debug and --log-file open
+    # their file for writing, truncating it; --junitxml writes the report;
+    # -o/--override-ini can set log_file, or addopts to any of these.
+    "pytest": frozenset(
+        {"--basetemp", "--debug", "--log-file", "--junitxml", "--junit-xml",
+         "--override-ini", "-o"}
+    ),
+    # Each report option writes a directory of reports and --junit-xml a file;
+    # --install-types runs pip, which no rollback reaches either.
+    "mypy": frozenset(
+        {"--install-types", "--junit-xml", "--any-exprs-report", "--cobertura-xml-report",
+         "--html-report", "--linecount-report", "--linecoverage-report",
+         "--lineprecision-report", "--txt-report", "--xml-report", "--xslt-html-report",
+         "--xslt-txt-report"}
+    ),
+}
+# Short options that take no value. In a cluster such as `-qo` the parser
+# reads on past them, so the `-o` after them is still an option.
+SHORT_FLAGS = {"ruff": frozenset("ehnqsvwV"), "pytest": frozenset("hlqsvxV")}
+# mypy's parser takes any unique prefix of a long option: `--junit-x` is
+# `--junit-xml`. ruff's and pytest's do not.
+ABBREVIATING = frozenset({"mypy"})
+_ROLLBACK = "a rollback restores what the file tools wrote, not what a command writes"
 
 
 class CommandRejected(PermissionError):
@@ -143,7 +209,96 @@ def validate_command(command: str) -> list[str]:
         for argument in arguments:
             if argument in FIND_ACTIONS:
                 raise CommandRejected(f"find may search, not act: {argument}")
+    elif executable == "grep":
+        _refuse_recursive_grep(arguments)
+    elif executable in WRITING_OPTIONS:
+        _refuse_writing_options(executable, arguments)
     return parts
+
+
+def _refuse_recursive_grep(arguments: list[str]) -> None:
+    """Fix 9. Every argument is read, `--` included: a value grep takes from
+    the next argument (`-e --`) would otherwise end the scan early. A pattern
+    spelled like a recursive option is refused too; search_text finds it."""
+    for index, argument in enumerate(arguments):
+        following = arguments[index + 1] if index + 1 < len(arguments) else ""
+        if argument.startswith("--"):
+            # grep takes any unambiguous prefix of a long option.
+            name, has_value, value = argument.partition("=")
+            if len(name) <= 2:
+                continue
+            if "--recursive".startswith(name) or "--dereference-recursive".startswith(name):
+                _refuse_recursion(argument)
+            if "--directories".startswith(name) and _recurse(value if has_value else following):
+                _refuse_recursion(argument)
+        elif argument.startswith("-"):
+            for position, letter in enumerate(argument[1:], start=2):
+                if letter in "rR":
+                    _refuse_recursion(argument)
+                if letter in GREP_VALUE_OPTIONS:
+                    value = argument[position:] or following
+                    if letter == "d" and _recurse(value):
+                        _refuse_recursion(argument)
+                    break
+
+
+def _recurse(value: str) -> bool:
+    # grep takes an unambiguous abbreviation of the action too: `-d rec`.
+    return bool(value) and "recurse".startswith(value)
+
+
+def _refuse_recursion(argument: str) -> None:
+    raise CommandRejected(
+        f"grep may not search recursively ({argument}): it {RECURSIVE_READ}; "
+        f"{SEARCH_TEXT_INSTEAD}"
+    )
+
+
+def _refuse_writing_options(executable: str, arguments: list[str]) -> None:
+    for index, argument in enumerate(arguments):
+        if argument.startswith("@"):
+            raise CommandRejected(
+                f"{executable} would read more arguments from {argument[1:]}, "
+                "out of this check's sight; give them on the command line"
+            )
+        if _writes(executable, argument):
+            raise CommandRejected(
+                f"{argument} makes {executable} write files, and {_ROLLBACK}: "
+                f"run {executable} to check, and change files with write_file"
+            )
+        if executable == "ruff" and argument.split("=", 1)[0] == "--config":
+            if "=" in argument:
+                value = argument.split("=", 1)[1]
+            else:
+                value = arguments[index + 1] if index + 1 < len(arguments) else ""
+            # A path names a file; `key = value` is a setting, and `fix = true`
+            # fixes exactly as --fix does.
+            if "=" in value:
+                raise CommandRejected(
+                    f"--config {value}: an inline setting can turn fixing on, and "
+                    f"{_ROLLBACK}; name a configuration file instead"
+                )
+
+
+def _writes(executable: str, argument: str) -> bool:
+    writing = WRITING_OPTIONS[executable]
+    if argument.startswith("--"):
+        name = argument.split("=", 1)[0]
+        if name in writing:
+            return True
+        # `--` alone ends the options; it abbreviates nothing.
+        return executable in ABBREVIATING and len(name) > 2 and any(
+            option.startswith(name) for option in writing if option.startswith("--")
+        )
+    if argument.startswith("-"):
+        flags = SHORT_FLAGS.get(executable, frozenset())
+        for letter in argument[1:]:
+            if f"-{letter}" in writing:
+                return True
+            if letter not in flags:
+                # This option takes a value: the rest of the argument is it.
+                return False
+    return False
 
 
 def _refuse_escaping_path(argument: str) -> None:
@@ -174,5 +329,10 @@ def _validate_git(arguments: list[str]) -> None:
     if subcommand not in GIT_READ_ONLY:
         raise CommandRejected(f"not a read-only git subcommand: {subcommand}")
     for argument in arguments[1:]:
+        if subcommand == "diff" and argument == "--no-index":
+            # git accepts no abbreviation of it: `--no-ind` is a usage error.
+            raise CommandRejected(
+                f"git diff --no-index {RECURSIVE_READ}; {SEARCH_TEXT_INSTEAD}"
+            )
         if argument.startswith(GIT_WRITING_OPTIONS):
             raise CommandRejected(f"git option that writes or runs a program: {argument}")

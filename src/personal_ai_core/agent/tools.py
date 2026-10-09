@@ -24,17 +24,20 @@ command, and only with the owner's yes for each one.
 """
 from __future__ import annotations
 
+import ctypes
 import fnmatch
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
 from ..core.agent import RiskLevel, ToolResult, ToolSpec
-from .commands import CommandRejected, validate_command
+from .commands import RECURSIVE_READ, SEARCH_TEXT_INSTEAD, CommandRejected, validate_command
 from .recovery import Checkpoints, atomic_write_text
 from .sandbox import SandboxError, Workspace, is_protected
 
@@ -42,6 +45,13 @@ MAX_OUTPUT_CHARS = 20_000
 MAX_LIST_ENTRIES = 500
 MAX_SEARCH_MATCHES = 200
 MAX_WRITE_CHARS = 1_000_000
+# How much of any one file a content search will read before it moves on. A
+# budget, so a single very large file cannot be loaded whole; large enough that
+# an ordinary file is searched in full.
+MAX_SEARCH_CHARS = 1_000_000
+# One character over the output budget, so a captured stream that exceeded it
+# still reads as truncated to `_bounded` rather than as an exact fit.
+MAX_CAPTURE_CHARS = MAX_OUTPUT_CHARS + 1
 
 _PATH = {"type": "string", "description": "a path relative to the workspace"}
 
@@ -50,6 +60,261 @@ def _bounded(text: str) -> tuple[str, bool]:
     if len(text) <= MAX_OUTPUT_CHARS:
         return text, False
     return text[:MAX_OUTPUT_CHARS], True
+
+
+def _bounded_read_text(path: Path, max_chars: int = MAX_OUTPUT_CHARS) -> tuple[str, bool]:
+    """Read at most `max_chars` characters without loading the whole file.
+
+    `Path.read_text` buffers the entire file before it can be truncated, so a
+    very large file exhausts memory even though only a slice is kept. Reading
+    `max_chars + 1` characters bounds what is held at once; the extra character
+    only says whether there is more.
+    """
+    with path.open("r", encoding="utf-8") as handle:
+        text = handle.read(max_chars + 1)
+    truncated = len(text) > max_chars
+    if truncated:
+        text = text[:max_chars]
+    return text, truncated
+
+
+# --- Windows process-tree ownership -----------------------------------------
+#
+# POSIX gets a killable group for free: `start_new_session` makes the child its
+# own session/group leader and `os.killpg` kills every member of it, including
+# after the leader itself has exited. Windows has no such group. `taskkill /T
+# /PID` walks the tree from the named process, so once the leader is gone it
+# cannot reach a descendant that is still holding the inherited output pipes:
+# the descendant survives the timeout and the two reader threads stay blocked
+# on it (observed on the owner's Windows machine, 2026-10-08, with the leader
+# exiting before the kill). A Job Object closes that hole. The child is assigned
+# to a job whose last handle closing terminates every member, so the whole tree
+# dies from the job handle even when the leader is already gone.
+#
+# THE RACE THAT MAKES SUSPENSION NECESSARY. A process inherits its parent's job
+# at the moment it is created, so a descendant is contained only if its parent
+# was already in the job when it forked. Assigning the leader just after
+# `Popen` returns leaves a window in which a fast, native command can spawn a
+# grandchild that escaped the job -- and `taskkill /T` cannot reach it once the
+# leader exits, which is the whole failure being fixed. So the child is created
+# SUSPENDED (it cannot run, and cannot fork, until told to), assigned to the job
+# while it is frozen, and only then resumed. Containment is then by
+# construction rather than a race we hope to win. These are Windows-only APIs,
+# reached through `getattr` so the Linux type gate -- which runs pyright on a
+# platform where `WinDLL` does not exist -- stays quiet.
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9  # JobObjectExtendedLimitInformation
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+_CREATE_SUSPENDED = 0x00000004
+_TH32CS_SNAPTHREAD = 0x00000004
+_THREAD_SUSPEND_RESUME = 0x0002
+
+_jobs: dict[int, int] = {}
+_jobs_lock = threading.Lock()
+
+
+class _IoCounters(ctypes.Structure):
+    _fields_ = [
+        ("ReadOperationCount", ctypes.c_ulonglong),
+        ("WriteOperationCount", ctypes.c_ulonglong),
+        ("OtherOperationCount", ctypes.c_ulonglong),
+        ("ReadTransferCount", ctypes.c_ulonglong),
+        ("WriteTransferCount", ctypes.c_ulonglong),
+        ("OtherTransferCount", ctypes.c_ulonglong),
+    ]
+
+
+class _JobBasicLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_int64),
+        ("PerJobUserTimeLimit", ctypes.c_int64),
+        ("LimitFlags", ctypes.c_uint32),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", ctypes.c_uint32),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", ctypes.c_uint32),
+        ("SchedulingClass", ctypes.c_uint32),
+    ]
+
+
+class _JobExtendedLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", _JobBasicLimitInformation),
+        ("IoInfo", _IoCounters),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+class _ThreadEntry32(ctypes.Structure):
+    """THREADENTRY32 -- one row of a system thread snapshot, filtered by owner."""
+
+    _fields_ = [
+        ("dwSize", ctypes.c_uint32),
+        ("cntUsage", ctypes.c_uint32),
+        ("th32ThreadID", ctypes.c_uint32),
+        ("th32OwnerProcessID", ctypes.c_uint32),
+        ("tpBasePri", ctypes.c_int32),
+        ("tpDeltaPri", ctypes.c_int32),
+        ("dwFlags", ctypes.c_uint32),
+    ]
+
+
+def _job_kernel32() -> Any:
+    """A configured kernel32, or None when not on Windows / no WinDLL.
+
+    Every prototype is stated: without them ctypes truncates a 64-bit HANDLE to
+    a C int and `TerminateJobObject` silently targets the wrong object.
+    """
+    win_dll = getattr(ctypes, "WinDLL", None)
+    if sys.platform != "win32" or win_dll is None:
+        return None
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+    kernel32.SetInformationJobObject.restype = ctypes.c_int
+    kernel32.SetInformationJobObject.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32,
+    ]
+    kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+    kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.TerminateJobObject.restype = ctypes.c_int
+    kernel32.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    kernel32.CloseHandle.restype = ctypes.c_int
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    # Suspended-start resume path: find the child's one thread and release it.
+    kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+    kernel32.CreateToolhelp32Snapshot.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+    kernel32.Thread32First.restype = ctypes.c_int
+    kernel32.Thread32First.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.Thread32Next.restype = ctypes.c_int
+    kernel32.Thread32Next.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.OpenThread.restype = ctypes.c_void_p
+    kernel32.OpenThread.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.ResumeThread.restype = ctypes.c_uint32
+    kernel32.ResumeThread.argtypes = [ctypes.c_void_p]
+    return kernel32
+
+
+def _create_kill_on_close_job() -> int | None:
+    """A private job that terminates its members when its last handle closes.
+
+    The job is unnamed and private, so it contains only what is explicitly
+    assigned to it -- closing it can never reach an unrelated process.
+    """
+    kernel32 = _job_kernel32()
+    if kernel32 is None:
+        return None
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    limits = _JobExtendedLimitInformation()
+    limits.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not kernel32.SetInformationJobObject(
+        ctypes.c_void_p(job), _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+        ctypes.byref(limits), ctypes.sizeof(limits),
+    ):
+        kernel32.CloseHandle(ctypes.c_void_p(job))
+        return None
+    return int(job)
+
+
+def _assign_process_to_job(job: int, process: subprocess.Popen[str]) -> bool:
+    kernel32 = _job_kernel32()
+    if kernel32 is None:
+        return False
+    # `_handle` is subprocess' own process handle; CreateProcess grants it the
+    # PROCESS_SET_QUOTA|PROCESS_TERMINATE that AssignProcessToJobObject needs.
+    # That handle is owned by subprocess and must NOT be closed here.
+    return bool(kernel32.AssignProcessToJobObject(
+        ctypes.c_void_p(job), ctypes.c_void_p(int(getattr(process, "_handle")))
+    ))
+
+
+def _resume_process(process: subprocess.Popen[str]) -> bool:
+    """Release the single thread of a `CREATE_SUSPENDED` child. True on success.
+
+    CPython closes the primary thread handle immediately after `CreateProcess`,
+    so the child's one thread is found here through a system thread snapshot and
+    resumed by its thread id. Both the snapshot and the thread handle are ours
+    and are closed before returning.
+    """
+    kernel32 = _job_kernel32()
+    if kernel32 is None:
+        return False
+    snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
+    if not snapshot or snapshot == ctypes.c_void_p(-1).value:
+        return False
+    entry = _ThreadEntry32()
+    entry.dwSize = ctypes.sizeof(_ThreadEntry32)
+    resumed = False
+    try:
+        more = kernel32.Thread32First(snapshot, ctypes.byref(entry))
+        while more:
+            if entry.th32OwnerProcessID == process.pid:
+                thread = kernel32.OpenThread(
+                    _THREAD_SUSPEND_RESUME, False, entry.th32ThreadID)
+                if thread:
+                    try:
+                        # ResumeThread returns the prior suspend count, or
+                        # (DWORD)-1 on failure; the child was suspended exactly
+                        # once, so any value but -1 is the release we want.
+                        resumed = kernel32.ResumeThread(ctypes.c_void_p(thread)) != 0xFFFFFFFF
+                    finally:
+                        kernel32.CloseHandle(ctypes.c_void_p(thread))
+                break
+            more = kernel32.Thread32Next(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(ctypes.c_void_p(snapshot))
+    return resumed
+
+
+def _start_suspended_in_job() -> tuple[int | None, int]:
+    """A job handle and the `creationflags` to start its child suspended.
+
+    Returns `(None, 0)` off Windows or when the job cannot be created; the
+    caller then runs the command normally and still has `taskkill`.
+    """
+    job = _create_kill_on_close_job()
+    if job is None:
+        return None, 0
+    return job, _CREATE_SUSPENDED
+
+
+def _contain_and_release(job: int, process: subprocess.Popen[str]) -> int | None:
+    """Assign a suspended child to `job`, resume it, and return the job to track.
+
+    Never returns with the child still suspended: a frozen child would hang the
+    caller with no output and no timeout if it never ran. When the job cannot
+    hold the child -- for example PAC is itself in a job that forbids nesting --
+    the command is resumed anyway and `None` is returned, so the caller keeps
+    the `taskkill` fallback. When the child is contained but cannot be resumed,
+    the job is terminated so the process does not linger frozen, and `None` is
+    returned: the call reports a failed command rather than hanging.
+    """
+    if _assign_process_to_job(job, process):
+        if _resume_process(process):
+            return job
+        _terminate_job(job)  # kills the contained, still-frozen child
+        _close_job(job)
+        return None
+    if not _resume_process(process):
+        process.kill()  # could not run it; never leave it suspended
+    _close_job(job)
+    return None
+
+
+def _terminate_job(job: int) -> bool:
+    kernel32 = _job_kernel32()
+    return bool(kernel32 and kernel32.TerminateJobObject(ctypes.c_void_p(job), 1))
+
+
+def _close_job(job: int) -> None:
+    kernel32 = _job_kernel32()
+    if kernel32 is not None:
+        kernel32.CloseHandle(ctypes.c_void_p(job))
 
 
 def run_bounded(
@@ -64,31 +329,141 @@ def run_bounded(
     minutes. So: stdin is closed (a debugger or prompt reads end-of-file and
     exits), and on timeout the whole process tree is killed, not only the
     direct child. Raises subprocess.TimeoutExpired after the kill.
+
+    On Windows the tree is contained in a job object rather than reached with
+    `taskkill /T`, which cannot find a descendant once its leader has exited
+    (see the block above).
     """
     extra: dict[str, Any] = {}
+    job: int | None = None
+    creationflags = 0
     if sys.platform != "win32":
         extra["start_new_session"] = True  # its own process group, killed as one
-    process = subprocess.Popen(  # noqa: S603 -- callers validate or confirm the command
-        args, shell=shell, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
-        errors="replace", **extra,
-    )
+    else:
+        # Create the child frozen so it is inside the job before it can fork;
+        # `_contain_and_release` resumes it, or reports the command failed.
+        job, creationflags = _start_suspended_in_job()
+    process: subprocess.Popen[str] | None = None
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        _kill_tree(process)
+        process = subprocess.Popen(  # noqa: S603 -- callers validate or confirm the command
+            args, shell=shell, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+            errors="replace", creationflags=creationflags, **extra,
+        )
+        if job is not None:
+            job = _contain_and_release(job, process)
+    except BaseException:
+        # Creation can fail before Popen returns. Assignment/resume can also be
+        # interrupted while the child is frozen: release our handle and reap
+        # that child before propagating the original failure.
         try:
-            process.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            pass  # something outside the tree holds the pipes; give up on its output
+            if process is not None:
+                process.kill()
+                process.wait()
+        finally:
+            if job is not None:
+                _close_job(job)
         raise
+    if job is not None:
+        with _jobs_lock:
+            _jobs[id(process)] = job
+    try:
+        stdout, stderr = _drain_bounded(process, timeout)
+    finally:
+        if job is not None:
+            with _jobs_lock:
+                _jobs.pop(id(process), None)
+            # Closing the job (KILL_ON_JOB_CLOSE) ends any member that survived
+            # the kill above, so a command's tree cannot outlive the call.
+            _close_job(job)
     return process.returncode, stdout, stderr
+
+
+def _drain_bounded(process: subprocess.Popen, timeout: int) -> tuple[str, str]:
+    """Read stdout and stderr concurrently, keeping only a bounded prefix.
+
+    Both pipes are read to end-of-file so a command that prints a lot still
+    finishes and its exit status stays real, while no more than
+    `MAX_CAPTURE_CHARS` characters are held in memory -- one over the output
+    budget, so an oversized stream still reads as truncated to `_bounded`.
+    """
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    kept = 0
+    lock = threading.Lock()
+
+    def drain(stream: Any, parts: list[str]) -> None:
+        nonlocal kept
+        try:
+            while True:
+                chunk = stream.read(8192)
+                if not chunk:
+                    return
+                with lock:
+                    if kept >= MAX_CAPTURE_CHARS:
+                        continue  # past the budget: keep reading, keep nothing
+                    take = min(len(chunk), MAX_CAPTURE_CHARS - kept)
+                    parts.append(chunk[:take])
+                    kept += take
+        except (OSError, ValueError):
+            return
+        finally:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+    threads = [
+        threading.Thread(target=drain, args=(pipe, parts), daemon=True)
+        for pipe, parts in ((process.stdout, stdout_parts), (process.stderr, stderr_parts))
+        if pipe is not None
+    ]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + timeout
+    try:
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_tree(process)
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass  # something outside the tree holds the pipes; give up on its output
+            raise
+        # The leader has exited, but a descendant may still hold a pipe: capture
+        # is complete only when both pipes read end-of-file, so the timeout
+        # covers the pipes too, not just the leader's exit.
+        for thread in threads:
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        if any(thread.is_alive() for thread in threads):
+            _kill_tree(process)
+            raise subprocess.TimeoutExpired(process.args, timeout)
+    except subprocess.TimeoutExpired:
+        raise
+    except BaseException:
+        # N3: anything else that ends the wait -- a Ctrl-C above all -- ends
+        # the command too. It runs in its own process group, so the terminal's
+        # interrupt never reaches it; left alone it would go on running, and
+        # writing, after pac had exited.
+        _kill_tree(process)
+        raise
+    finally:
+        for thread in threads:
+            thread.join(timeout=5)
+    return "".join(stdout_parts), "".join(stderr_parts)
 
 
 def _kill_tree(process: subprocess.Popen[str]) -> None:
     if sys.platform == "win32":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                       capture_output=True, timeout=30, check=False)
+        with _jobs_lock:
+            job = _jobs.get(id(process))
+        # The job handle reaches descendants after the leader has exited, which
+        # `taskkill /T` cannot; keep taskkill as the fallback for the cases
+        # where the job was never created or assignment was refused.
+        if job is None or not _terminate_job(job):
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                           capture_output=True, timeout=30, check=False)
     else:
         try:
             os.killpg(process.pid, signal.SIGKILL)
@@ -121,16 +496,15 @@ class ReadFile:
         path = self._workspace.resolve(arguments["path"])
         # Whether a secret may be READ is this tool's call, and the answer is
         # no: a secret read into the model's context is a secret disclosed.
-        if is_protected(path):
+        if is_protected(path) or self._workspace.is_hard_link_to_protected(path):
             raise SandboxError(f"protected file, the agent may not read it: {arguments['path']}")
         if not path.is_file():
             return ToolResult(ok=False, error=f"not a file: {arguments['path']}")
         try:
-            text = path.read_text(encoding="utf-8")
+            text, truncated = _bounded_read_text(path)
         except UnicodeDecodeError:
             return ToolResult(ok=False, error=f"not UTF-8 text: {arguments['path']}")
-        output, truncated = _bounded(text)
-        return ToolResult(ok=True, output=output, truncated=truncated)
+        return ToolResult(ok=True, output=text, truncated=truncated)
 
 
 class ListDirectory:
@@ -196,6 +570,8 @@ class SearchText:
         base = self._workspace.root if given in ("", ".") else self._workspace.resolve(given)
         wanted = needle if case_sensitive else needle.lower()
         matches: list[str] = []
+        match_chars = 0
+        file_truncated = False
         for directory, subdirectories, files in os.walk(base):
             subdirectories[:] = sorted(d for d in subdirectories if d.lower() != ".git")
             for name in sorted(files):
@@ -207,25 +583,35 @@ class SearchText:
                     resolved = self._workspace.resolve(relative)
                 except SandboxError:
                     continue
-                if is_protected(resolved):
+                if not resolved.is_file():
+                    # A FIFO, socket or device: opening it can block forever,
+                    # so it is skipped, never read.
+                    continue
+                if is_protected(resolved) or self._workspace.is_hard_link_to_protected(resolved):
                     continue
                 try:
-                    lines = resolved.read_text(encoding="utf-8").splitlines()
+                    text, truncated = _bounded_read_text(resolved, MAX_SEARCH_CHARS)
+                    if truncated:
+                        file_truncated = True
+                    lines = text.splitlines()
                 except (UnicodeDecodeError, OSError):
                     continue
                 for number, line in enumerate(lines, start=1):
                     haystack = line if case_sensitive else line.lower()
                     if wanted in haystack:
                         matches.append(f"{relative}:{number}: {line.strip()}")
-                        if len(matches) > MAX_SEARCH_MATCHES:
-                            return ToolResult(
-                                ok=True,
-                                output="\n".join(matches[:MAX_SEARCH_MATCHES]),
-                                truncated=True,
-                            )
+                        match_chars += len(matches[-1])
+                        # N2: the count was bounded and each line was not, and
+                        # the accumulated output was not either: many long lines
+                        # were megabytes held in memory before this check ran.
+                        # Bound the accumulated size as well as the count.
+                        if match_chars > MAX_OUTPUT_CHARS or len(matches) > MAX_SEARCH_MATCHES:
+                            output, _ = _bounded("\n".join(matches[:MAX_SEARCH_MATCHES]))
+                            return ToolResult(ok=True, output=output, truncated=True)
         if not matches:
-            return ToolResult(ok=True, output="no matches")
-        return ToolResult(ok=True, output="\n".join(matches))
+            return ToolResult(ok=True, output="no matches", truncated=file_truncated)
+        output, truncated = _bounded("\n".join(matches))
+        return ToolResult(ok=True, output=output, truncated=truncated or file_truncated)
 
 
 class FindFiles:
@@ -353,6 +739,17 @@ class DeleteFile:
 
     def run(self, arguments: Mapping[str, Any]) -> ToolResult:
         path = self._workspace.resolve_for_write(arguments["path"])
+        # `resolve` follows a link to its target, so unlinking the resolved
+        # path would delete the file the link points to, not the link named.
+        named = self._workspace.root.joinpath(*arguments["path"].replace("\\", "/").split("/"))
+        if named.is_symlink():
+            return ToolResult(
+                ok=False,
+                error=(
+                    f"is a symlink: {arguments['path']}; delete_file deletes regular "
+                    "files only, and would delete the file it points to"
+                ),
+            )
         if not path.is_file():
             return ToolResult(ok=False, error=f"not a file: {arguments['path']}")
         self._checkpoints.before_mutation(path)
@@ -392,6 +789,34 @@ def _refuse_protected_arguments(workspace: Workspace, args: list[str]) -> None:
                 ) from None
 
 
+def _refuse_diff_outside_a_repository(
+    workspace: Workspace, args: list[str], env: Mapping[str, str]
+) -> None:
+    """Refuse `git diff` where git would read it as `git diff --no-index`.
+
+    Outside a git work tree, `git diff a b` compares the two paths themselves,
+    a directory file by file, so `git diff empty .` printed every file in the
+    workspace, the database and the owner's profile among them (fix 9 in
+    commands.py refuses the explicit `--no-index`). Git is asked, with the
+    environment and directory the command would run with, rather than the
+    answer guessed from a `.git` on disk; if it cannot say, the diff is refused.
+    """
+    if args[:2] != ["git", "diff"]:
+        return
+    try:
+        code, stdout, _ = run_bounded(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=workspace.root, env=env, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        code, stdout = 1, ""
+    if code != 0 or stdout.strip() != "true":
+        raise CommandRejected(
+            f"git diff outside a git work tree compares files directly and "
+            f"{RECURSIVE_READ}; {SEARCH_TEXT_INSTEAD}"
+        )
+
+
 def _refuse_shadowed_executable(workspace: Workspace, name: str) -> None:
     """Refuse an allowlisted command that a workspace file would shadow.
 
@@ -423,8 +848,13 @@ class RunCommand:
         self.spec = ToolSpec(
             name="run_command",
             description=(
-                "Run one allowlisted, read-only or checking command in the workspace, "
-                "without a shell."
+                "Run one allowlisted command in the workspace, without a shell: a "
+                "read-only one, or a check (pytest, ruff, mypy). A check is not "
+                "read-only: pytest runs the project's own code, and the project's "
+                "configuration can make any check write files, so the owner is asked "
+                "before every run. Options that write files, such as ruff --fix, are "
+                "refused: change files with write_file. Undoing a task restores what "
+                "the file tools wrote, not what a command wrote."
             ),
             risk_level=RiskLevel.HIGH,
             input_schema={
@@ -452,6 +882,7 @@ class RunCommand:
         }
         if os.name == "nt":
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
+        _refuse_diff_outside_a_repository(self._workspace, args, env)
         try:
             returncode, stdout, stderr = run_bounded(
                 args, cwd=self._workspace.root, env=env, timeout=self.spec.timeout_seconds

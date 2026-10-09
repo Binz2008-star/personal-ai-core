@@ -15,7 +15,8 @@ It records events. It never writes memory.
 """
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Callable, Mapping, Sequence, TypeVar
 
 from ..core.contracts import (
     ContextBudgetPolicy,
@@ -39,9 +40,12 @@ from ..core.domain import (
 )
 from ..core.context import ContextAllocation
 from ..core.errors import ContextOverflowError, ProviderError
+from ..core.redaction import RedactionError
 from .events import EventRecorder
-from .grounding import ContextBuilder, summarize
+from .grounding import ContextBuilder, Grounding, Retrieval, summarize
 from .language_guard import GUARD_NOTE, check_reply
+
+_T = TypeVar("_T")
 
 
 class ConversationService:
@@ -82,6 +86,9 @@ class ConversationService:
         # GUARD_NOTE's tokens whenever it is on, so a retry cannot overflow.
         self._language_guard = language_guard
         self._recorder = EventRecorder(events)
+        # Read back for R2 only: whether the previous turn left messages out.
+        self._events = events
+        self._left_out_started: dict[str, int] = {}
 
     @property
     def grounded(self) -> bool:
@@ -126,6 +133,23 @@ class ConversationService:
         if session is None:
             raise KeyError(f"unknown session: {session_id}")
 
+        spec = self._registry.active
+        # N1: the window this turn is budgeted against is the window the model
+        # server is told to use (`num_ctx`). A caller naming another one would
+        # make the budget describe a window the server does not have, so it is
+        # refused here, before anything is stored -- not overridden in silence.
+        named_window = (options or {}).get("num_ctx")
+        if named_window is not None and named_window != spec.context_window:
+            raise ValueError(
+                f"num_ctx {named_window!r} differs from the active model's context "
+                f"window {spec.context_window}, which this turn is budgeted against"
+            )
+
+        # R1: a turn that cannot fit is refused before anything is stored --
+        # before, a refused message stayed in the session and was recorded,
+        # and when the profile was the cause, every later turn refused too.
+        self._refuse_if_it_cannot_fit(session_id=session_id, content=content, spec=spec)
+
         user_message = Message(
             session_id=session_id,
             role=Role.USER,
@@ -141,16 +165,52 @@ class ConversationService:
             actor=session.user_id,
         )
 
-        spec = self._registry.active
-        history = self._messages.list_for_session(session_id)
-
-        grounding = self._ground(
-            session_id=session_id,
-            query=content,
-            language=language,
-            spec=spec,
-            history=history,
+        # Retrieval first: it depends on this message alone, and what it
+        # returns decides how much room the history may take (R3).
+        retrieval = self._retrieve(
+            session_id=session_id, query=content, language=language,
             message_id=user_message.id,
+        )
+        builder = self._context_builder
+        reserve = (
+            # Priced on the redacted render, so a redactor failure here is a
+            # retrieval failure like any other: recorded by type, re-raised.
+            self._recording_retrieval_failure(
+                session_id=session_id,
+                message_id=user_message.id,
+                step=lambda: builder.evidence_reserve(retrieval),
+            )
+            if builder is not None and retrieval is not None
+            else 0
+        )
+
+        # The whole history stays in the store; the prompt gets the newest
+        # messages that fit (P1-3) beside the fixed reserves and, on a turn
+        # that retrieved passages, the room for its top two (R3). Both paths
+        # are measured on what is sent.
+        def fits(tokens: int) -> bool:
+            allocation = self._budget_policy.allocate(model=spec, history_tokens=tokens)
+            return not allocation.overcommitted and allocation.evidence >= reserve
+
+        window = window_history(
+            self._messages.list_for_session(session_id),
+            estimate=self._estimator.estimate,
+            fits=fits,
+        )
+        history = window.sent
+        self._note_left_out(session_id=session_id, left_out=window.left_out)
+
+        grounding = (
+            self._assemble(
+                session_id=session_id,
+                retrieval=retrieval,
+                spec=spec,
+                window=window,
+                reserve=reserve,
+                message_id=user_message.id,
+            )
+            if retrieval is not None
+            else None
         )
         # Every turn has an allocation and a CONTEXT_ASSEMBLED event: the
         # grounded path's, or one measured here from the history alone.
@@ -158,12 +218,14 @@ class ConversationService:
             grounding.allocation
             if grounding is not None
             else self._measure(
-                session_id=session_id, spec=spec, history=history,
+                session_id=session_id, spec=spec, window=window,
                 message_id=user_message.id,
             )
         )
-        # ADR-005: no silent overflow. A turn that needs more than the window
-        # before any evidence is refused here, recorded, and never sent.
+        # ADR-005: no silent overflow. Only this turn's own message is left
+        # in the window when it does not fit (window_history), so a turn that
+        # still needs more than the window is refused here, recorded, and
+        # never sent: fail-closed, not cut by the server.
         if allocation.overcommitted:
             self._recorder.record(
                 session_id=session_id,
@@ -208,6 +270,9 @@ class ConversationService:
             "grounded": grounding is not None and grounding.message is not None,
             "evidence_chunks": grounding.used if grounding is not None else 0,
             "generation_limit": allocation.generation_reserve,
+            # N1: the window the server is told to use -- the one this turn
+            # was budgeted against.
+            "num_ctx": allocation.context_window,
             "sampling": dict(self._sampling),
         }
         self._recorder.record(
@@ -231,7 +296,7 @@ class ConversationService:
             self._recorder.record(
                 session_id=session_id,
                 type=EventType.GENERATION_FAILED,
-                payload={"model": spec.name, "error": str(exc)},
+                payload={"model": spec.name, **_provider_failure(exc)},
                 message_id=user_message.id,
             )
             raise
@@ -333,7 +398,7 @@ class ConversationService:
             self._recorder.record(
                 session_id=session_id,
                 type=EventType.GENERATION_FAILED,
-                payload={"model": spec.name, "error": str(exc), "attempt": 2},
+                payload={"model": spec.name, **_provider_failure(exc), "attempt": 2},
                 message_id=user_message.id,
             )
             # The trigger is recorded on this path too: a retry that never
@@ -365,9 +430,14 @@ class ConversationService:
         policy, and silently overriding it would make the parameter a lie. The
         limit and the sampling are recorded on `GENERATION_REQUESTED` either
         way, so what was sent is recoverable.
+
+        `num_ctx` is the exception (N1): it is always the allocation's window,
+        because a server running another window truncates the prompt without
+        a word. `send` has already refused a caller that named a different one.
         """
         merged = {**self._sampling, **dict(options or {})}
         merged.setdefault("num_predict", allocation.generation_reserve)
+        merged["num_ctx"] = allocation.context_window
         return merged
 
     def _measure(
@@ -375,7 +445,7 @@ class ConversationService:
         *,
         session_id: str,
         spec: ModelSpecLike,
-        history: Sequence[Message],
+        window: HistoryWindow,
         message_id: str,
     ) -> ContextAllocation:
         """The allocation of a turn with no retrieval, measured and recorded.
@@ -384,14 +454,14 @@ class ConversationService:
         uses, so the two paths budget a conversation alike; recorded as
         CONTEXT_ASSEMBLED so the size of every turn against the window can be
         read back, not only the grounded ones."""
-        history_tokens = sum(self._estimator.estimate(m.content) for m in history)
+        history_tokens = sum(self._estimator.estimate(m.content) for m in window.sent)
         allocation = self._budget_policy.allocate(model=spec, history_tokens=history_tokens)
         self._recorder.record(
             session_id=session_id,
             type=EventType.CONTEXT_ASSEMBLED,
             payload={
                 "grounded": False,
-                "history_messages": len(history),
+                **window.recorded(),
                 "context_window": allocation.context_window,
                 "history_tokens": allocation.history,
                 "generation_reserve": allocation.generation_reserve,
@@ -405,17 +475,15 @@ class ConversationService:
         )
         return allocation
 
-    def _ground(
+    def _retrieve(
         self,
         *,
         session_id: str,
         query: str,
         language: str,
-        spec: ModelSpecLike,
-        history: Sequence[Message],
         message_id: str,
-    ):
-        """Retrieve and budget evidence for this turn, or return None.
+    ) -> Retrieval | None:
+        """Retrieve evidence for this turn, or return None when ungrounded.
 
         A retrieval failure is recorded and then re-raised rather than
         swallowed. Answering anyway would produce an ungrounded reply that the
@@ -424,31 +492,144 @@ class ConversationService:
         """
         if self._context_builder is None:
             return None
+        builder = self._context_builder
+        return self._recording_retrieval_failure(
+            session_id=session_id,
+            message_id=message_id,
+            step=lambda: builder.retrieve(
+                session_id=session_id, query=query, language=language
+            ),
+        )
 
-        try:
-            grounding = self._context_builder.build(
+    def _assemble(
+        self,
+        *,
+        session_id: str,
+        retrieval: Retrieval,
+        spec: ModelSpecLike,
+        window: HistoryWindow,
+        reserve: int,
+        message_id: str,
+    ) -> Grounding:
+        """Fit the retrieved evidence beside the window, and record it."""
+        builder = self._context_builder
+        assert builder is not None  # only called with a retrieval
+        grounding = self._recording_retrieval_failure(
+            session_id=session_id,
+            message_id=message_id,
+            step=lambda: builder.assemble(
                 session_id=session_id,
-                query=query,
-                language=language,
+                retrieval=retrieval,
                 model=spec,
-                history=history,
-            )
+                history=window.sent,
+            ),
+        )
+        self._recorder.record(
+            session_id=session_id,
+            type=EventType.CONTEXT_ASSEMBLED,
+            payload={**summarize(grounding), **window.recorded(), "evidence_reserve": reserve},
+            message_id=message_id,
+        )
+        return grounding
+
+    def _recording_retrieval_failure(
+        self, *, session_id: str, message_id: str, step: Callable[[], _T]
+    ) -> _T:
+        try:
+            return step()
         except Exception as exc:
+            # The type, not the message: a retriever's message can quote a
+            # document path, a database host or the text it failed on (P1-8).
+            # A redactor's failure says which of its declared classifications
+            # it is, and nothing else can be in it (ADR-018 section 3.8).
+            failure: dict[str, object] = {"error_type": type(exc).__name__}
+            if isinstance(exc, RedactionError):
+                failure["classification"] = exc.classification
             self._recorder.record(
                 session_id=session_id,
                 type=EventType.RETRIEVAL_FAILED,
-                payload={"error": str(exc), "error_type": type(exc).__name__},
+                payload=failure,
                 message_id=message_id,
             )
             raise
 
+    def _refuse_if_it_cannot_fit(
+        self, *, session_id: str, content: str, spec: ModelSpecLike
+    ) -> None:
+        """Refuse, before anything is stored, a turn no window could hold.
+
+        R1. The history can always be left out (P1-3), so what is left is
+        this message beside the fixed reserves -- the identity (the profile),
+        the overhead, the generation reserve and the guard. Which of the two
+        is too large decides the advice, so the error says which.
+        """
+        message_tokens = self._estimator.estimate(content)
+        needed = self._budget_policy.allocate(model=spec, history_tokens=message_tokens)
+        if not needed.overcommitted:
+            return
+        fixed = needed.spoken_for - needed.history
+        cause = "fixed_reserves" if fixed >= needed.context_window else "message"
         self._recorder.record(
             session_id=session_id,
-            type=EventType.CONTEXT_ASSEMBLED,
-            payload=summarize(grounding),
-            message_id=message_id,
+            type=EventType.GENERATION_FAILED,
+            payload={
+                "model": spec.name,
+                "error": "the context window is overcommitted; the turn was not sent",
+                "reason": "context_overcommitted",
+                "cause": cause,
+                "stored": False,
+                "spoken_for": needed.spoken_for,
+                "context_window": needed.context_window,
+                "history_tokens": needed.history,
+                "fixed_tokens": fixed,
+            },
         )
-        return grounding
+        raise ContextOverflowError(
+            spoken_for=needed.spoken_for,
+            context_window=needed.context_window,
+            history_tokens=needed.history,
+            fixed_tokens=fixed,
+            cause=cause,
+        )
+
+    def check_room(self) -> None:
+        """Raise ContextOverflowError when no message could fit beside the
+        fixed reserves (R1, case b), so a caller can say so before it
+        creates a session that would refuse every turn."""
+        spec = self._registry.active
+        fixed = self._budget_policy.allocate(model=spec, history_tokens=0)
+        if fixed.spoken_for >= fixed.context_window:
+            raise ContextOverflowError(
+                spoken_for=fixed.spoken_for,
+                context_window=fixed.context_window,
+                history_tokens=0,
+                fixed_tokens=fixed.spoken_for,
+                cause="fixed_reserves",
+            )
+
+    def _note_left_out(self, *, session_id: str, left_out: int) -> None:
+        """Remember whether this turn is the first to leave messages out (R2).
+
+        Read from the session's own record, so a resumed session that was
+        already leaving messages out is not announced again."""
+        self._left_out_started.pop(session_id, None)
+        if not left_out:
+            return
+        previous = 0
+        for event in self._events.list_for_session(session_id):
+            if event.type is EventType.CONTEXT_ASSEMBLED:
+                previous = int(event.payload.get("history_left_out", 0) or 0)
+        if not previous:
+            self._left_out_started[session_id] = left_out
+
+    def left_out_started(self, session_id: str) -> int | None:
+        """How many messages the session's latest turn left out of the
+        prompt, when that turn is the first to leave any out; else None.
+
+        "First" counts from the last turn that left nothing out, so a window
+        that grows back to the whole session and then shrinks is announced
+        again."""
+        return self._left_out_started.get(session_id)
 
     def has_session(self, session_id: str) -> bool:
         """Whether `send` would accept this session id.
@@ -470,3 +651,70 @@ class ConversationService:
 
     def history(self, session_id: str) -> Sequence[Message]:
         return self._messages.list_for_session(session_id)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryWindow:
+    """The part of a session's history one turn sends, and what it left out."""
+
+    sent: tuple[Message, ...]
+    left_out: int
+    left_out_tokens: int
+
+    def recorded(self) -> dict[str, object]:
+        """For CONTEXT_ASSEMBLED. Every message before `history_first_sent` is
+        in the store and was not sent; counts and an id, never the text."""
+        return {
+            "history_messages": len(self.sent),
+            "history_left_out": self.left_out,
+            "history_left_out_tokens": self.left_out_tokens,
+            "history_first_sent": self.sent[0].id if self.sent else None,
+        }
+
+
+def window_history(
+    history: Sequence[Message],
+    *,
+    estimate: Callable[[str], int],
+    fits: Callable[[int], bool],
+) -> HistoryWindow:
+    """The newest messages whose estimate `fits`, the oldest left out first.
+
+    Gap analysis P1-3. Every turn sent the whole session, so a long enough
+    one stopped fitting the window, and from then on every turn was refused
+    (ADR-005: refused rather than cut by the server). Now the oldest messages
+    are left out of the prompt -- only of the prompt: the store keeps them.
+
+    Deterministic: the same history and the same estimate give the same
+    window. The newest message, this turn's own, is always kept; when it does
+    not fit alone the window is just that message, and the caller's overflow
+    check refuses the turn. Once anything is left out the window starts at a
+    user message, so the model never reads a reply without its question.
+    """
+    tokens = [estimate(m.content) for m in history]
+    total = sum(tokens)
+    start = 0
+    while start < len(history) - 1 and not fits(total):
+        total -= tokens[start]
+        start += 1
+    if start:
+        while start < len(history) - 1 and history[start].role is not Role.USER:
+            total -= tokens[start]
+            start += 1
+    return HistoryWindow(
+        sent=tuple(history[start:]),
+        left_out=start,
+        left_out_tokens=sum(tokens[:start]),
+    )
+
+
+def _provider_failure(exc: ProviderError) -> dict[str, object]:
+    """What a durable GENERATION_FAILED keeps of a provider's failure.
+
+    Gap analysis P1-8: the message went into the event as it was, and a
+    transport's message can name the host, the port and whatever the server
+    answered. A row in the event store outlives the terminal it was printed
+    on, so it keeps a classification -- the error's type, its kind and an
+    HTTP status -- and the person at the terminal still gets the message.
+    """
+    return {"error_type": type(exc).__name__, "error_kind": exc.kind, "status": exc.status}

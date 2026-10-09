@@ -1,8 +1,10 @@
 """The agent's tools, run directly -- the executor is tested separately."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from personal_ai_core.agent.tools import (
     SearchText,
     WriteFile,
     default_tools,
+    run_bounded,
 )
 from personal_ai_core.core.agent import RiskLevel
 from personal_ai_core.core.contracts import Tool
@@ -347,3 +350,81 @@ def test_a_timeout_kills_the_grandchild_too(ws):
     while _alive(pid) and time.monotonic() < deadline:
         time.sleep(0.2)
     assert not _alive(pid), "the grandchild outlived the timeout"
+
+
+def test_a_timeout_kills_a_descendant_after_the_leader_exits(ws):
+    """The leader can exit while a descendant still holds the inherited pipes.
+
+    `taskkill /T` walks the tree from the named process, so once the leader is
+    gone it cannot reach the descendant: on Windows the descendant outlived the
+    timeout and the two reader threads stayed blocked on its pipes (owner's
+    machine, 2026-10-08). The grandchild test above keeps the leader alive with
+    `child.wait()`, so it never covered this case. A job object kills the whole
+    tree from the job handle instead, so the descendant must be gone.
+    """
+    metadata = ws.root / "descendant.pid"
+    leader = (
+        "import subprocess, sys\n"
+        "from pathlib import Path\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+        "Path(sys.argv[1]).write_text(str(child.pid))\n"
+    )
+    before = set(threading.enumerate())
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_bounded([sys.executable, "-c", leader, str(metadata)],
+                    cwd=ws.root, env=dict(os.environ), timeout=2)
+    assert time.monotonic() - started < 8, "leader exit left capture waiting beyond its deadline"
+    assert not [thread for thread in threading.enumerate() if thread not in before], (
+        "capture left live pipe readers after returning"
+    )
+    deadline = time.monotonic() + 10
+    while not metadata.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    pid = int(metadata.read_text())
+    deadline = time.monotonic() + 10
+    while _alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert not _alive(pid), "a descendant outlived the leader's timeout"
+
+
+def test_failed_process_creation_closes_the_prepared_job(ws, monkeypatch):
+    closed = []
+    monkeypatch.setattr(tools_module.sys, "platform", "win32")
+    monkeypatch.setattr(tools_module, "_start_suspended_in_job", lambda: (101, 4))
+    monkeypatch.setattr(tools_module, "_close_job", closed.append)
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("missing executable")
+
+    monkeypatch.setattr(tools_module.subprocess, "Popen", missing)
+    with pytest.raises(FileNotFoundError, match="missing executable"):
+        run_bounded(["missing"], cwd=ws.root, env={}, timeout=1)
+    assert closed == [101]
+    assert not tools_module._jobs
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("assignment failed"), KeyboardInterrupt()])
+def test_interrupted_containment_kills_and_reaps_the_frozen_child(ws, monkeypatch, failure):
+    actions = []
+
+    class FrozenChild:
+        def kill(self):
+            actions.append("kill")
+
+        def wait(self):
+            actions.append("wait")
+
+    monkeypatch.setattr(tools_module.sys, "platform", "win32")
+    monkeypatch.setattr(tools_module, "_start_suspended_in_job", lambda: (101, 4))
+    monkeypatch.setattr(tools_module.subprocess, "Popen", lambda *args, **kwargs: FrozenChild())
+    monkeypatch.setattr(tools_module, "_close_job", lambda job: actions.append(("close", job)))
+
+    def interrupted(job, process):
+        raise failure
+
+    monkeypatch.setattr(tools_module, "_contain_and_release", interrupted)
+    with pytest.raises(type(failure)):
+        run_bounded(["command"], cwd=ws.root, env={}, timeout=1)
+    assert actions == ["kill", "wait", ("close", 101)]
+    assert not tools_module._jobs

@@ -105,9 +105,22 @@ class Workspace:
     contains it). Each is reserved together with its SQLite companion files,
     and a reserved file is refused by `resolve`, so for every tool and every
     purpose: read, search, write and delete. Listing hides it.
+
+    `owner_files` are the owner's profile and projects files (N4). They are
+    composed into every later turn's instructions, so an agent that could
+    write one -- MEDIUM risk, never asked -- could rewrite what every later
+    conversation obeys. They are reserved exactly as the database is, but
+    alone: they have no companion files. A path that does not exist yet is
+    reserved too, so the agent cannot create a profile where there was none.
     """
 
-    def __init__(self, root: Path, *, reserved: Iterable[Path] = ()) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        reserved: Iterable[Path] = (),
+        owner_files: Iterable[Path] = (),
+    ) -> None:
         resolved = Path(root).resolve()
         if not resolved.is_dir():
             raise ValueError(f"workspace is not a directory: {root}")
@@ -117,17 +130,23 @@ class Workspace:
             for path in reserved
             for companion in SQLITE_COMPANIONS
         )
+        self._owner_files = tuple(Path(path).resolve() for path in owner_files)
 
     def is_reserved(self, path: Path) -> bool:
-        """Whether `path` is, or is the same file as, a reserved one.
+        """Whether `path` is, or is the same file as, a reserved one -- the
+        database (with its companions) or one of the owner's files.
 
         Compared by resolved name (case-folded where the platform folds case)
         and, for files that exist, by identity: a hard link, or a spelling a
         case-insensitive filesystem maps to the same file, is the same file.
         """
+        return self._matches(path, self._reserved) or self._matches(path, self._owner_files)
+
+    @staticmethod
+    def _matches(path: Path, reserved_paths: tuple[Path, ...]) -> bool:
         candidate = Path(path).resolve()
         folded = os.path.normcase(str(candidate))
-        for reserved in self._reserved:
+        for reserved in reserved_paths:
             if folded == os.path.normcase(str(reserved)):
                 return True
             try:
@@ -138,6 +157,45 @@ class Workspace:
             except OSError:
                 continue
         return False
+
+    def is_hard_link_to_protected(self, path: Path) -> bool:
+        """Whether `path` is the same file as a protected file in the root.
+
+        Name protection alone misses a hard link: `alias.txt -> .env` carries an
+        ordinary name, so `is_protected("alias.txt")` is False and the link's
+        contents reach the model. A hard link IS the same file, so this compares
+        by identity instead of spelling -- but only for regular files that could
+        have a link (st_nlink > 1), so ordinary files pay no scan.
+        """
+        try:
+            info = path.stat()
+        except OSError:
+            return False
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink < 2:
+            return False
+        for protected in self._protected_files():
+            try:
+                if os.path.samefile(path, protected):
+                    return True
+            except OSError:
+                continue
+        return False
+
+    def _protected_files(self) -> Iterable[Path]:
+        """Protected filenames and Git metadata, for identity comparison.
+
+        `.git` is unreachable through every file tool. A hard link must not
+        bypass that directory rule merely because it has an ordinary name.
+        The scan inspects identities only; it never reads metadata contents.
+        """
+        for directory, _, files in os.walk(self.root):
+            git_metadata = any(
+                part.lower() == ".git"
+                for part in Path(directory).relative_to(self.root).parts
+            )
+            for name in files:
+                if git_metadata or name.lower() == ".git" or is_protected(Path(name)):
+                    yield Path(directory) / name
 
     def resolve(self, path: str) -> Path:
         """A path inside the workspace, or SandboxError. For reading."""
@@ -170,16 +228,20 @@ class Workspace:
         # (`GIT~1`), or a link to the directory -- resolves to the real one.
         if any(part.lower() == ".git" for part in resolved.relative_to(self.root).parts):
             raise SandboxError(f".git is not reachable from the workspace: {path}")
-        if self.is_reserved(resolved):
+        if self._matches(resolved, self._reserved):
             raise SandboxError(
                 f"the Core's own database is not reachable from the workspace: {path}"
+            )
+        if self._matches(resolved, self._owner_files):
+            raise SandboxError(
+                f"the owner's profile is not reachable from the workspace: {path}"
             )
         return resolved
 
     def resolve_for_write(self, path: str) -> Path:
         """As `resolve`, and the target is not a protected file."""
         resolved = self.resolve(path)
-        if is_protected(resolved):
+        if is_protected(resolved) or self.is_hard_link_to_protected(resolved):
             raise SandboxError(f"protected file, the agent may not write it: {path}")
         return resolved
 
