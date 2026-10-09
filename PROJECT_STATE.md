@@ -742,6 +742,7 @@ claim written in one place with nothing that notices it going stale.
   #225 9270025  fix(app): a failing store ends in a sentence and the safe next step, not a
                traceback (P1-5)
   #226 5fc9828  fix(agent): web_search uses the guarded, bounded fetch transport
+  #227 bd3090c  ci: check Python 3.11 and 3.14 types alongside 3.12
   #228 7f528b8  fix(app): preserve the owner's profile during failed writes and invalid input
   #229 02b79f4  fix(app): pac says when the first reply will load the model, and which
                failure a failed turn was (P1-6)
@@ -1248,7 +1249,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-09, main at 72077bd)
+NEXT SESSION HANDOFF (updated 2026-10-09, main at bd3090c)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start
@@ -1931,7 +1932,7 @@ The rig (owner's Windows PC, GTX 1060 6GB)
 Open, each an owner decision (OPEN REVIEW FINDINGS, ARCHITECTURE.md OD-1..10)
   - `pac --remember` outside the lifecycle; ExperiencePipeline unwired and its
     12-character conflict check; MemoryReader over a write-capable store; dead
-    enum members; raw exception text in GENERATION_FAILED / RETRIEVAL_FAILED.
+    enum members. Failure-event exception text was removed by merged PR #223.
   - ADR-017 A2 Step B stays unbuilt.
 
 Mechanics that cost time
