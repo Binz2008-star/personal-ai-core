@@ -169,6 +169,16 @@ jobs:
       - name: Types
         run: pyright
 
+      # The same tree, typed against the oldest Python pyproject.toml admits
+      # and the one the owner's machine runs. The stubs differ by version:
+      # shlex.split took None until 3.12, and a test that passed against 3.11
+      # failed here (#222). Each is a few seconds; a version nobody types
+      # against is one whose breakage arrives on the owner's machine first.
+      - name: Types (Python 3.11, the declared minimum)
+        run: pyright --pythonversion 3.11
+      - name: Types (Python 3.14, the owner's machine)
+        run: pyright --pythonversion 3.14
+
   # Windows exists as its own job, NOT as a matrix leg on `suite`, and the
   # reason is worth stating so nobody "simplifies" it back.
   #

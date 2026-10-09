@@ -197,6 +197,29 @@ def test_when_the_end_cannot_be_recorded_the_original_failure_is_the_one_reporte
         loop.run("x", session_id="s1")
 
 
+# --- a defect mid-task ---------------------------------------------------------------------
+
+
+def test_an_unexpected_exception_mid_task_still_offers_the_undo(tmp_path):
+    """A failure pac has no sentence for still propagates -- the loop recorded
+    it as internal_error -- but not before the changed files are offered back."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "keep.md").write_text(ORIGINAL, encoding="utf-8")
+    out = io.StringIO()
+    with pytest.raises(RuntimeError, match="a defect"):
+        pac(["--database", str(tmp_path / "core.db"), "--agent", "--workspace",
+             str(workspace)], transport=scripted(WRITE, RuntimeError("a defect")),
+            stdin=iter([TASK, "y"]), stdout=out, env={})
+    output = out.getvalue()
+    assert "undo 1 file change(s) from this task (keep.md)?" in output
+    assert "restored: keep.md" in output
+    assert (workspace / "keep.md").read_text(encoding="utf-8") == ORIGINAL
+    [finish] = finishes(tmp_path)
+    assert finish["stopped_reason"] == "internal_error (RuntimeError)"
+    assert finish["touched_files"] == ["keep.md"]
+
+
 # --- a running command does not outlive the interrupt -----------------------------------
 
 
@@ -208,16 +231,19 @@ def test_an_interrupt_while_a_command_runs_ends_the_command(tmp_path, monkeypatc
     class Recording(real_popen):  # type: ignore[misc, valid-type]
         """Interrupts the wait on the command under test, and on nothing else:
         on Windows the kill itself runs `taskkill` through Popen, and its wait
-        must go through untouched."""
+        must go through untouched. The wait is interrupted once, so the
+        assertion afterwards can still reap the process."""
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             started.append(self)
+            self._interrupted = False
 
-        def communicate(self, *args, **kwargs):
-            if self.args == command:
+        def wait(self, timeout=None):
+            if self.args == command and not self._interrupted:
+                self._interrupted = True
                 raise KeyboardInterrupt
-            return super().communicate(*args, **kwargs)
+            return super().wait(timeout)
 
     monkeypatch.setattr(subprocess, "Popen", Recording)
     # Windows' Python does not start without SYSTEMROOT; elsewhere nothing is needed.

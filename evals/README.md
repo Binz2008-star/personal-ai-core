@@ -246,6 +246,22 @@ python -m personal_ai_core.app.bench --report evals\results\bench\bench-<time>.j
 - A check marked `"informational": true` is judged and reported as its own rate but does not decide success. The citation checks are informational: the system does not ask the model to cite.
 - **Containment, not a sandbox.** Agent tools stay in a temporary workspace, network tools are denied, and `shell` accepts only local git and Python/pytest. Code the agent writes and runs is not isolated from the network. Do not describe a result as sandboxed or offline.
 
+## Retrieval-only gate
+
+`tests/unit/test_retrieval_bench_gate.py` runs in CI with the rest of the suite. No model is involved. It ingests each knowledge task's corpus the way `pac --documents` does, retrieves the top 5 for the English and the Arabic instruction, and pins where the cited document ranks.
+
+Baseline at 6c35db3, over the 8 tasks that cite a document:
+
+| | recall@1 | recall@2 | recall@5 |
+|---|---|---|---|
+| English | 7/8 | 8/8 | 8/8 |
+| Arabic | 4/8 | 6/8 | 8/8 |
+
+- The Arabic misses at 2 are `kb-deploy-day` and `kb-leave-carryover`. In both, the cited document ranks 3rd.
+- Equal fused scores count against the cited document. Chunk ids are minted per run, so the order of tied passages differs between runs, and the gate must not.
+- A change to retrieval (chunking, a similarity floor, ranking) that moves any rank updates `BASELINE` and `RECALL` in the same PR.
+- The corpora are three documents each, so the gate is coarse. Changing RRF's k does not move any rank here.
+
 ## Verdicts
 
 | Verdict | Meaning |

@@ -109,6 +109,19 @@ def test_the_static_analysis_gate_exists(workflow_text):
     assert re.search(r"^\s*run: pyright\b", workflow_text, re.MULTILINE)
 
 
+def test_the_types_are_checked_against_the_minimum_and_the_owners_python(workflow_text):
+    """pyproject.toml admits 3.11, CI runs 3.12, the owner's machine runs 3.14.
+
+    The standard library's stubs differ by version; a test that type-checked
+    against 3.11 failed against 3.12 (#222). Each version the code runs on is
+    typed, not assumed.
+    """
+    static = workflow_text[workflow_text.index("\n  static:"):]
+    for version in ("3.11", "3.14"):
+        assert re.search(rf"^\s*run: pyright --pythonversion {re.escape(version)}$",
+                         static, re.MULTILINE), f"pyright is not run against Python {version}"
+
+
 def test_the_static_gate_is_its_own_job_not_a_step_on_suite(workflow_text):
     """Steps are sequential: as steps on `suite`, a red suite skips them.
 

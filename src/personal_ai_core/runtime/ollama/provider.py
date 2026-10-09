@@ -7,6 +7,7 @@ embedding calls were hard-wired in three files.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import time
@@ -34,7 +35,17 @@ def http_transport(url: str, payload: Mapping[str, Any], timeout: int) -> Mappin
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         kind, status = transport_failure(exc)
         raise ProviderError(f"ollama request failed: {exc}", kind=kind, status=status) from exc
-    except json.JSONDecodeError as exc:
+    except http.client.IncompleteRead as exc:
+        # The server answered and the body was cut short: what came is not a
+        # reply, and asking again would wait out the whole generation twice.
+        raise ProviderError(f"ollama reply was cut short: {exc!r}",
+                            kind="invalid_response") from exc
+    except http.client.HTTPException as exc:
+        # Not an HTTP reply at all (BadStatusLine and the like): as with a
+        # refused connection, nothing usable answered at that address.
+        kind, status = transport_failure(exc)
+        raise ProviderError(f"ollama request failed: {exc!r}", kind=kind, status=status) from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ProviderError(f"ollama returned invalid JSON: {exc}",
                             kind="invalid_response") from exc
 
@@ -75,7 +86,15 @@ class OllamaProvider:
                 f"got keys: {sorted(raw)}",
                 kind="invalid_response",
             )
-        return self._response(raw, message, model, message["content"], ())
+        content = message["content"]
+        if not isinstance(content, str):
+            # A null or a number is not a reply: past here it would reach the
+            # language guard, or the store, as text.
+            raise ProviderError(
+                f"ollama response message.content is not text: {type(content).__name__}",
+                kind="invalid_response",
+            )
+        return self._response(raw, message, model, content, ())
 
     def generate_with_tools(
         self,
@@ -105,6 +124,11 @@ class OllamaProvider:
         raw, message = self._chat(payload)
         calls = _native_calls(message.get("tool_calls"))
         content = message.get("content")
+        if content is not None and not isinstance(content, str):
+            raise ProviderError(
+                f"ollama response message.content is not text: {type(content).__name__}",
+                kind="invalid_response",
+            )
         if content is None and not calls:
             raise ProviderError(
                 "ollama response has neither message.content nor message.tool_calls; "
@@ -133,6 +157,12 @@ class OllamaProvider:
     def _chat(self, payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
         raw = with_one_retry(lambda: self._transport(f"{self._host}/api/chat", payload, self._timeout),
                              sleep=self._sleep)
+        if not isinstance(raw, Mapping):
+            # Valid JSON, but `[1, 2]`, `null` or `"hi"` is not a chat reply.
+            raise ProviderError(
+                f"ollama response is not a JSON object: {type(raw).__name__}",
+                kind="invalid_response",
+            )
         message = raw.get("message")
         if not isinstance(message, Mapping):
             raise ProviderError(

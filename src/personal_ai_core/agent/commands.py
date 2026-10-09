@@ -38,6 +38,17 @@ fails if it reopens:
      on the read-only list. `<` and `>` join the refused metacharacters:
      harmless without a shell, but a command containing them was written for
      one, and it should be refused as written rather than run as something else.
+  9. Recursive reading. The workspace-aware check in tools.py tries each
+     argument as a FILE, so a DIRECTORY argument passed it, and `grep -r x .`
+     read every file under it: the Core's database, the owner's profile and
+     `.env`, all of which the file tools refuse or skip. grep's recursive
+     spellings are refused (`-r`, `-R`, inside a cluster such as `-rn`,
+     `--recursive`, `--dereference-recursive` and their abbreviations,
+     `-d`/`--directories` `recurse`), pointing the model to search_text. So is
+     `git diff --no-index`, which diffs two directories file by file; outside
+     a git work tree `git diff` does the same without the option, and that
+     case is refused in tools.py, where the workspace is known. Listings that
+     show names and not contents (`ls -R`, `find`) are left alone.
 
 `pytest`, `ruff` and `mypy` stay. pytest runs the project's own test code; a
 command tool is HIGH risk, so every run is ASKed first (AGENT_ARCHITECTURE.md
@@ -111,6 +122,17 @@ FIND_ACTIONS = frozenset(
     {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
 )
 GIT_WRITING_OPTIONS = ("--output", "--ext-diff")
+# grep's short options that take a value: the rest of the argument, or the
+# next argument, is that value, not more options.
+GREP_VALUE_OPTIONS = frozenset("ABCDdefm")
+SEARCH_TEXT_INSTEAD = (
+    "use search_text, which searches the workspace's files and leaves out the "
+    "ones the agent may not read"
+)
+RECURSIVE_READ = (
+    "reads every file under a directory, the Core's database and the owner's "
+    "profile among them"
+)
 SHELL_METACHARACTERS = frozenset("|;&$`!{}()[]<>")
 
 # Options that make a checking command write files, refused alone or as
@@ -187,9 +209,49 @@ def validate_command(command: str) -> list[str]:
         for argument in arguments:
             if argument in FIND_ACTIONS:
                 raise CommandRejected(f"find may search, not act: {argument}")
+    elif executable == "grep":
+        _refuse_recursive_grep(arguments)
     elif executable in WRITING_OPTIONS:
         _refuse_writing_options(executable, arguments)
     return parts
+
+
+def _refuse_recursive_grep(arguments: list[str]) -> None:
+    """Fix 9. Every argument is read, `--` included: a value grep takes from
+    the next argument (`-e --`) would otherwise end the scan early. A pattern
+    spelled like a recursive option is refused too; search_text finds it."""
+    for index, argument in enumerate(arguments):
+        following = arguments[index + 1] if index + 1 < len(arguments) else ""
+        if argument.startswith("--"):
+            # grep takes any unambiguous prefix of a long option.
+            name, has_value, value = argument.partition("=")
+            if len(name) <= 2:
+                continue
+            if "--recursive".startswith(name) or "--dereference-recursive".startswith(name):
+                _refuse_recursion(argument)
+            if "--directories".startswith(name) and _recurse(value if has_value else following):
+                _refuse_recursion(argument)
+        elif argument.startswith("-"):
+            for position, letter in enumerate(argument[1:], start=2):
+                if letter in "rR":
+                    _refuse_recursion(argument)
+                if letter in GREP_VALUE_OPTIONS:
+                    value = argument[position:] or following
+                    if letter == "d" and _recurse(value):
+                        _refuse_recursion(argument)
+                    break
+
+
+def _recurse(value: str) -> bool:
+    # grep takes an unambiguous abbreviation of the action too: `-d rec`.
+    return bool(value) and "recurse".startswith(value)
+
+
+def _refuse_recursion(argument: str) -> None:
+    raise CommandRejected(
+        f"grep may not search recursively ({argument}): it {RECURSIVE_READ}; "
+        f"{SEARCH_TEXT_INSTEAD}"
+    )
 
 
 def _refuse_writing_options(executable: str, arguments: list[str]) -> None:
@@ -267,5 +329,10 @@ def _validate_git(arguments: list[str]) -> None:
     if subcommand not in GIT_READ_ONLY:
         raise CommandRejected(f"not a read-only git subcommand: {subcommand}")
     for argument in arguments[1:]:
+        if subcommand == "diff" and argument == "--no-index":
+            # git accepts no abbreviation of it: `--no-ind` is a usage error.
+            raise CommandRejected(
+                f"git diff --no-index {RECURSIVE_READ}; {SEARCH_TEXT_INSTEAD}"
+            )
         if argument.startswith(GIT_WRITING_OPTIONS):
             raise CommandRejected(f"git option that writes or runs a program: {argument}")
