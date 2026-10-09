@@ -778,6 +778,7 @@ claim written in one place with nothing that notices it going stale.
   #253 0e9a979  feat(opencode): add the PAC provider integration
   #254 6f62def  fix(agent): contain Windows commands in a kill-on-close job
   #255 2e14f2c  test(agent): run recursive-read grep guards on Windows
+  #256 ac401f2  test(agent): run command-output secret redaction on Windows
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1244,7 +1245,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-09, main at 2e14f2c)
+NEXT SESSION HANDOFF (updated 2026-10-09, main at ac401f2)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start

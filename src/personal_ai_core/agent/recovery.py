@@ -31,7 +31,13 @@ from pathlib import Path
 from typing import Callable
 
 from ..core.errors import RollbackIncomplete
-from .sandbox import Workspace
+from .sandbox import SandboxError, Workspace
+
+
+# Rollback snapshots live in memory only for the current task. A mutation is
+# refused before it happens if preserving its original would exceed this
+# shared budget; earlier rollback points are never evicted to make room.
+MAX_CHECKPOINT_BYTES = 16 * 1024 * 1024
 
 
 def _read_umask() -> int:
@@ -147,7 +153,11 @@ class _Before:
 
 class Checkpoints:
     """What each touched file held before the agent touched it, and which
-    directories the agent's writes created."""
+    directories the agent's writes created.
+
+    Original bytes share a 16 MiB task budget. A file that cannot fit is
+    refused before mutation, while existing checkpoints remain available.
+    """
 
     def __init__(self, workspace: Workspace) -> None:
         self._workspace = workspace
@@ -163,7 +173,22 @@ class Checkpoints:
         if path in self._before:
             return
         if path.is_file():
-            self._before[path] = _Before(path.read_bytes(), _file_mode(path))
+            retained = sum(len(before.content) for before in self._before.values()
+                           if before.content is not None)
+            remaining = max(0, MAX_CHECKPOINT_BYTES - retained)
+            message = (
+                f"rollback checkpoint budget exceeded ({MAX_CHECKPOINT_BYTES} bytes per task); "
+                f"file was not changed: {self._workspace.relative(path)}"
+            )
+            if path.stat().st_size > remaining:
+                raise SandboxError(message)
+            # Size can change after stat. Bound the actual read as well, with
+            # one extra byte to detect overflow before storing a snapshot.
+            with path.open("rb") as handle:
+                content = handle.read(remaining + 1)
+            if len(content) > remaining:
+                raise SandboxError(message)
+            self._before[path] = _Before(content, _file_mode(path))
         else:
             self._before[path] = _Before(None)
 
