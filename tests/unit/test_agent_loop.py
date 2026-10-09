@@ -1,6 +1,8 @@
 """The agent loop -- AGENT_ARCHITECTURE.md section 1, driven by a scripted model."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from personal_ai_core.agent.executor import ToolExecutor
@@ -10,7 +12,7 @@ from personal_ai_core.context import ReserveBasedBudgetPolicy, ScriptAwareTokenE
 from personal_ai_core.agent.recovery import Checkpoints
 from personal_ai_core.agent.sandbox import Workspace
 from personal_ai_core.agent.tools import default_tools
-from personal_ai_core.core.agent import AgentTaskContract
+from personal_ai_core.core.agent import AgentTaskContract, ToolResult
 from personal_ai_core.core.domain import EventType, ModelResponse, Role
 from personal_ai_core.persistence.in_memory import InMemoryEventRepository
 
@@ -101,6 +103,162 @@ def test_a_task_runs_tools_then_answers(ws):
     # The model saw the file's content, fenced as data.
     assert "the answer is 42" in script.calls[1]["messages"][-1].content
     assert script.calls[1]["messages"][-1].content.startswith("<<<result ")
+
+
+def test_exact_read_rejects_invented_text_after_a_real_read_then_accepts_evidence(ws):
+    script = Script(
+        '{"tool": "read_file", "arguments": {"path": "notes.md"}}',
+        '{"answer": "morning meeting at 10 AM"}',
+        '{"answer": "the answer is 42\\n"}',
+    )
+    events = InMemoryEventRepository()
+    outcome = loop(ws, script, events=events).run(
+        AgentTaskContract("return the exact file text", True, exact_read_path="notes.md"),
+        session_id="s1",
+    )
+    assert outcome.finished and outcome.answer == "the answer is 42\n"
+    assert outcome.verification_rejections == 1
+    assert outcome.refused_replies[0].kind == "exact_read_required"
+    assert "notes.md" in script.calls[0]["messages"][-2].content
+    assert events.list_for_session("s1")[-1].payload["verification_rejections"] == 1
+    assert "morning meeting" not in repr([dict(e.payload) for e in events.list_for_session("s1")])
+
+
+@pytest.mark.parametrize("path", ["notes.md", "./notes.md"])
+def test_exact_read_does_not_accept_a_directory_listing_as_file_evidence(ws, path):
+    script = Script('{"tool": "list_directory"}', *['{"answer": "invented"}'] * 3)
+    outcome = loop(ws, script).run(
+        AgentTaskContract("return file text", True, exact_read_path=path), session_id="s1"
+    )
+    assert not outcome.finished and outcome.answer is None
+    assert outcome.verification_rejections == 3
+
+
+def test_exact_read_of_another_file_does_not_satisfy_the_contract(ws):
+    (ws.root / "other.md").write_text("the answer is 42\n", encoding="utf-8")
+    script = Script(
+        '{"tool": "read_file", "arguments": {"path": "other.md"}}',
+        *['{"answer": "the answer is 42\\n"}'] * 3,
+    )
+    outcome = loop(ws, script).run(
+        AgentTaskContract("return file text", True, exact_read_path="notes.md"), session_id="s1"
+    )
+    assert not outcome.finished
+
+
+def test_exact_read_accepts_an_equivalent_relative_path(ws):
+    script = Script(
+        '{"tool": "read_file", "arguments": {"path": "./notes.md"}}',
+        '{"answer": "the answer is 42\\n"}',
+    )
+    outcome = loop(ws, script).run(
+        AgentTaskContract("return file text", True, exact_read_path="notes.md"), session_id="s1"
+    )
+    assert outcome.finished
+
+
+def test_exact_read_cannot_write_the_file_to_make_an_invented_answer_true(ws):
+    script = Script(
+        '{"tool": "read_file", "arguments": {"path": "notes.md"}}',
+        '{"tool": "write_file", "arguments": {"path": "notes.md", "content": "updated"}}',
+        '{"answer": "updated"}',
+        '{"tool": "read_file", "arguments": {"path": "notes.md"}}',
+        '{"answer": "the answer is 42\\n"}',
+    )
+    outcome = loop(ws, script).run(
+        AgentTaskContract("return file text", True, exact_read_path="notes.md"), session_id="s1"
+    )
+    assert outcome.finished and outcome.answer == "the answer is 42\n"
+    assert outcome.verification_rejections == 1
+    assert not outcome.steps[1].record.executed
+    assert (ws.root / "notes.md").read_text(encoding="utf-8") == "the answer is 42\n"
+
+
+@pytest.mark.parametrize("name", ["shell", "run_command", "delete_file"])
+def test_exact_read_refuses_commands_and_deletion_without_asking_the_owner(ws, name):
+    asked = []
+    arguments = {"path": "notes.md"} if name == "delete_file" else {"command": "git status"}
+    script = Script(
+        json.dumps({"tool": name, "arguments": arguments}),
+        '{"tool": "read_file", "arguments": {"path": "notes.md"}}',
+        '{"answer": "the answer is 42\\n"}',
+    )
+    outcome = loop(ws, script, confirm=lambda r, s: asked.append(r) or True).run(
+        AgentTaskContract("return file text", True, exact_read_path="notes.md"), session_id="s1"
+    )
+    assert outcome.finished and not outcome.steps[0].record.executed
+    assert asked == []
+
+
+@pytest.mark.parametrize("text", ["", "نص عربي\n", "line with spaces  \n"])
+def test_exact_read_preserves_empty_text_arabic_and_whitespace(ws, text):
+    (ws.root / "notes.md").write_text(text, encoding="utf-8")
+    script = Script(
+        '{"tool": "read_file", "arguments": {"path": "notes.md"}}',
+        json.dumps({"answer": text}),
+    )
+    outcome = loop(ws, script).run(
+        AgentTaskContract("return file text", True, exact_read_path="notes.md"), session_id="s1"
+    )
+    assert outcome.finished and outcome.answer == text
+
+
+def test_exact_read_refuses_truncated_evidence(ws, monkeypatch):
+    monkeypatch.setattr(
+        "personal_ai_core.agent.tools.ReadFile.run",
+        lambda self, arguments: ToolResult(ok=True, output="partial", truncated=True),
+    )
+    script = Script(
+        '{"tool": "read_file", "arguments": {"path": "notes.md"}}',
+        *['{"answer": "partial"}'] * 3,
+    )
+    outcome = loop(ws, script).run(
+        AgentTaskContract("return file text", True, exact_read_path="notes.md"), session_id="s1"
+    )
+    assert outcome.steps[0].verified and not outcome.finished
+
+
+def test_exact_read_preserves_protected_file_refusal(ws):
+    canary = "scratch-secret-canary"
+    (ws.root / ".env").write_text(canary, encoding="utf-8")
+    script = Script(
+        '{"tool": "read_file", "arguments": {"path": ".env"}}',
+        *['{"answer": "not found"}'] * 2,
+    )
+    outcome = loop(ws, script).run(
+        AgentTaskContract("return file text", True, exact_read_path=".env"), session_id="s1"
+    )
+    assert not outcome.finished
+    result = outcome.steps[0].record.result
+    assert result is not None and "protected file" in (result.error or "")
+    assert canary not in repr(script.calls)
+
+
+def test_exact_read_does_not_turn_a_secret_bearing_read_into_an_answer(ws):
+    secret = "ghp_" + "A" * 30
+    text = f"API_KEY={secret}"
+    (ws.root / "notes.md").write_text(text, encoding="utf-8")
+    script = Script(
+        '{"tool": "read_file", "arguments": {"path": "notes.md"}}',
+        *[json.dumps({"answer": text})] * 2,
+    )
+    outcome = loop(ws, script).run(
+        AgentTaskContract("return file text", True, exact_read_path="notes.md"), session_id="s1"
+    )
+    assert not outcome.finished and outcome.answer is None
+    assert not outcome.steps[0].verified
+    assert secret not in repr(outcome.refused_replies)
+
+
+@pytest.mark.parametrize("path", ["", "   "])
+def test_exact_read_contract_refuses_empty_paths(path):
+    with pytest.raises(ValueError, match="exact_read_path"):
+        AgentTaskContract("read a file", True, exact_read_path=path)
+
+
+def test_exact_read_contract_does_not_override_a_false_action_declaration():
+    with pytest.raises(ValueError, match="action_required=true"):
+        AgentTaskContract("read a file", False, exact_read_path="notes.md")
 
 
 def test_action_required_rejects_answer_until_a_tool_executes(ws):

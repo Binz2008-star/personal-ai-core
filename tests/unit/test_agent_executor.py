@@ -78,6 +78,18 @@ def test_a_denied_tool_does_not_run():
     assert spy.calls == []
 
 
+@pytest.mark.parametrize("risk", [RiskLevel.LOW, RiskLevel.HIGH])
+def test_a_task_can_deny_an_allowed_or_asked_tool_before_confirmation(risk):
+    spy = Spy(risk=risk)
+    asked = []
+    ex = executor(spy, confirm=lambda request, spec: asked.append(request) or True)
+    record = ex.execute(ToolRequest("spy", {"n": 1}), deny_reason="read-only task")
+    assert not record.executed and spy.calls == [] and asked == []
+    assert record.decision.decision is Decision.DENY
+    assert record.decision.reason == "read-only task"
+    assert ex.audit.records() == (record,)
+
+
 # --- ASK -----------------------------------------------------------------------------
 
 

@@ -103,6 +103,9 @@ class AgentTaskContract:
     # would send it to run_command. None: the caller names none. Read only by
     # the completion check (ADR-023 unit 3), which is off unless asked for.
     test_command: str | None = None
+    # Opt-in evidence requirement for an exact file-copy task. The caller
+    # names the file; the model never decides whether this check applies.
+    exact_read_path: str | None = None
 
     def __post_init__(self) -> None:
         task_text = self.task_text.strip()
@@ -111,6 +114,13 @@ class AgentTaskContract:
         if not isinstance(self.action_required, bool):
             raise TypeError("action_required must be a boolean")
         object.__setattr__(self, "task_text", task_text)
+        if self.exact_read_path is not None:
+            if not isinstance(self.exact_read_path, str):
+                raise TypeError("exact_read_path must be a string")
+            if not self.exact_read_path.strip():
+                raise ValueError("exact_read_path must not be empty")
+            if not self.action_required:
+                raise ValueError("exact_read_path requires action_required=true")
         if self.test_command is not None:
             if not isinstance(self.test_command, str):
                 raise TypeError("test_command must be a string")

@@ -84,10 +84,14 @@ class ToolExecutor:
     def specs(self) -> Mapping[str, ToolSpec]:
         return {name: tool.spec for name, tool in self._tools.items()}
 
-    def execute(self, request: ToolRequest) -> AuditRecord:
+    def execute(self, request: ToolRequest, *, deny_reason: str | None = None) -> AuditRecord:
         tool = self._tools.get(request.tool)
         spec = tool.spec if tool is not None else None
         decision = self._policy.decide(request, spec)
+        # A caller-owned task may narrow access. It can never turn DENY or
+        # ASK into ALLOW, and a task refusal is audited through the same path.
+        if deny_reason is not None and decision.decision is not Decision.DENY:
+            decision = PolicyDecision(decision=Decision.DENY, reason=deny_reason)
         record = self._decide_and_run(request, tool, spec, decision)
         self.audit.append(record)
         return record

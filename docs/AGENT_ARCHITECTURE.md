@@ -146,3 +146,61 @@ exhausting it stops the agent rather than letting it loop.
 | `Rico` `src/rico_safety.py` (208, 23 domain refs) | product-coupled | **REWRITE** |
 | `Robin` `quality_gate.py` | gate-result shape only | **REWRITE** (concept) |
 | — | generic verifier | **BUILD** |
+
+## Proposed opt-in exact file reads (2026-10-10)
+
+Status: review candidate. This control is off by default and has no live Boss
+capability result yet. It does not change the existing task contract's meaning:
+`[action_required=false]` still permits an answer without executing a tool.
+
+The caller can declare `AgentTaskContract(..., action_required=True,
+exact_read_path="notes.txt")`, or use `pac --agent --workspace DIR --exact-read
+notes.txt`. Each task line must still begin with `[action_required=true]`.
+A contradictory false declaration is a usage error, not silently overridden.
+
+In this mode the task is read-only. Only `read_file`, `list_directory`,
+`search_text` and `find_files` may run. The executor audits other requests as
+DENY before confirmation or execution, so a model cannot write invented text
+into the source and then read it to satisfy the check. The ordinary tool policy
+and confirmations remain unchanged when this mode is absent.
+
+Before accepting an answer, the loop requires a successful, verified,
+untruncated `read_file` result for the declared path and exact equality between
+that text and the answer. It does not trim whitespace or translate text.
+Relative path equivalence is lexical using the host's path syntax; filesystem
+aliases and symbolic links are not inferred. The existing sandbox, secret
+checks, context budget and failure budget still apply. Rejected answers consume
+the global failure budget; exhaustion returns no answer. In this CLI mode an
+unfinished task also returns exit 1. Rejection events contain counts and reasons,
+not file contents or rejected answer text.
+
+This is a check of an observed file snapshot, not a general semantic judge.
+It does not establish that outside processes left the file unchanged, make a
+large result fit the generation budget, or govern OpenCode's separate tool loop.
+For edit/test tasks, the existing benchmark flag `--verify-completion` requires
+the task's own test command to pass after the last change; it remains off by default.
+
+### Windows validation before adoption
+
+Use a fresh isolated worktree/venv and scratch workspace, profile and database.
+Put that venv's `Scripts` directory first in this process's PATH, so commands
+such as `pytest` use the same environment as the caller. Keep the Boss, context
+8192, sampling, profile and Ollama launch configuration fixed.
+
+```powershell
+$env:PATH = (Join-Path $pacVerifyVenv "Scripts") + ";" + $env:PATH
+$env:PYTHONPATH = Join-Path $PWD "src"
+"[action_required=true] Read notes.txt and return only its exact contents." |
+  & $pacVerifyPython -m personal_ai_core.app --agent --exact-read notes.txt `
+    --workspace $pacScratchWorkspace --database $pacScratchDatabase --profile $pacScratchProfile
+```
+
+Before running the pilot, use five fresh file contents per language (English and
+Arabic), with the same fixtures and true action declaration in the baseline and
+candidate. Record code SHA, model digest/quantization, effective context,
+environment executable paths, exact input, each tool result, final text and exit
+code. The target is zero accepted fabricated copies. Measure useful exact-copy
+success separately from budget stops and inspect every refusal for a false one;
+do not call refusals a capability improvement. No adoption or reliability claim
+follows solely from passing scripted tests. Command-guidance and test-completion
+comparisons should be separate so their effects can be attributed.
