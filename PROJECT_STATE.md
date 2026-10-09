@@ -771,6 +771,7 @@ claim written in one place with nothing that notices it going stale.
   #246 c4311f9  fix(app): the owner's profile is capped by tokens against the model's
                window, at load and at --remember (F-A)
   #248 fd02696  fix(app): reserve room beside the profile for two Arabic passages (F-A)
+  #250 f440057  fix(agent): write_file keeps a file's mode, and undo removes the directories a task created
   #251 d5e7206  fix(runtime): classify malformed model replies and offer undo on unexpected agent failure
   #252 fa83f73  fix(agent): refuse recursive grep and directory diff past workspace guards
   #253 0e9a979  feat(opencode): add the PAC provider integration
@@ -1240,7 +1241,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-09, main at 5fc9828)
+NEXT SESSION HANDOFF (updated 2026-10-09, main at f440057)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start

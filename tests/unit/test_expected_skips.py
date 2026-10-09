@@ -107,18 +107,19 @@ MAX_NON_HARNESS_SKIPS = 57
 ENVIRONMENT_SKIP_REASONS = ("cannot create a symlink here",)
 
 # Skips that a specific PLATFORM cannot run, not a test turned off. Windows has
-# no POSIX permission bits, so the file-mode cases in this file skip with
+# no POSIX permission bits, so the file-mode cases in these two files skip with
 # "POSIX file modes" and RUN on Linux. They are allowed from exactly these
 # files -- a "POSIX file modes" skip from any other file is still unaccounted
 # for -- and kept out of the structural count. The value is the exact number of
 # skip legs that file contributes: PR #250 adds the three atomic-writes legs,
-# no profile legs until PR #228 lands. A different count is a test added or removed
+# PR #228 the two profile legs. A different count is a test added or removed
 # without recording the decision, so it is part of the allowance, not a loose
 # ceiling (test_platform_skip_counts_are_exact). On Linux they run, and a skip
 # there means the tests stopped running (test_platform_skips_never_happen_on_linux).
 PLATFORM_SKIP_REASONS = ("POSIX file modes",)
 PLATFORM_SKIP_SOURCES = {
     "tests/unit/test_atomic_writes_and_rollback.py": 3,
+    "tests/integration/test_cli_profile_safety.py": 2,
 }
 
 # A `-rs` skip line: `SKIPPED [3] tests/unit/foo.py:133: reason`. Parsed rather
@@ -377,7 +378,7 @@ PROFILE_POSIX = (
 def test_a_platform_skip_is_recognized_with_either_separator():
     assert _platform(ATOMIC_POSIX)
     assert _platform(ATOMIC_WINDOWS)
-    assert not _platform(PROFILE_POSIX)
+    assert _platform(PROFILE_POSIX)
 
 
 def test_a_platform_skip_rejects_a_resembling_filename_or_other_reason():
@@ -398,16 +399,18 @@ def test_a_platform_skip_rejects_a_resembling_filename_or_other_reason():
 
 def test_platform_counts_match_exactly_and_reject_drift():
     """The allowance is an exact count, not a ceiling: an extra or missing leg
-    must not read as the recorded three."""
+    must not read as the recorded three and two."""
     recorded = [
         "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:133: POSIX file modes",
         "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:147: POSIX file modes",
         "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:155: POSIX file modes",
+        "SKIPPED [1] tests/integration/test_cli_profile_safety.py:176: POSIX file modes",
+        "SKIPPED [1] tests/integration/test_cli_profile_safety.py:186: POSIX file modes",
     ]
     assert _platform_counts(recorded) == PLATFORM_SKIP_SOURCES
     extra_atomic = recorded + [
         "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:999: POSIX file modes"
     ]
     assert _platform_counts(extra_atomic) != PLATFORM_SKIP_SOURCES
-    missing_atomic = recorded[:-1]
-    assert _platform_counts(missing_atomic) != PLATFORM_SKIP_SOURCES
+    missing_profile = recorded[:-1]
+    assert _platform_counts(missing_profile) != PLATFORM_SKIP_SOURCES
