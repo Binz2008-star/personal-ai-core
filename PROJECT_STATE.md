@@ -779,6 +779,7 @@ claim written in one place with nothing that notices it going stale.
   #254 6f62def  fix(agent): contain Windows commands in a kill-on-close job
   #255 2e14f2c  test(agent): run recursive-read grep guards on Windows
   #256 ac401f2  test(agent): run command-output secret redaction on Windows
+  #257 2e4c81d  fix(agent): protect aliases and bound file, capture and rollback I/O
 
 Pattern worth recording: #8, #9, #11, #12 and #13 are one defect class -- a
 claim written down with nothing checking it, so a guard had quietly stopped
@@ -1245,7 +1246,7 @@ wiring, not after it.
 
 Do not turn these open items into unauthorized implementation.
 
-NEXT SESSION HANDOFF (updated 2026-10-09, main at ac401f2)
+NEXT SESSION HANDOFF (updated 2026-10-09, main at 2e4c81d)
 ==========================================================
 
 Start here: `python tools/session_state.py`. It runs by itself at session start

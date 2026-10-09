@@ -782,6 +782,25 @@ def _backup(args, database: Path | None, out: TextIO) -> int:
     return 0
 
 
+def _speak_utf8(*, stdin: object, stdout: object, stderr: object) -> None:
+    """Read and write the process's own streams as UTF-8, whatever the locale.
+
+    On Windows, a stream that is not the console -- piped, redirected, through
+    `Tee-Object`, in Git Bash -- takes the ANSI code page (cp1252, cp1256), and
+    an Arabic reply then failed to print: a traceback, the reply stored but
+    never shown. Only the process's own streams are changed; a stream a caller
+    passes in is the caller's. `errors="replace"` so a byte the pipe cannot
+    carry costs one character, never the turn.
+    """
+    for given, stream in ((stdin, sys.stdin), (stdout, sys.stdout), (stderr, sys.stderr)):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if given is None and reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass  # a stream that cannot be changed is left as it is
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -798,6 +817,7 @@ def main(
     sentence and exit 1 rather than a traceback (gap analysis P1-5):
     `describe_store_failure` says what happened and what to do first.
     """
+    _speak_utf8(stdin=stdin, stdout=stdout, stderr=stderr)
     try:
         return _main(argv, transport=transport, stdin=stdin, stdout=stdout,
                      stderr=stderr, env=env, probe=probe)
