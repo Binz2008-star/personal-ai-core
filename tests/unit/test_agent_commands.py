@@ -36,7 +36,7 @@ def refused(command: str) -> bool:
         "git show HEAD",
         "pytest -q",
         "ruff check .",
-        "grep -r needle src",
+        "grep -n needle README.md",
         "find . -name '*.py'",
         "wc -l README.md",
     ],
@@ -60,7 +60,7 @@ def test_every_command_the_source_let_through_is_refused(command, fix):
 
 
 def test_the_fix_list_covers_every_numbered_fix():
-    assert {fix for _, fix in SOURCE_LETS_THROUGH} == set(range(1, 9))
+    assert {fix for _, fix in SOURCE_LETS_THROUGH} == set(range(1, 10))
 
 
 @pytest.mark.parametrize(
@@ -120,3 +120,67 @@ def test_the_source_blocklist_still_applies_to_arguments(command):
     is a separate, reviewed decision, not a side effect of the adaptation."""
     with pytest.raises(CommandRejected, match="blocked argument"):
         validate_command(command)
+
+
+# --- fix 9: recursive reading ----------------------------------------------
+# A deliberate change: `grep -r` was pinned as ordinary inspection above until
+# it was found reading the database and the owner's profile through a
+# directory argument. search_text is the recursive search.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grep -r needle src",
+        "grep -R needle src",
+        "grep -rn needle .",
+        "grep -Rli needle .",
+        "grep -rao -e needle .",
+        "grep -nr needle",  # no path: grep -r searches "."
+        "grep -5r needle .",  # a context count, then -r
+        "grep needle . -r",  # GNU grep reads options after operands too
+        "grep --recursive needle .",
+        "grep --recur needle .",  # an unambiguous prefix is the option
+        "grep --dereference-recursive needle .",
+        "grep --deref needle .",
+        "grep -drecurse needle .",
+        "grep -nd recurse needle .",
+        "grep --directories=recurse needle .",
+        "grep --directories recurse needle .",
+        "grep --dir=rec needle .",
+        "grep -e -- -r .",  # `--` is -e's value here, not the end of options
+    ],
+)
+def test_grep_may_not_search_recursively(command):
+    with pytest.raises(CommandRejected, match="may not search recursively.*use search_text"):
+        validate_command(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grep needle notes.md",
+        "grep -n needle notes.md",
+        "grep -in -e needle notes.md",
+        "grep -c needle notes.md README.md",
+        "grep -e-r notes.md",  # -e takes the rest, "-r", as its pattern
+        "grep -f patterns.txt notes.md",
+        "grep -m 3 needle notes.md",
+        "grep --directories=skip needle notes.md",
+        "grep --color=never needle notes.md",
+    ],
+)
+def test_grep_on_named_files_is_still_allowed(command):
+    assert validate_command(command)[0] == "grep"
+
+
+def test_git_diff_no_index_is_refused():
+    with pytest.raises(CommandRejected, match="--no-index.*use search_text"):
+        validate_command("git diff --no-index empty .")
+    assert validate_command("git diff --stat HEAD")
+
+
+@pytest.mark.parametrize("command", ["ls -R", "find . -type f", "ls -R src"])
+def test_listings_of_names_are_left_alone(command):
+    """Names, not contents: they show at most that a file exists."""
+    assert validate_command(command)

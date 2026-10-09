@@ -12,3 +12,8 @@ venv/
 .env.*
 !.env.example
 .neon
+
+# Local-only artifacts: never committed (machine-specific paths and secrets).
+Desktop/
+.codex/
+AUDIT_REPORT.md

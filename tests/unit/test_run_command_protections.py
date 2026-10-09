@@ -38,7 +38,7 @@ def check(ws, args):
     "command",
     [
         "cat .env",
-        "grep -r needle .env",
+        "grep needle .env",
         "grep --file=.env x",
         "cat .git/config",
         "git show HEAD:.env",
@@ -74,7 +74,7 @@ def test_a_reserved_database_is_refused(tmp_path):
         "pytest -q -p no:cacheprovider",
         "git show HEAD:notes.md",
         "ruff check .",
-        "grep -r needle src",
+        "grep -n needle notes.md",
         "find . -name '*.py'",
         "wc -l README.md",
         "cat notes.md",

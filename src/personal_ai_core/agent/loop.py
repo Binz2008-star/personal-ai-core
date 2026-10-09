@@ -42,6 +42,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ..core.agent import AgentTaskContract, AuditRecord, Decision, ToolRequest
 from ..core.context import ContextAllocation
+from ..core.errors import ProviderError
 from ..core.contracts import (
     ContextBudgetPolicy,
     EventRepository,
@@ -50,6 +51,7 @@ from ..core.contracts import (
     TokenEstimator,
     ToolCallingProvider,
 )
+from ..core.redaction import RedactionError
 from ..core.domain import (
     Event,
     EventType,
@@ -62,7 +64,7 @@ from ..core.domain import (
 from .environment import EnvironmentContext
 from .executor import ToolExecutor
 from .recovery import ActionBudget, Checkpoints
-from .verifier import Verifier
+from .verifier import SecretShapeRedactor, Verifier
 
 MAX_TASK_CHARS = 8_000
 RESULT_TOKEN_LENGTH = 16
@@ -448,6 +450,23 @@ def fence(label: str, content: str) -> str:
     return f"<<<result {token} {label}>>>\n{content}\n<<<end result {token}>>>"
 
 
+_OUTPUT_UNCHECKED = "[output withheld: it could not be checked for secrets]"
+
+
+def _withheld(text: str) -> str:
+    """`text` with each secret-shaped value replaced by the withheld marker.
+
+    Fail-closed, as everywhere a check guards what is shown (ADR-018 §3.8): a
+    check that could not run withholds the whole text, never passes it.
+    """
+    if not text:
+        return text
+    try:
+        return SecretShapeRedactor().redact(text).text
+    except RedactionError:
+        return _OUTPUT_UNCHECKED
+
+
 @dataclass(frozen=True, slots=True)
 class _Window:
     """`core.contracts.ModelSpecLike` for the model this loop calls."""
@@ -474,15 +493,25 @@ def _describe(step: Step, *, limit: int | None = None) -> str:
     result = record.result
     if result is None:
         return "no result"
-    status = "ok" if result.ok else f"failed ({result.error})"
+    status = "ok" if result.ok else f"failed ({_withheld(result.error or '')})"
     if record.decision.decision is Decision.ASK and not record.confirmed_by_user:
         status = "the user did not confirm; nothing ran"
-    body = result.output or "(no output)"
+    # N7: a secret-shaped value in what a tool returned -- a key in a file a
+    # command printed, a token in a page -- is withheld before the model reads
+    # it, as a chat reply's is before the owner does (P0-6). The verifier
+    # still fails the step on it; that only charged the budget, and the value
+    # went to the model whole.
+    # Withheld first, then cut (N2): a cut taken first could split a secret
+    # into a fragment the shape check no longer recognises.
+    body = _withheld(result.output) or "(no output)"
     if limit is not None:
         body = body[:limit] + FITTED_MARKER
     elif result.truncated:
         body += "\n[output truncated]"
-    verdict = "" if step.verified else "\nverification failed: " + "; ".join(step.failed_checks)
+    # The verifier quotes a failed tool's error in its checks, so they are
+    # withheld from the same way.
+    verdict = "" if step.verified else "\nverification failed: " + "; ".join(
+        _withheld(check) for check in step.failed_checks)
     return fence(f"{record.request.tool} -> {status}", body) + verdict
 
 
@@ -579,9 +608,40 @@ class AgentLoop:
         Raises KeyError for a session `session_exists` does not know, before
         the model is called or anything is recorded: the same refusal, and the
         same exception, as ConversationService.send (F-2).
+
+        A run that ends by an exception -- the model server failing, an
+        interrupt, a store error -- still records its end (N3): AGENT_FINISHED
+        with `finished: false`, a classification of what ended it and the
+        files it touched, never the error's text. Then the exception is
+        raised again, unchanged, for the caller to explain and to offer the
+        undo. If that record cannot be written either, the original exception
+        is the one raised.
         """
         if self._session_exists is not None and not self._session_exists(session_id):
             raise KeyError(f"unknown session: {session_id}")
+        contract = task if isinstance(task, AgentTaskContract) else None
+        audited = len(self._executor.audit.records())
+        try:
+            return self._run(task, session_id=session_id, on_step=on_step,
+                             on_protocol_error=on_protocol_error)
+        except BaseException as exc:
+            try:
+                self._record_abnormal_end(
+                    exc, session_id, contract,
+                    steps=len(self._executor.audit.records()) - audited,
+                )
+            except Exception:  # noqa: BLE001 -- the original failure is the one to report
+                pass
+            raise
+
+    def _run(
+        self,
+        task: str | AgentTaskContract,
+        *,
+        session_id: str,
+        on_step: Callable[[Step], None] | None,
+        on_protocol_error: Callable[[str], None] | None,
+    ) -> AgentOutcome:
         if isinstance(task, AgentTaskContract):
             contract, task_text = task, task.task_text
         else:
@@ -863,7 +923,10 @@ class AgentLoop:
             return whole
         if room < MIN_RESULT_TOKENS:
             return None
-        output = step.record.result.output if step.record.result is not None else ""
+        # Sized on the output as `_describe` cuts it: already withheld (N7).
+        output = (
+            _withheld(step.record.result.output) if step.record.result is not None else ""
+        )
         low, high = 0, len(output)  # the longest prefix whose rendering fits
         while low < high:
             middle = (low + high + 1) // 2
@@ -956,6 +1019,45 @@ class AgentLoop:
                 type=EventType.AGENT_FINISHED,
                 actor="agent",
                 payload=payload,
+            )
+        )
+
+    def _record_abnormal_end(
+        self,
+        exc: BaseException,
+        session_id: str,
+        contract: AgentTaskContract | None,
+        *,
+        steps: int,
+    ) -> None:
+        """AGENT_FINISHED for a run an exception ended (N3).
+
+        A classification only: the provider's failure kind, "interrupted", or
+        the exception's type name -- never its message, which can quote a
+        host, a path or the workspace (the repository's rule, P1-8).
+        """
+        if self._events is None:
+            return
+        if isinstance(exc, ProviderError):
+            reason = f"provider_failure ({exc.kind})"
+        elif isinstance(exc, KeyboardInterrupt):
+            reason = "interrupted"
+        else:
+            reason = f"internal_error ({type(exc).__name__})"
+        self._events.append(
+            Event(
+                session_id=session_id,
+                type=EventType.AGENT_FINISHED,
+                actor="agent",
+                payload={
+                    "finished": False,
+                    "steps": steps,
+                    "stopped_reason": reason,
+                    "touched_files": list(self._touched()),
+                    "action_required": (
+                        contract.action_required if contract is not None else "no contract"
+                    ),
+                },
             )
         )
 
