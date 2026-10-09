@@ -1253,6 +1253,13 @@ def _agent_session(*, agent, session_id, lines, out, err,
             # in the store, so their undo is offered first.
             _offer_undo(agent, lines, out)
             raise
+        except Exception:
+            # A defect, not a failure pac knows how to name: the loop has
+            # already recorded it as internal_error, and it still propagates.
+            # The files the task changed are offered back first, so a crash
+            # does not cost the owner the undo.
+            _offer_undo(agent, lines, out)
+            raise
         window_due = True
         if outcome.finished:
             print(f"{REPLY}{outcome.answer}", file=out)
