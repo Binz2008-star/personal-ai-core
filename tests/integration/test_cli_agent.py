@@ -97,6 +97,56 @@ def test_action_not_required_answer_only_task_is_accepted(tmp_path):
     assert "core> just explaining" in output
 
 
+def test_exact_read_flag_rejects_invented_answer_then_prints_the_real_text(tmp_path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "notes.txt").write_text("actual scratch contents", encoding="utf-8")
+    transport = scripted(
+        '{"tool": "read_file", "arguments": {"path": "notes.txt"}}',
+        '{"answer": "invented meeting notes"}',
+        '{"answer": "actual scratch contents"}',
+    )
+    code, output, _ = run(
+        tmp_path, transport, "[action_required=true] return the exact file contents",
+        extra=("--exact-read", "notes.txt"),
+    )
+    assert code == 0 and "core> actual scratch contents" in output
+    assert "invented meeting notes" not in output
+
+
+def test_exact_read_flag_does_not_silently_override_action_false(tmp_path, capsys):
+    transport = scripted('{"answer": "must not run"}')
+    code, output, _ = run(
+        tmp_path, transport, "[action_required=false] read notes.txt",
+        extra=("--exact-read", "notes.txt"),
+    )
+    assert code == 2 and transport.sent == []  # type: ignore[attr-defined]
+    assert "action_required=true" in capsys.readouterr().err
+    assert "core>" not in output
+
+
+def test_exact_read_budget_stop_returns_failure_instead_of_success(tmp_path):
+    transport = scripted('{"tool": "list_directory"}', *['{"answer": "invented"}'] * 3)
+    code, output, _ = run(
+        tmp_path, transport, "[action_required=true] read notes.txt",
+        extra=("--exact-read", "notes.txt"),
+    )
+    assert code == 1 and "stopped:" in output
+    assert "core> invented" not in output
+
+
+def test_exact_read_without_agent_is_refused_before_store_or_model(tmp_path):
+    database = tmp_path / "should-not-exist.db"
+    transport = scripted('{"answer": "must not run"}')
+    out = io.StringIO()
+    code = main(
+        ["--database", str(database), "--exact-read", "notes.txt"],
+        transport=transport, stdout=out, env={},
+    )
+    assert code == 2 and "requires --agent" in out.getvalue()
+    assert not database.exists() and transport.sent == []  # type: ignore[attr-defined]
+
+
 @pytest.mark.parametrize(
     ("line", "task_text", "action_required"),
     [

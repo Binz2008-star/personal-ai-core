@@ -93,7 +93,7 @@ REPLY = "core> "
 _AGENT_TASK = re.compile(r"^\[action_required=(true|false)\]\s+(.+?)\s*$")
 
 
-def parse_agent_task(line: str) -> AgentTaskContract:
+def parse_agent_task(line: str, *, exact_read_path: str | None = None) -> AgentTaskContract:
     """Parse one explicit caller-owned agent task contract."""
     match = _AGENT_TASK.fullmatch(line.rstrip("\r\n"))
     if match is None:
@@ -102,7 +102,7 @@ def parse_agent_task(line: str) -> AgentTaskContract:
     if task_text.startswith("[action_required="):
         raise ValueError("expected [action_required=true|false] TASK")
     return AgentTaskContract(
-        task_text=task_text, action_required=match.group(1) == "true"
+        task_text=task_text, action_required=match.group(1) == "true", exact_read_path=exact_read_path
     )
 
 
@@ -175,6 +175,11 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DIR",
         help="the directory the agent is confined to. Required with --agent.",
+    )
+    parser.add_argument(
+        "--exact-read", metavar="PATH",
+        help=("make each agent task read-only and require it to read PATH and answer with exactly the verified, "
+              "complete file text. Requires --agent and [action_required=true]. Off by default."),
     )
     parser.add_argument(
         "--profile",
@@ -849,6 +854,13 @@ def _main(
     args = _parser().parse_args(argv)
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
+    if args.exact_read is not None:
+        if not args.agent:
+            print("--exact-read requires --agent", file=out)
+            return 2
+        if not args.exact_read.strip():
+            print("--exact-read needs a non-empty path", file=out)
+            return 2
     environment = os.environ.copy() if env is None else env
     try:
         settings = Settings.from_env(environment)
@@ -1003,14 +1015,17 @@ def _main(
                 session_exists=service.has_session,
             )
             print(f"agent:   workspace {agent.workspace.root}", file=out)
-            print(
-                "         reads, searches and writes freely inside it; asks before "
-                "running a command or deleting a file",
-                file=out,
-            )
+            if args.exact_read is not None:
+                print(f"         exact read of {args.exact_read!r}; file changes and commands refused", file=out)
+            else:
+                print(
+                    "         reads, searches and writes freely inside it; asks before "
+                    "running a command or deleting a file",
+                    file=out,
+                )
             print(file=out)
             return _agent_session(agent=agent, session_id=session_id, lines=lines, out=out,
-                                  err=err, settings=settings,
+                                  err=err, settings=settings, exact_read_path=args.exact_read,
                                   confirm_window=lambda: _confirm_window(
                                       settings, probe=probe, live=transport is None, out=out))
 
@@ -1238,8 +1253,10 @@ def _describe_step(step) -> str:
 
 def _agent_session(*, agent, session_id, lines, out, err,
                    settings: Settings | None = None,
-                   confirm_window: Callable[[], int | None] | None = None) -> int:
+                   confirm_window: Callable[[], int | None] | None = None,
+                   exact_read_path: str | None = None) -> int:
     invalid_tasks = False
+    exact_read_failed = False
     # N1: the window is checked once, after the first task has loaded the
     # model and its outcome has been shown -- and before a second task runs.
     window_due = False
@@ -1258,7 +1275,7 @@ def _agent_session(*, agent, session_id, lines, out, err,
         if not line.strip():
             continue
         try:
-            task = parse_agent_task(line)
+            task = parse_agent_task(line, exact_read_path=exact_read_path)
         except ValueError as exc:
             print(f"invalid agent task: {exc}", file=err)
             invalid_tasks = True
@@ -1312,13 +1329,15 @@ def _agent_session(*, agent, session_id, lines, out, err,
                 print(f"         changed: {', '.join(outcome.touched_files)}", file=out)
             agent.checkpoints.commit()
             continue
+        if exact_read_path is not None:
+            exact_read_failed = True
         print(f"{outcome.stopped_reason}", file=out)
         if _offer_undo(agent, lines, out):
             return 130
     code = window_verdict()
     if code is not None:
         return code
-    return 2 if invalid_tasks else 0
+    return 2 if invalid_tasks else (1 if exact_read_failed else 0)
 
 
 def _offer_undo(agent, lines, out) -> bool:

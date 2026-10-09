@@ -38,6 +38,7 @@ import math
 import shlex
 import warnings
 from dataclasses import dataclass, field
+from pathlib import PurePath
 from typing import Any, Callable, Mapping, Sequence
 
 from ..core.agent import AgentTaskContract, AuditRecord, Decision, ToolRequest
@@ -90,6 +91,19 @@ VERIFICATION_REQUIRED_MESSAGE = (
 # may write files, so it counts unless it is the test run itself.
 EDITING_TOOLS = frozenset({"write_file", "edit_file", "delete_file", "shell"})
 TEST_RUNNERS = frozenset({"run_command", "shell"})
+EXACT_READ_TOOLS = frozenset({"read_file", "list_directory", "search_text", "find_files"})
+READ_INVALIDATING_TOOLS = EDITING_TOOLS | {"run_command"}
+EXACT_READ_NOTICE = (
+    "Exact file read required: call read_file with path {path}. Your answer "
+    "must be exactly its complete, verified output, with no explanation. "
+    "A directory listing or a different file does not satisfy this task. "
+    "This task is read-only: only read_file, list_directory, search_text and "
+    "find_files are permitted; commands and file changes are refused."
+)
+EXACT_READ_RETRY = (
+    "Verification required: your answer does not match a complete, verified "
+    "read_file result for {path}. Read that file and return exactly its output."
+)
 
 PROTOCOL = """You are working as an agent in the user's workspace, with tools.
 
@@ -148,13 +162,39 @@ class Step:
     failed_checks: tuple[str, ...]
 
 
+def _exact_read_matches(steps: Sequence[Step], path: str, answer: str) -> bool:
+    """Match an observed read, without another file read or model judgment.
+
+    A later possible mutation invalidates the snapshot. Path equivalence is
+    lexical only, with the host's path syntax; no filesystem aliases are guessed.
+    """
+    output: str | None = None
+    target = PurePath(path).parts
+    for step in steps:
+        record = step.record
+        tool = record.request.tool
+        if record.executed and tool in READ_INVALIDATING_TOOLS:
+            output = None
+        requested = record.request.arguments.get("path")
+        if tool == "read_file" and isinstance(requested, str) and PurePath(requested).parts == target:
+            result = record.result
+            output = (
+                result.output
+                if record.executed and step.verified and result is not None
+                and result.ok and not result.truncated
+                else None
+            )
+    return output is not None and answer == output
+
+
 @dataclass(frozen=True, slots=True)
 class RefusedReply:
     """A reply the loop refused and charged to the budget, with its text.
 
     `kind` is "protocol_error" (not one JSON object; `error` says why),
     "action_required" (an answer before any tool had run, under a contract
-    that requires action) or "verification_required" (an answer before the
+    that requires action), "exact_read_required" (an answer without matching
+    complete file evidence) or "verification_required" (an answer before the
     contract's test command had passed after the last change; ADR-023 unit 3).
     `call` is the model call it answered, from 1.
 
@@ -202,7 +242,7 @@ class AgentOutcome:
     refused_replies: tuple[RefusedReply, ...] = field(default=())
     # Each reply read under ADR-024 unit A (see LenientParse); empty when off.
     lenient_parses: tuple[LenientParse, ...] = field(default=())
-    # Answers refused by the completion check (ADR-023 unit 3); 0 when off.
+    # Answers refused by an opted-in completion check; 0 when none is active.
     verification_rejections: int = 0
 
     @property
@@ -657,7 +697,7 @@ class AgentLoop:
             else None
         )
         messages = self._opening(task_text, session_id, composed.text if composed else None,
-                                 check_command)
+                                 check_command, contract.exact_read_path if contract else None)
         steps: list[Step] = []
         protocol_errors = 0
         action_rejections = 0
@@ -728,6 +768,23 @@ class AgentLoop:
                     messages.append(self._user(session_id, ACTION_REQUIRED_MESSAGE))
                     continue
                 if (
+                    contract is not None
+                    and contract.exact_read_path is not None
+                    and not _exact_read_matches(steps, contract.exact_read_path, proposal["answer"])
+                ):
+                    verification_rejections += 1
+                    refused.append(self._refused(call, "exact_read_required", shown))
+                    budget.record(ok=False)
+                    self._record_answer_rejected(
+                        session_id, verification_rejections, contract, reason="exact_read_required"
+                    )
+                    messages.append(self._user(
+                        session_id, EXACT_READ_RETRY.format(
+                            path=json.dumps(contract.exact_read_path, ensure_ascii=False)
+                        )
+                    ))
+                    continue
+                if (
                     check_command is not None
                     and contract is not None
                     and not tests_passed_since_last_change(steps, check_command)
@@ -755,9 +812,16 @@ class AgentLoop:
                     verification_rejections,
                 )
 
-            record = self._executor.execute(
-                ToolRequest(tool=proposal["tool"], arguments=proposal["arguments"])
-            )
+            request = ToolRequest(tool=proposal["tool"], arguments=proposal["arguments"])
+            if (
+                contract is not None and contract.exact_read_path is not None
+                and request.tool not in EXACT_READ_TOOLS
+            ):
+                record = self._executor.execute(
+                    request, deny_reason="exact-read tasks allow only file-reading and search tools"
+                )
+            else:
+                record = self._executor.execute(request)
             verification = self._verifier.verify(record)
             step = Step(
                 record=record,
@@ -800,6 +864,7 @@ class AgentLoop:
     def _opening(
         self, task: str, session_id: str, environment: str | None = None,
         check_command: str | None = None,
+        exact_read_path: str | None = None,
     ) -> list[Message]:
         messages: list[Message] = []
         if self._identity is not None:
@@ -819,6 +884,11 @@ class AgentLoop:
         if check_command is not None:
             messages.append(Message(session_id=session_id, role=Role.SYSTEM,
                                     content=COMPLETION_CHECK_NOTICE.format(command=check_command)))
+        if exact_read_path is not None:
+            messages.append(Message(
+                session_id=session_id, role=Role.SYSTEM,
+                content=EXACT_READ_NOTICE.format(path=json.dumps(exact_read_path, ensure_ascii=False)),
+            ))
         messages.append(self._user(session_id, task))
         return messages
 
@@ -1008,8 +1078,10 @@ class AgentLoop:
             ),
         }
         # Only when the check was on: with it off the event is what it always was.
-        if self._verify_completion:
+        if self._verify_completion or (contract is not None and contract.exact_read_path is not None):
             payload["verification_rejections"] = outcome.verification_rejections
+        if contract is not None and contract.exact_read_path is not None:
+            payload["exact_read_required"] = True
         # Only when the context was on: with it off the event is what it always was.
         if outcome.environment is not None:
             payload["environment"] = dict(outcome.environment)
