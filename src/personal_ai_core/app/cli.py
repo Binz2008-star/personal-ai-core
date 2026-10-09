@@ -40,6 +40,7 @@ from ..conversation.factory import (
     describe_store_failure,
     list_sessions,
     profile_budget,
+    save_owner_text,
     STORE_ERRORS,
 )
 from ..core.agent import AgentTaskContract
@@ -403,7 +404,19 @@ def _remember(path: Path | None, text: str, settings: Settings, out: TextIO) -> 
             file=out,
         )
         return 2
-    existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
+    # Gap analysis P2-7: a profile that cannot be read is a sentence, not a
+    # traceback, and nothing is written.
+    if path.exists() and not path.is_file():
+        print(f"the profile is not a file: {path}", file=out)
+        return 2
+    try:
+        existing = path.read_text(encoding="utf-8") if path.is_file() else "# About me\n"
+    except UnicodeDecodeError:
+        print(f"the profile is not UTF-8 text: {path}", file=out)
+        return 2
+    except OSError as exc:
+        print(f"the profile cannot be read: {path} ({exc.strerror or exc})", file=out)
+        return 2
     if not existing.endswith("\n"):
         existing += "\n"
     updated = existing + f"- {text}\n"
@@ -423,8 +436,15 @@ def _remember(path: Path | None, text: str, settings: Settings, out: TextIO) -> 
             file=out,
         )
         return 2
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(updated, encoding="utf-8")
+    # Gap analysis P2-7: written whole or not at all. The profile is the
+    # owner's own text and is sent with every turn; it is never left torn.
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        save_owner_text(path, updated)
+    except OSError as exc:
+        print(f"nothing added to {path}: {exc.strerror or exc}. The profile is as it was.",
+              file=out)
+        return 2
     print(f"remembered, in {path}", file=out)
     return 0
 
@@ -467,6 +487,11 @@ def _joined_profile(
             ).strip()
         except UnicodeDecodeError:
             print(f"the profile is not UTF-8 text: {file}", file=out)
+            return None
+        except OSError as exc:
+            # Unreadable (permissions, a directory by that name): a sentence,
+            # not a traceback (gap analysis P2-7).
+            print(f"the profile cannot be read: {file} ({exc.strerror or exc})", file=out)
             return None
         if text:
             parts.append(text)
@@ -1251,6 +1276,13 @@ def _agent_session(*, agent, session_id, lines, out, err,
         except STORE_ERRORS:
             # The store's own sentence is printed by `main`; the files are not
             # in the store, so their undo is offered first.
+            _offer_undo(agent, lines, out)
+            raise
+        except Exception:
+            # A defect, not a failure pac knows how to name: the loop has
+            # already recorded it as internal_error, and it still propagates.
+            # The files the task changed are offered back first, so a crash
+            # does not cost the owner the undo.
             _offer_undo(agent, lines, out)
             raise
         window_due = True
