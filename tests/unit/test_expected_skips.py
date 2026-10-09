@@ -37,6 +37,7 @@ edit reintroduces a fork bomb.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -105,6 +106,26 @@ MAX_NON_HARNESS_SKIPS = 57
 # skip is still a failure (test_environment_skips_never_happen_on_linux).
 ENVIRONMENT_SKIP_REASONS = ("cannot create a symlink here",)
 
+# Skips that a specific PLATFORM cannot run, not a test turned off. Windows has
+# no POSIX permission bits, so the file-mode cases in this file skip with
+# "POSIX file modes" and RUN on Linux. They are allowed from exactly these
+# files -- a "POSIX file modes" skip from any other file is still unaccounted
+# for -- and kept out of the structural count. The value is the exact number of
+# skip legs that file contributes: PR #250 adds the three atomic-writes legs,
+# no profile legs until PR #228 lands. A different count is a test added or removed
+# without recording the decision, so it is part of the allowance, not a loose
+# ceiling (test_platform_skip_counts_are_exact). On Linux they run, and a skip
+# there means the tests stopped running (test_platform_skips_never_happen_on_linux).
+PLATFORM_SKIP_REASONS = ("POSIX file modes",)
+PLATFORM_SKIP_SOURCES = {
+    "tests/unit/test_atomic_writes_and_rollback.py": 3,
+}
+
+# A `-rs` skip line: `SKIPPED [3] tests/unit/foo.py:133: reason`. Parsed rather
+# than substring-matched, so an unrelated filename that merely contains an
+# allowed one (`test_atomic_writes_and_rollback.py_extra.py`) is not accepted.
+_SKIP_LINE = re.compile(r"^SKIPPED\s+\[(\d+)\]\s+([^:]+):\d+:\s*(.*)$")
+
 pytestmark = pytest.mark.skipif(
     os.environ.get(NESTED_MARKER) == "1",
     reason="nested run started by the skip audit itself; not re-entered",
@@ -147,12 +168,38 @@ def _environmental(line: str) -> bool:
     return any(reason in line for reason in ENVIRONMENT_SKIP_REASONS)
 
 
+def _platform(line: str) -> bool:
+    """A POSIX-only skip that the platform cannot run, from an exactly-named
+    source and the exact reason. A "POSIX file modes" skip from a file that
+    merely resembles an allowed one, or with a different reason, is not."""
+    match = _SKIP_LINE.match(_normalize(line))
+    if match is None:
+        return False
+    _, source, reason = match.groups()
+    return reason in PLATFORM_SKIP_REASONS and source in PLATFORM_SKIP_SOURCES
+
+
+def _platform_counts(lines: list[str]) -> dict[str, int]:
+    """The recorded number of platform skips per allowed source, for the exact
+    count that `test_platform_skip_counts_are_exact` holds against the record."""
+    counted: dict[str, int] = {}
+    for line in lines:
+        match = _SKIP_LINE.match(_normalize(line))
+        if match is None:
+            continue
+        count, source, reason = match.groups()
+        if reason in PLATFORM_SKIP_REASONS and source in PLATFORM_SKIP_SOURCES:
+            counted[source] = counted.get(source, 0) + int(count)
+    return counted
+
+
 def _unaccounted_for(lines: list[str]) -> list[str]:
     return [
         line
         for line in lines
         if not any(source in _normalize(line) for source in ALLOWED_SKIP_SOURCES)
         and not _environmental(line)
+        and not _platform(line)
     ]
 
 
@@ -173,7 +220,9 @@ def test_the_number_of_structural_skips_has_not_grown(skips):
     """The tokenizer harness may grow samples; the exemptions may not grow."""
     structural = [
         line for line in skips
-        if "test_token_estimator_validation.py" not in line and not _environmental(line)
+        if "test_token_estimator_validation.py" not in line
+        and not _environmental(line)
+        and not _platform(line)
     ]
     total = sum(_count(line) for line in structural)
     assert total <= MAX_NON_HARNESS_SKIPS, (
@@ -187,6 +236,23 @@ def test_environment_skips_never_happen_on_linux(skips):
     """The symlink allowance is for machines that cannot create one. On Linux
     they always can, so a skip there means the tests stopped running."""
     assert not [line for line in skips if _environmental(line)]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the allowance below exists for Windows")
+def test_platform_skips_never_happen_on_linux(skips):
+    """The POSIX-mode allowance is for Windows, which has no permission bits.
+    On Linux those tests run, so a skip there means they stopped running."""
+    assert not [line for line in skips if _platform(line)]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="platform skips appear only on Windows")
+def test_platform_skip_counts_are_exact(skips):
+    """The platform allowance is an exact decision, not a ceiling: adding or
+    removing a POSIX-mode case must change the recorded count or the gate fails."""
+    assert _platform_counts(skips) == PLATFORM_SKIP_SOURCES, (
+        f"platform skip counts drifted from the recorded {PLATFORM_SKIP_SOURCES}: "
+        f"{_platform_counts(skips)}"
+    )
 
 
 def test_every_skip_states_a_usable_reason(skips):
@@ -289,3 +355,59 @@ def test_the_fork_bomb_canary_fires_with_either_separator():
 
 def test_the_canary_does_not_fire_on_an_unrelated_file():
     assert _re_entries([POSIX_EXEMPT, WINDOWS_EXEMPT]) == []
+
+
+# --- The platform-skip matcher, on both platforms' output -------------------
+#
+# The platform allowance is a decision about an exact count, so the matcher and
+# its counter are exercised directly with both separators, resembling names,
+# wrong reasons, and excess counts -- the shapes a Linux-only CI cannot observe.
+
+ATOMIC_POSIX = (
+    "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:133: POSIX file modes"
+)
+ATOMIC_WINDOWS = (
+    "SKIPPED [1] tests\\unit\\test_atomic_writes_and_rollback.py:133: POSIX file modes"
+)
+PROFILE_POSIX = (
+    "SKIPPED [1] tests/integration/test_cli_profile_safety.py:176: POSIX file modes"
+)
+
+
+def test_a_platform_skip_is_recognized_with_either_separator():
+    assert _platform(ATOMIC_POSIX)
+    assert _platform(ATOMIC_WINDOWS)
+    assert not _platform(PROFILE_POSIX)
+
+
+def test_a_platform_skip_rejects_a_resembling_filename_or_other_reason():
+    resembling = (
+        "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py_extra.py:12: "
+        "POSIX file modes"
+    )
+    assert not _platform(resembling)
+    wrong_reason = (
+        "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:133: "
+        "some other reason"
+    )
+    assert not _platform(wrong_reason)
+    wrong_file = "SKIPPED [1] tests/unit/test_something_new.py:1: POSIX file modes"
+    assert not _platform(wrong_file)
+    assert not _platform("not a SKIPPED line at all")
+
+
+def test_platform_counts_match_exactly_and_reject_drift():
+    """The allowance is an exact count, not a ceiling: an extra or missing leg
+    must not read as the recorded three."""
+    recorded = [
+        "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:133: POSIX file modes",
+        "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:147: POSIX file modes",
+        "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:155: POSIX file modes",
+    ]
+    assert _platform_counts(recorded) == PLATFORM_SKIP_SOURCES
+    extra_atomic = recorded + [
+        "SKIPPED [1] tests/unit/test_atomic_writes_and_rollback.py:999: POSIX file modes"
+    ]
+    assert _platform_counts(extra_atomic) != PLATFORM_SKIP_SOURCES
+    missing_atomic = recorded[:-1]
+    assert _platform_counts(missing_atomic) != PLATFORM_SKIP_SOURCES
