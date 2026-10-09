@@ -103,6 +103,31 @@ def test_a_task_runs_tools_then_answers(ws):
     assert script.calls[1]["messages"][-1].content.startswith("<<<result ")
 
 
+def test_command_refusal_reaches_the_model_before_a_separate_command_runs(ws, monkeypatch):
+    ran = []
+    asked = []
+
+    def run(args, **kwargs):
+        ran.append(args)
+        return 0, "inspection complete", ""
+
+    monkeypatch.setattr("personal_ai_core.agent.tools.run_bounded", run)
+    script = Script(
+        '{"tool": "run_command", "arguments": {"command": "git status | head"}}',
+        '{"tool": "run_command", "arguments": {"command": "git status"}}',
+        '{"answer": "inspection complete"}',
+    )
+    outcome = loop(ws, script, confirm=lambda request, spec: asked.append(request) or True).run(
+        AgentTaskContract(task_text="inspect the repository", action_required=True), session_id="s1"
+    )
+    assert ran == [["git", "status"]]
+    assert len(asked) == 2
+    assert not outcome.steps[0].verified and outcome.steps[1].verified
+    assert "one command per tool call" in script.calls[0]["messages"][0].content
+    assert "one command per tool call" in script.calls[1]["messages"][-1].content
+    assert outcome.finished and outcome.answer == "inspection complete"
+
+
 def test_action_required_rejects_answer_until_a_tool_executes(ws):
     events = InMemoryEventRepository()
     script = Script(

@@ -146,3 +146,14 @@ exhausting it stops the agent rather than letting it loop.
 | `Rico` `src/rico_safety.py` (208, 23 domain refs) | product-coupled | **REWRITE** |
 | `Robin` `quality_gate.py` | gate-result shape only | **REWRITE** (concept) |
 | — | generic verifier | **BUILD** |
+
+## Command syntax recovery (2026-10-10)
+
+`run_command` executes one allowlisted executable without a shell. Its tool
+description and shell-metacharacter refusals tell the model to use a separate
+tool call for each command and read the returned output directly. Pipes,
+chaining and redirects remain refused. There is no automatic command rewrite,
+shell fallback, change to confirmation, or change to the allowlist.
+
+This corrects missing guidance, not a measured capability result. Verify recovery
+with the same Boss model and context before adopting a claim of improvement.

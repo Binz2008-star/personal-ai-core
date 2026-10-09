@@ -2040,3 +2040,11 @@ Architecture docs:
 - docs/MEMORY_ARCHITECTURE.md — Event != Memory, promotion, provenance
 - docs/MODEL_ARCHITECTURE.md — registry, Boss model huihui_ai/qwen2.5-abliterate:7b
 - docs/AGENT_ARCHITECTURE.md — agent loop, tool contracts
+
+
+Command syntax guidance — REVIEW CANDIDATE (2026-10-10)
+- Code commit: 84fc5dc32346340bed4d4ce95d2da213c87e4a95
+- Reviewed base: a43c6f4443f8ed8ea4aac39570060ecedd2a5591
+- Scope: describe the supported one-command syntax and supply recovery guidance after a shell-metacharacter refusal. No allowlist, execution, confirmation, model or context change.
+- Local verification: 3428 passed / 80 skipped; Ruff 0.15.8 and Pyright 1.1.408 clean.
+- Status: draft for live Boss recovery comparison; not merged and no capability improvement claimed.
