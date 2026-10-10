@@ -1,0 +1,12 @@
+[bare-pytest-1] exit=0 at 18:52:59.676 :: .                                                                        [100%] | 1 passed in 0.01s
+[python-m-pytest-1] exit=0 at 18:53:10.319 :: .                                                                        [100%] | 1 passed in 0.00s
+[bare-pytest-2] exit=0 at 18:53:10.763 :: .                                                                        [100%] | 1 passed in 0.00s
+[python-m-pytest-2] exit=0 at 18:53:11.174 :: .                                                                        [100%] | 1 passed in 0.00s
+[bare-pytest-3] exit=0 at 18:53:11.594 :: .                                                                        [100%] | 1 passed in 0.00s
+[python-m-pytest-3] exit=0 at 18:53:12.010 :: .                                                                        [100%] | 1 passed in 0.00s
+[bare-pytest-4] exit=0 at 18:53:12.434 :: .                                                                        [100%] | 1 passed in 0.00s
+[python-m-pytest-4] exit=0 at 18:53:12.858 :: .                                                                        [100%] | 1 passed in 0.00s
+[bare-pytest-5] exit=0 at 18:53:13.263 :: .                                                                        [100%] | 1 passed in 0.00s
+[python-m-pytest-5] exit=0 at 18:53:13.685 :: .                                                                        [100%] | 1 passed in 0.00s
+CodeIntegrity 3077/3089 events in window: 0
+PREFLIGHT DONE

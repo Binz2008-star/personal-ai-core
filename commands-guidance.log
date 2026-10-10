@@ -1,0 +1,44 @@
+[1/20] PASS git-last-commit-file en run 1 (5s)
+[2/20] FAIL git-last-commit-file ar run 1 (9s)
+[3/20] FAIL verify-off-by-one en run 1 (8s)
+[4/20] FAIL verify-off-by-one ar run 1 (7s)
+[5/20] PASS git-last-commit-file en run 2 (4s)
+[6/20] PASS git-last-commit-file ar run 2 (8s)
+[7/20] FAIL verify-off-by-one en run 2 (71s)
+[8/20] FAIL verify-off-by-one ar run 2 (72s)
+[9/20] PASS git-last-commit-file en run 3 (5s)
+[10/20] PASS git-last-commit-file ar run 3 (5s)
+[11/20] FAIL verify-off-by-one en run 3 (7s)
+[12/20] FAIL verify-off-by-one ar run 3 (6s)
+[13/20] FAIL git-last-commit-file en run 4 (7s)
+[14/20] PASS git-last-commit-file ar run 4 (6s)
+[15/20] FAIL verify-off-by-one en run 4 (7s)
+[16/20] FAIL verify-off-by-one ar run 4 (7s)
+[17/20] FAIL git-last-commit-file en run 5 (7s)
+[18/20] PASS git-last-commit-file ar run 5 (7s)
+[19/20] FAIL verify-off-by-one en run 5 (6s)
+[20/20] FAIL verify-off-by-one ar run 5 (6s)
+overall: 7/20 (35%)
+by track:
+  agent                7/20 (35%)
+by language:
+  ar                   4/10 (40%)
+  en                   3/10 (30%)
+by category:
+  git                  7/10 (70%)
+  verification         0/10 (0%)
+by task (en | ar):
+  git-last-commit-file              3/5 (60%) | 4/5 (80%)
+  verify-off-by-one                  0/5 (0%) | 0/5 (0%)
+signals in the 13 failed run(s):
+  no_answer                    13
+  failed_steps                 12
+  check:command_passes         10
+  check:tested_after_last_edit 10
+  action_rejected              9
+  not_tested_after_edit        6
+  tool_refused                 4
+  protocol_errors              4
+  check:answer_contains        3
+seconds per run: median 7, max 72
+results: C:\Users\loyal\AppData\Local\Temp\opencode\pac-boss-review-20261010\commands-guidance\bench-20261010T111742Z.jsonl

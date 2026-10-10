@@ -1,0 +1,27 @@
+### WinError 4551 occurrences
+  STEP  bench-20261010T111502Z.jsonl verify-off-by-one en run2 step2 tool=run_command decision=ask executed=True cmd='pytest -f test_calc.py' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T111502Z.jsonl verify-off-by-one en run3 step1 tool=run_command decision=ask executed=True cmd='pytest -k test_calc -v --lf --no-capture' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T111502Z.jsonl verify-off-by-one en run3 step3 tool=run_command decision=ask executed=True cmd='pytest -k test_calc -v --lf --no-capture' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T111502Z.jsonl verify-off-by-one ar run3 step1 tool=run_command decision=ask executed=True cmd='pytest -f calc.py --collect-only' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T111742Z.jsonl verify-off-by-one en run5 step2 tool=run_command decision=ask executed=True cmd='pytest test_calc.py' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T112826Z.jsonl verify-off-by-one en run2 step1 tool=run_command decision=ask executed=True cmd='pytest -q -p no:cacheprovider test_calc.py' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T112826Z.jsonl verify-off-by-one en run2 step3 tool=run_command decision=ask executed=True cmd='pytest -q -p no:cacheprovider test_calc.py' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T112826Z.jsonl verify-off-by-one en run3 step1 tool=run_command decision=ask executed=True cmd='pytest -q -p no:cacheprovider test_calc.py' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T112826Z.jsonl verify-off-by-one en run3 step3 tool=run_command decision=ask executed=True cmd='pytest -q -p no:cacheprovider test_calc.py' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T112826Z.jsonl verify-off-by-one en run4 step1 tool=run_command decision=ask executed=True cmd='pytest -q test_calc.py --tb=short --ff' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T112826Z.jsonl verify-off-by-one en run5 step1 tool=run_command decision=ask executed=True cmd='pytest -q -p no:cacheprovider test_calc.py' error=OSError: [WinError 4551] An Application Control policy has blocked this file
+  STEP  bench-20261010T112826Z.jsonl verify-off-by-one en run5 step2 tool=shell decision=ask executed=True cmd='pytest -q -p no:cacheprovider test_calc.py --lf' error=exit code 4551
+  STEP  bench-20261010T112826Z.jsonl verify-off-by-one en run5 step3 tool=shell decision=ask executed=True cmd='pytest -q -p no:cacheprovider' error=exit code 4551
+
+### cat / non-executable commands the model issued
+  bench-20261010T112826Z.jsonl verify-off-by-one en run1 step1 tool=run_command decision=ask executed=True ok=False cmd='cat test_calc.py' error='command not installed: cat'
+  bench-20261010T112826Z.jsonl verify-off-by-one en run1 step2 tool=shell decision=ask executed=False ok=False cmd='cat test_calc.py' error='not confirmed by the user; nothing ran'
+  bench-20261010T112826Z.jsonl verify-off-by-one ar run1 step1 tool=shell decision=ask executed=False ok=False cmd='cat test_calc.py calc.py' error='not confirmed by the user; nothing ran'
+
+### metadata per file
+  bench-20261010T111502Z.jsonl: commit=a43c6f4443f8ed8ea4aac39570060ecedd2a5591 model=huihui_ai/qwen2.5-abliterate:7b num_ctx_sent=8192 num_ctx_measured=8192 verify_completion=False scorer=bench-checks-v2
+      end: context_length=8192 context_mismatch=False weights=sha256:212345411ab817a8d7669ed63f24a30f2e2a2cd297455a6aad1de50c82f7691c manifest=sha256:103482475c9b4d4032999dd5d7383478cad8b966ae6ae984d525daf7352c2219 verified=True
+  bench-20261010T111742Z.jsonl: commit=ab448b5273d291dd420422e929e14345c8e07b83 model=huihui_ai/qwen2.5-abliterate:7b num_ctx_sent=8192 num_ctx_measured=8192 verify_completion=False scorer=bench-checks-v2
+      end: context_length=8192 context_mismatch=False weights=sha256:212345411ab817a8d7669ed63f24a30f2e2a2cd297455a6aad1de50c82f7691c manifest=sha256:103482475c9b4d4032999dd5d7383478cad8b966ae6ae984d525daf7352c2219 verified=True
+  bench-20261010T112826Z.jsonl: commit=ab448b5273d291dd420422e929e14345c8e07b83 model=huihui_ai/qwen2.5-abliterate:7b num_ctx_sent=8192 num_ctx_measured=8192 verify_completion=True scorer=bench-checks-v2
+      end: context_length=8192 context_mismatch=False weights=sha256:212345411ab817a8d7669ed63f24a30f2e2a2cd297455a6aad1de50c82f7691c manifest=sha256:103482475c9b4d4032999dd5d7383478cad8b966ae6ae984d525daf7352c2219 verified=True

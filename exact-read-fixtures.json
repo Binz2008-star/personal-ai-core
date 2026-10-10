@@ -1,0 +1,52 @@
+[
+  {
+    "id": "en-1",
+    "language": "en",
+    "text": "The meeting starts at 13:27 on Tuesday. Reference: df639bd0."
+  },
+  {
+    "id": "en-2",
+    "language": "en",
+    "text": "The package count is 17. Reference: 60c54dae."
+  },
+  {
+    "id": "en-3",
+    "language": "en",
+    "text": "First line.\nSecond line: a40dc8bd.\n"
+  },
+  {
+    "id": "en-4",
+    "language": "en",
+    "text": "  Preserve these spaces: d6bfbfc4.  "
+  },
+  {
+    "id": "en-5",
+    "language": "en",
+    "text": "The delivery desk is on level 3. Reference: 45f113c0."
+  },
+  {
+    "id": "ar-1",
+    "language": "ar",
+    "text": "يبدأ الاجتماع يوم الثلاثاء الساعة 13:27. المرجع: 458b2d8c."
+  },
+  {
+    "id": "ar-2",
+    "language": "ar",
+    "text": "عدد الطرود هو 17. المرجع: 4b6a8dd9."
+  },
+  {
+    "id": "ar-3",
+    "language": "ar",
+    "text": "السطر الأول.\nالسطر الثاني: 2cbd44d6.\n"
+  },
+  {
+    "id": "ar-4",
+    "language": "ar",
+    "text": "  احتفظ بهذه المسافات: 8314ef10.  "
+  },
+  {
+    "id": "ar-5",
+    "language": "ar",
+    "text": "مكتب التسليم في الطابق الثالث. المرجع: bdf9188f."
+  }
+]

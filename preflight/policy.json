@@ -1,0 +1,36 @@
+{
+    "execution_policy":  "Bypass",
+    "machine_policy":  "Undefined",
+    "user_policy":  "Undefined",
+    "smart_app_control_state":  1,
+    "device_guard":  {
+                         "AvailableSecurityProperties":  [
+                                                             1,
+                                                             4,
+                                                             7
+                                                         ],
+                         "CodeIntegrityPolicyEnforcementStatus":  2,
+                         "InstanceIdentifier":  "4ff40742-2649-41b8-bdd1-e80fad1cce80",
+                         "RequiredSecurityProperties":  [
+                                                            0
+                                                        ],
+                         "SecurityFeaturesEnabled":  [
+                                                         0
+                                                     ],
+                         "SecurityServicesConfigured":  [
+                                                            0
+                                                        ],
+                         "SecurityServicesRunning":  [
+                                                         0
+                                                     ],
+                         "SmmIsolationLevel":  0,
+                         "UsermodeCodeIntegrityPolicyEnforcementStatus":  2,
+                         "Version":  "1.0",
+                         "VirtualizationBasedSecurityStatus":  2,
+                         "VirtualMachineIsolation":  false,
+                         "VirtualMachineIsolationProperties":  [
+                                                                   0
+                                                               ],
+                         "PSComputerName":  null
+                     }
+}

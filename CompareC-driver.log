@@ -1,0 +1,46 @@
+Previous HEAD position was 086c355 docs(state): record proposed exact-read completion control
+HEAD is now at ab448b5 docs(state): record command-guidance review candidate
+[1/20] PASS git-last-commit-file en run 1 (7s)
+[2/20] PASS git-last-commit-file ar run 1 (5s)
+[3/20] FAIL verify-off-by-one en run 1 (5s)
+[4/20] FAIL verify-off-by-one ar run 1 (6s)
+[5/20] PASS git-last-commit-file en run 2 (5s)
+[6/20] FAIL git-last-commit-file ar run 2 (4s)
+[7/20] FAIL verify-off-by-one en run 2 (7s)
+[8/20] FAIL verify-off-by-one ar run 2 (6s)
+[9/20] FAIL git-last-commit-file en run 3 (9s)
+[10/20] PASS git-last-commit-file ar run 3 (4s)
+[11/20] FAIL verify-off-by-one en run 3 (7s)
+[12/20] FAIL verify-off-by-one ar run 3 (7s)
+[13/20] FAIL git-last-commit-file en run 4 (6s)
+[14/20] PASS git-last-commit-file ar run 4 (4s)
+[15/20] FAIL verify-off-by-one en run 4 (8s)
+[16/20] FAIL verify-off-by-one ar run 4 (6s)
+[17/20] PASS git-last-commit-file en run 5 (5s)
+[18/20] PASS git-last-commit-file ar run 5 (6s)
+[19/20] FAIL verify-off-by-one en run 5 (9s)
+[20/20] FAIL verify-off-by-one ar run 5 (6s)
+overall: 7/20 (35%)
+by track:
+  agent                7/20 (35%)
+by language:
+  ar                   4/10 (40%)
+  en                   3/10 (30%)
+by category:
+  git                  7/10 (70%)
+  verification         0/10 (0%)
+by task (en | ar):
+  git-last-commit-file              3/5 (60%) | 4/5 (80%)
+  verify-off-by-one                  0/5 (0%) | 0/5 (0%)
+signals in the 13 failed run(s):
+  no_answer                    11
+  action_rejected              10
+  failed_steps                 10
+  check:command_passes         10
+  check:tested_after_last_edit 10
+  tool_refused                 5
+  check:answer_contains        3
+  not_tested_after_edit        2
+seconds per run: median 6, max 9
+results: C:\Users\loyal\AppData\Local\Temp\opencode\pac-boss-review-20261010\completion-on\bench-20261010T112826Z.jsonl
+COMPARISON C COMPLETE

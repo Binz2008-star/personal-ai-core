@@ -1,0 +1,25 @@
+Previous HEAD position was ab448b5 docs(state): record command-guidance review candidate
+HEAD is now at a43c6f4 Merge pull request #258 from Binz2008-star/hardening/v1-production
+baseline en-1: exact=False fabricated=True
+baseline en-2: exact=False fabricated=True
+baseline en-3: exact=False fabricated=True
+baseline en-4: exact=False fabricated=True
+baseline en-5: exact=False fabricated=True
+baseline ar-1: exact=False fabricated=True
+baseline ar-2: exact=False fabricated=True
+baseline ar-3: exact=False fabricated=True
+baseline ar-4: exact=False fabricated=True
+baseline ar-5: exact=False fabricated=False
+Previous HEAD position was a43c6f4 Merge pull request #258 from Binz2008-star/hardening/v1-production
+HEAD is now at 086c355 docs(state): record proposed exact-read completion control
+candidate en-1: exact=False fabricated=False
+candidate en-2: exact=False fabricated=False
+candidate en-3: exact=False fabricated=False
+candidate en-4: exact=False fabricated=False
+candidate en-5: exact=False fabricated=False
+candidate ar-1: exact=True fabricated=False
+candidate ar-2: exact=False fabricated=False
+candidate ar-3: exact=False fabricated=False
+candidate ar-4: exact=False fabricated=False
+candidate ar-5: exact=False fabricated=False
+COMPARISON B COMPLETE

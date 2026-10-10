@@ -1,0 +1,92 @@
+[
+    {
+        "label":  "bare-pytest-1",
+        "executable":  "pytest",
+        "args":  "-q -p no:cacheprovider test_ok.py",
+        "start":  "2026-10-10T18:52:59.6760536+04:00",
+        "end":  "2026-10-10T18:53:10.2935935+04:00",
+        "exit":  0,
+        "output":  ".                                                                        [100%]\r\n1 passed in 0.01s"
+    },
+    {
+        "label":  "python-m-pytest-1",
+        "executable":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\python.exe",
+        "args":  "-m pytest -q -p no:cacheprovider test_ok.py",
+        "start":  "2026-10-10T18:53:10.3196942+04:00",
+        "end":  "2026-10-10T18:53:10.7623202+04:00",
+        "exit":  0,
+        "output":  ".                                                                        [100%]\r\n1 passed in 0.00s"
+    },
+    {
+        "label":  "bare-pytest-2",
+        "executable":  "pytest",
+        "args":  "-q -p no:cacheprovider test_ok.py",
+        "start":  "2026-10-10T18:53:10.7633219+04:00",
+        "end":  "2026-10-10T18:53:11.1737302+04:00",
+        "exit":  0,
+        "output":  ".                                                                        [100%]\r\n1 passed in 0.00s"
+    },
+    {
+        "label":  "python-m-pytest-2",
+        "executable":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\python.exe",
+        "args":  "-m pytest -q -p no:cacheprovider test_ok.py",
+        "start":  "2026-10-10T18:53:11.1747275+04:00",
+        "end":  "2026-10-10T18:53:11.5933750+04:00",
+        "exit":  0,
+        "output":  ".                                                                        [100%]\r\n1 passed in 0.00s"
+    },
+    {
+        "label":  "bare-pytest-3",
+        "executable":  "pytest",
+        "args":  "-q -p no:cacheprovider test_ok.py",
+        "start":  "2026-10-10T18:53:11.5942471+04:00",
+        "end":  "2026-10-10T18:53:12.0086375+04:00",
+        "exit":  0,
+        "output":  ".                                                                        [100%]\r\n1 passed in 0.00s"
+    },
+    {
+        "label":  "python-m-pytest-3",
+        "executable":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\python.exe",
+        "args":  "-m pytest -q -p no:cacheprovider test_ok.py",
+        "start":  "2026-10-10T18:53:12.0104061+04:00",
+        "end":  "2026-10-10T18:53:12.4299308+04:00",
+        "exit":  0,
+        "output":  ".                                                                        [100%]\r\n1 passed in 0.00s"
+    },
+    {
+        "label":  "bare-pytest-4",
+        "executable":  "pytest",
+        "args":  "-q -p no:cacheprovider test_ok.py",
+        "start":  "2026-10-10T18:53:12.4340096+04:00",
+        "end":  "2026-10-10T18:53:12.8577247+04:00",
+        "exit":  0,
+        "output":  ".                                                                        [100%]\r\n1 passed in 0.00s"
+    },
+    {
+        "label":  "python-m-pytest-4",
+        "executable":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\python.exe",
+        "args":  "-m pytest -q -p no:cacheprovider test_ok.py",
+        "start":  "2026-10-10T18:53:12.8587314+04:00",
+        "end":  "2026-10-10T18:53:13.2612483+04:00",
+        "exit":  0,
+        "output":  ".                                                                        [100%]\r\n1 passed in 0.00s"
+    },
+    {
+        "label":  "bare-pytest-5",
+        "executable":  "pytest",
+        "args":  "-q -p no:cacheprovider test_ok.py",
+        "start":  "2026-10-10T18:53:13.2630774+04:00",
+        "end":  "2026-10-10T18:53:13.6844935+04:00",
+        "exit":  0,
+        "output":  ".                                                                        [100%]\r\n1 passed in 0.00s"
+    },
+    {
+        "label":  "python-m-pytest-5",
+        "executable":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\python.exe",
+        "args":  "-m pytest -q -p no:cacheprovider test_ok.py",
+        "start":  "2026-10-10T18:53:13.6855306+04:00",
+        "end":  "2026-10-10T18:53:14.0897438+04:00",
+        "exit":  0,
+        "output":  ".                                                                        [100%]\r\n1 passed in 0.00s"
+    }
+]

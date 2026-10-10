@@ -1,0 +1,15 @@
+{
+    "pytest_resolved":  [
+                            "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\pytest.exe",
+                            "C:\\Python314\\Scripts\\pytest.exe"
+                        ],
+    "python_resolved":  [
+                            "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\python.exe",
+                            "C:\\Python314\\python.exe"
+                        ],
+    "venv_scripts":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts",
+    "venv_pytest_exe":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\pytest.exe",
+    "venv_pytest_cmd":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\pytest.cmd",
+    "pytest_exe_exists":  true,
+    "pytest_cmd_exists":  false
+}
