@@ -1,0 +1,7 @@
+{
+    "LogName":  "Microsoft-Windows-CodeIntegrity/Operational",
+    "IsEnabled":  true,
+    "RecordCount":  1188,
+    "LogMode":  0,
+    "MaximumSizeInBytes":  1052672
+}

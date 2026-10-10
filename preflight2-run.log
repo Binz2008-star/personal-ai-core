@@ -1,0 +1,10 @@
+subprocess-check-1 returncode=0
+subprocess-check-2 returncode=0
+subprocess-check-3 returncode=0
+subprocess-check-4 returncode=0
+subprocess-check-5 returncode=0
+exported codeintegrity-3077-all.json: 15 events
+exported codeintegrity-3089-all.json: 580 events
+exported codeintegrity-3118-all.json: 15 events
+exported codeintegrity-3033-all.json: 563 events
+PREFLIGHT2 DONE

@@ -1,0 +1,53 @@
+{
+    "description":  "Core launch path reproduced: venv python subprocess -\u003e venv pytest.exe, 5 checks",
+    "venv_python":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\python.exe",
+    "venv_pytest":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\venv\\Scripts\\pytest.exe",
+    "cwd":  "C:\\Users\\loyal\\AppData\\Local\\Temp\\opencode\\pac-boss-review-20261010\\preflight\\scratch",
+    "runs":  [
+                 {
+                     "index":  1,
+                     "start":  "2026-10-10T21:47:24.9918155+04:00",
+                     "end":  "2026-10-10T21:47:25.5715597+04:00",
+                     "wrapper_exit":  0,
+                     "returncode":  0,
+                     "stdout":  ".                                                                        [100%]\n1 passed in 0.01s\n",
+                     "stderr":  ""
+                 },
+                 {
+                     "index":  2,
+                     "start":  "2026-10-10T21:47:25.6397590+04:00",
+                     "end":  "2026-10-10T21:47:26.1508492+04:00",
+                     "wrapper_exit":  0,
+                     "returncode":  0,
+                     "stdout":  ".                                                                        [100%]\n1 passed in 0.01s\n",
+                     "stderr":  ""
+                 },
+                 {
+                     "index":  3,
+                     "start":  "2026-10-10T21:47:26.1518826+04:00",
+                     "end":  "2026-10-10T21:47:26.6532956+04:00",
+                     "wrapper_exit":  0,
+                     "returncode":  0,
+                     "stdout":  ".                                                                        [100%]\n1 passed in 0.00s\n",
+                     "stderr":  ""
+                 },
+                 {
+                     "index":  4,
+                     "start":  "2026-10-10T21:47:26.6538010+04:00",
+                     "end":  "2026-10-10T21:47:27.4026517+04:00",
+                     "wrapper_exit":  0,
+                     "returncode":  0,
+                     "stdout":  ".                                                                        [100%]\n1 passed in 0.01s\n",
+                     "stderr":  ""
+                 },
+                 {
+                     "index":  5,
+                     "start":  "2026-10-10T21:47:27.4031551+04:00",
+                     "end":  "2026-10-10T21:47:28.1294460+04:00",
+                     "wrapper_exit":  0,
+                     "returncode":  0,
+                     "stdout":  ".                                                                        [100%]\n1 passed in 0.01s\n",
+                     "stderr":  ""
+                 }
+             ]
+}

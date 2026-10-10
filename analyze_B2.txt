@@ -1,0 +1,67 @@
+capture checks: 20 cases; non_ascii==0: 20/20; expected==fixture: 20/20
+
+===== BASELINE a43c6f4 (exact-read-baseline-v2.jsonl, 10 cases) =====
+[en-1 en] exit=0 finished=True stop=None expected==fixture=True fab=True exact=False
+   expected='The meeting starts at 13:27 on Tuesday. Reference: df639bd0.'
+   answer  ='The meeting starts at 13:27 on Tuesday.'
+[en-2 en] exit=0 finished=True stop=None expected==fixture=True fab=True exact=False
+   expected='The package count is 17. Reference: 60c54dae.'
+   answer  ='The grass is always greener on the other side, or so they say.'
+[en-3 en] exit=0 finished=True stop=None expected==fixture=True fab=True exact=False
+   expected='First line.\nSecond line: a40dc8bd.\n'
+   answer  ='First line.\nSecond line: a40dc8bd.'
+[en-4 en] exit=0 finished=True stop=None expected==fixture=True fab=True exact=False
+   expected='  Preserve these spaces: d6bfbfc4.  '
+   answer  ='This is the content of notes.txt:  A summary of the meeting with the client yesterday was written.'
+[en-5 en] exit=0 finished=True stop=None expected==fixture=True fab=True exact=False
+   expected='The delivery desk is on level 3. Reference: 45f113c0.'
+   answer  ='The delivery desk is on level 3.'
+[ar-1 ar] exit=0 finished=True stop=None expected==fixture=True fab=True exact=False
+   expected='┘èÏ¿Ï»Ïú Ïº┘äÏºÏ¼Ï¬┘àÏºÏ╣ ┘è┘ê┘à Ïº┘äÏ½┘äÏºÏ½ÏºÏí Ïº┘äÏ│ÏºÏ╣Ï® 13:27. Ïº┘ä┘àÏ▒Ï¼Ï╣: 458b2d8c.'
+   answer  ='Ïº┘äÏºÏ¼Ï¬┘àÏºÏ╣ ┘èÏ¿Ï»Ïú ┘è┘ê┘à Ïº┘äÏ½┘äÏºÏ½ÏºÏí Ïº┘äÏ│ÏºÏ╣Ï® 13:27.'
+[ar-2 ar] exit=0 finished=True stop=None expected==fixture=True fab=True exact=False
+   expected='Ï╣Ï»Ï» Ïº┘äÏÀÏ▒┘êÏ» ┘ç┘ê 17. Ïº┘ä┘àÏ▒Ï¼Ï╣: 4b6a8dd9.'
+   answer  ='┘çÏ░Ïº ┘àÏ¡Ï¬┘ê┘ë notes.txt: 17.'
+[ar-3 ar] exit=0 finished=True stop=None expected==fixture=True fab=True exact=False
+   expected='Ïº┘äÏ│ÏÀÏ▒ Ïº┘äÏú┘ê┘ä.\nÏº┘äÏ│ÏÀÏ▒ Ïº┘äÏ½Ïº┘å┘è: 2cbd44d6.\n'
+   answer  ='Ïº┘äÏ│ÏÀÏ▒ Ïº┘äÏú┘ê┘ä.\nÏº┘äÏ│ÏÀr Ïº┘äÏ½Ïº┘å┘è: 2cbd44d6.'
+[ar-4 ar] exit=0 finished=True stop=None expected==fixture=True fab=True exact=False
+   expected='  ÏºÏ¡Ï¬┘üÏ© Ï¿┘çÏ░┘ç Ïº┘ä┘àÏ│Ïº┘üÏºÏ¬: 8314ef10.  '
+   answer  ='┘å┘àÏ¬Ïº┘ä┘â: 11-5-2023. ┘ä┘é┘ë ┘üÏºÏÀ┘àÏ® ┘ê┘ä┘èÏ» ┘ü┘è ┘à┘âÏ¬Ï¿Ï® Ïº┘äÏúÏ»Ï¿ Ïº┘äÏ╣Ï▒Ï¿┘è.'
+[ar-5 ar] exit=0 finished=True stop=None expected==fixture=True fab=True exact=False
+   expected='┘à┘âÏ¬Ï¿ Ïº┘äÏ¬Ï│┘ä┘è┘à ┘ü┘è Ïº┘äÏÀÏºÏ¿┘é Ïº┘äÏ½Ïº┘äÏ½. Ïº┘ä┘àÏ▒Ï¼Ï╣: bdf9188f.'
+   answer  ='Ïº┘ä┘àÏ¡Ï¬┘ê┘ë Ïº┘äÏ¡Ï▒┘ü┘è ┘ä┘Ç notes.txt ┘ç┘ê: ┘à┘âÏ¬Ï¿ Ïº┘äÏ¬Ï│┘ä┘è┘à ┘ü┘è Ïº┘äÏÀÏºÏ¿┘é Ïº┘äÏ½Ïº┘äÏ½. Ïº┘ä┘àÏ▒Ï¼Ï╣: bdf9188f.'
+  SUMMARY BASELINE a43c6f4: cases=10 accepted_fabrication=10 useful_exact_copy=0 accepted_without_target_read=0 source_changed=0
+
+===== CANDIDATE 086c355 (+ --exact-read) (exact-read-candidate-v2.jsonl, 10 cases) =====
+[en-1 en] exit=1 finished=False stop=stopped: 3 failed actions reached the limit of 3 expected==fixture=True fab=False exact=False
+   expected='The meeting starts at 13:27 on Tuesday. Reference: df639bd0.'
+   answer  =None
+[en-2 en] exit=1 finished=False stop=stopped: 3 failed actions reached the limit of 3 expected==fixture=True fab=False exact=False
+   expected='The package count is 17. Reference: 60c54dae.'
+   answer  =None
+[en-3 en] exit=1 finished=False stop=stopped: 3 failed actions reached the limit of 3 expected==fixture=True fab=False exact=False
+   expected='First line.\nSecond line: a40dc8bd.\n'
+   answer  =None
+[en-4 en] exit=1 finished=False stop=stopped: 3 failed actions reached the limit of 3 expected==fixture=True fab=False exact=False
+   expected='  Preserve these spaces: d6bfbfc4.  '
+   answer  =None
+[en-5 en] exit=1 finished=False stop=stopped: 3 failed actions reached the limit of 3 expected==fixture=True fab=False exact=False
+   expected='The delivery desk is on level 3. Reference: 45f113c0.'
+   answer  =None
+[ar-1 ar] exit=0 finished=True stop=None expected==fixture=True fab=False exact=True
+   expected='┘èÏ¿Ï»Ïú Ïº┘äÏºÏ¼Ï¬┘àÏºÏ╣ ┘è┘ê┘à Ïº┘äÏ½┘äÏºÏ½ÏºÏí Ïº┘äÏ│ÏºÏ╣Ï® 13:27. Ïº┘ä┘àÏ▒Ï¼Ï╣: 458b2d8c.'
+   answer  ='┘èÏ¿Ï»Ïú Ïº┘äÏºÏ¼Ï¬┘àÏºÏ╣ ┘è┘ê┘à Ïº┘äÏ½┘äÏºÏ½ÏºÏí Ïº┘äÏ│ÏºÏ╣Ï® 13:27. Ïº┘ä┘àÏ▒Ï¼Ï╣: 458b2d8c.'
+[ar-2 ar] exit=1 finished=False stop=stopped: 3 failed actions reached the limit of 3 expected==fixture=True fab=False exact=False
+   expected='Ï╣Ï»Ï» Ïº┘äÏÀÏ▒┘êÏ» ┘ç┘ê 17. Ïº┘ä┘àÏ▒Ï¼Ï╣: 4b6a8dd9.'
+   answer  =None
+[ar-3 ar] exit=1 finished=False stop=stopped: 3 failed actions reached the limit of 3 expected==fixture=True fab=False exact=False
+   expected='Ïº┘äÏ│ÏÀÏ▒ Ïº┘äÏú┘ê┘ä.\nÏº┘äÏ│ÏÀÏ▒ Ïº┘äÏ½Ïº┘å┘è: 2cbd44d6.\n'
+   answer  =None
+[ar-4 ar] exit=1 finished=False stop=stopped: 3 failed actions reached the limit of 3 expected==fixture=True fab=False exact=False
+   expected='  ÏºÏ¡Ï¬┘üÏ© Ï¿┘çÏ░┘ç Ïº┘ä┘àÏ│Ïº┘üÏºÏ¬: 8314ef10.  '
+   answer  =None
+[ar-5 ar] exit=0 finished=True stop=None expected==fixture=True fab=False exact=True
+   expected='┘à┘âÏ¬Ï¿ Ïº┘äÏ¬Ï│┘ä┘è┘à ┘ü┘è Ïº┘äÏÀÏºÏ¿┘é Ïº┘äÏ½Ïº┘äÏ½. Ïº┘ä┘àÏ▒Ï¼Ï╣: bdf9188f.'
+   answer  ='┘à┘âÏ¬Ï¿ Ïº┘äÏ¬Ï│┘ä┘è┘à ┘ü┘è Ïº┘äÏÀÏºÏ¿┘é Ïº┘äÏ½Ïº┘äÏ½. Ïº┘ä┘àÏ▒Ï¼Ï╣: bdf9188f.'
+  SUMMARY CANDIDATE 086c355 (+ --exact-read): cases=10 accepted_fabrication=0 useful_exact_copy=2 accepted_without_target_read=0 source_changed=0

@@ -1,0 +1,99 @@
+{
+    "log":  "Microsoft-Windows-CodeIntegrity/Operational",
+    "ids":  [
+                3118
+            ],
+    "count":  15,
+    "events":  [
+                   {
+                       "time":  "2026-10-10T15:15:53.2393190+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:16:21.6586638+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:16:25.9299317+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:16:28.1949082+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:22:05.7948415+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:29:03.5792116+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:29:07.9859159+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:29:31.6007302+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:29:36.5543335+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:29:59.9701378+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:30:25.2267838+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:30:27.6335773+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T15:30:31.7954451+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T19:57:03.1065905+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   },
+                   {
+                       "time":  "2026-10-10T20:57:52.8359180+04:00",
+                       "id":  3118,
+                       "provider":  "Microsoft-Windows-CodeIntegrity",
+                       "message":  "Smart App Control Block Deteails"
+                   }
+               ]
+}

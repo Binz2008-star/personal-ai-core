@@ -1,0 +1,182 @@
+[
+  {
+    "phase": "baseline",
+    "case_id": "en-1",
+    "language": "en",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 60,
+    "expected_len": 60
+  },
+  {
+    "phase": "baseline",
+    "case_id": "en-2",
+    "language": "en",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 45,
+    "expected_len": 45
+  },
+  {
+    "phase": "baseline",
+    "case_id": "en-3",
+    "language": "en",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 35,
+    "expected_len": 35
+  },
+  {
+    "phase": "baseline",
+    "case_id": "en-4",
+    "language": "en",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 36,
+    "expected_len": 36
+  },
+  {
+    "phase": "baseline",
+    "case_id": "en-5",
+    "language": "en",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 53,
+    "expected_len": 53
+  },
+  {
+    "phase": "baseline",
+    "case_id": "ar-1",
+    "language": "ar",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 58,
+    "expected_len": 58
+  },
+  {
+    "phase": "baseline",
+    "case_id": "ar-2",
+    "language": "ar",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 35,
+    "expected_len": 35
+  },
+  {
+    "phase": "baseline",
+    "case_id": "ar-3",
+    "language": "ar",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 37,
+    "expected_len": 37
+  },
+  {
+    "phase": "baseline",
+    "case_id": "ar-4",
+    "language": "ar",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 34,
+    "expected_len": 34
+  },
+  {
+    "phase": "baseline",
+    "case_id": "ar-5",
+    "language": "ar",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 48,
+    "expected_len": 48
+  },
+  {
+    "phase": "candidate",
+    "case_id": "en-1",
+    "language": "en",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 60,
+    "expected_len": 60
+  },
+  {
+    "phase": "candidate",
+    "case_id": "en-2",
+    "language": "en",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 45,
+    "expected_len": 45
+  },
+  {
+    "phase": "candidate",
+    "case_id": "en-3",
+    "language": "en",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 35,
+    "expected_len": 35
+  },
+  {
+    "phase": "candidate",
+    "case_id": "en-4",
+    "language": "en",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 36,
+    "expected_len": 36
+  },
+  {
+    "phase": "candidate",
+    "case_id": "en-5",
+    "language": "en",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 53,
+    "expected_len": 53
+  },
+  {
+    "phase": "candidate",
+    "case_id": "ar-1",
+    "language": "ar",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 58,
+    "expected_len": 58
+  },
+  {
+    "phase": "candidate",
+    "case_id": "ar-2",
+    "language": "ar",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 35,
+    "expected_len": 35
+  },
+  {
+    "phase": "candidate",
+    "case_id": "ar-3",
+    "language": "ar",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 37,
+    "expected_len": 37
+  },
+  {
+    "phase": "candidate",
+    "case_id": "ar-4",
+    "language": "ar",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 34,
+    "expected_len": 34
+  },
+  {
+    "phase": "candidate",
+    "case_id": "ar-5",
+    "language": "ar",
+    "non_ascii_chars": 0,
+    "expected_equals_fixture": true,
+    "fixture_len": 48,
+    "expected_len": 48
+  }
+]
